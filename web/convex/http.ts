@@ -3,6 +3,9 @@ import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { auth } from "./auth";
 import { env } from "./env";
+import { safeEqual } from "./lib/crypto";
+import { createLeadHttp, getLeadHttp } from "./publicApi";
+import { leadOptions, leadPost } from "./site";
 
 const http = httpRouter();
 
@@ -14,7 +17,7 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, request) => {
     const secret = env("TELEGRAM_WEBHOOK_SECRET");
-    if (!secret || request.headers.get("x-telegram-bot-api-secret-token") !== secret) return new Response("forbidden", { status: 403 });
+    if (!secret || !safeEqual(request.headers.get("x-telegram-bot-api-secret-token") ?? "", secret)) return new Response("forbidden", { status: 403 });
     let update: unknown;
     try {
       update = await request.json();
@@ -55,7 +58,7 @@ http.route({
     if (!expected) return new Response("not configured", { status: 503 });
     const url = new URL(request.url);
     const given = request.headers.get("x-pbx-secret") ?? url.searchParams.get("secret");
-    if (given !== expected) return new Response("forbidden", { status: 403 });
+    if (!given || !safeEqual(given, expected)) return new Response("forbidden", { status: 403 });
     let body: Record<string, unknown> = {};
     const type = request.headers.get("content-type") ?? "";
     try {
@@ -82,5 +85,12 @@ http.route({
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   }),
 });
+
+// ── Заявки с сайта и публичный API ───────────────────────────────────────────
+// CORS — только у формы сайта: её зовут браузеры с /zayavka и с сайтов компании. API — для серверов, по ключу.
+http.route({ path: "/public/lead", method: "OPTIONS", handler: leadOptions });
+http.route({ path: "/public/lead", method: "POST", handler: leadPost });
+http.route({ path: "/api/v1/leads", method: "POST", handler: createLeadHttp });
+http.route({ pathPrefix: "/api/v1/leads/", method: "GET", handler: getLeadHttp });
 
 export default http;

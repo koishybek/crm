@@ -37,11 +37,12 @@ export function useNow(intervalMs = 30_000) {
 
 /** Глобальные дроверы — открываются из шапки, со страниц и из поиска. */
 interface UiState {
-  lead: { open: boolean; mode: "lead" | "order"; leadId?: string; clientId?: string; callId?: string; phone?: string };
+  /** conversationId — заявка из «Сообщений»: форма заполняется по переписке, заявка связывается с диалогом. */
+  lead: { open: boolean; mode: "lead" | "order"; leadId?: string; clientId?: string; callId?: string; phone?: string; conversationId?: string };
   client: { open: boolean; clientId?: string };
   executor: { open: boolean; executorId?: string };
   nav: boolean;
-  openLead: (o?: { mode?: "lead" | "order"; leadId?: string; clientId?: string; callId?: string; phone?: string }) => void;
+  openLead: (o?: { mode?: "lead" | "order"; leadId?: string; clientId?: string; callId?: string; phone?: string; conversationId?: string }) => void;
   closeLead: () => void;
   openClient: (clientId?: string) => void;
   closeClient: () => void;
@@ -55,7 +56,7 @@ export const useUi = create<UiState>()((set) => ({
   client: { open: false },
   executor: { open: false },
   nav: false,
-  openLead: (o = {}) => set({ lead: { open: true, mode: o.mode ?? "lead", leadId: o.leadId, clientId: o.clientId, callId: o.callId, phone: o.phone } }),
+  openLead: (o = {}) => set({ lead: { open: true, mode: o.mode ?? "lead", leadId: o.leadId, clientId: o.clientId, callId: o.callId, phone: o.phone, conversationId: o.conversationId } }),
   closeLead: () => set((s) => ({ lead: { ...s.lead, open: false } })),
   openClient: (clientId) => set({ client: { open: true, clientId } }),
   closeClient: () => set((s) => ({ client: { ...s.client, open: false } })),

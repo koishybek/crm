@@ -9,6 +9,7 @@ import { createStaff, report, resetPassword, setUserActive, toast } from "../dat
 import { Avatar, Badge, Button, Card, FormRow, Input, Loading, Menu, MenuItem, Modal, PageHeader, Segmented } from "../components/ui";
 import { phone } from "../lib/format";
 import { CatalogEditor } from "./CatalogEditor";
+import { ApiAndSiteCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
@@ -233,6 +234,10 @@ export default function Settings() {
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.3fr_1fr]">
         <TelephonyCard />
         <AiStatusCard />
+      </div>
+
+      <div className="mt-4">
+        <ApiAndSiteCard />
       </div>
 
       <div className="mt-4">

@@ -50,7 +50,9 @@ import {
   uploadCall,
 } from "../data/store";
 import type { AiDraft, AiSummary, CategoryId, Client, Lead, SourceId, Urgency } from "../data/types";
+import { linkConversationLead, useConversationDraft } from "../data/inbox";
 import { AiCard } from "../components/AiCard";
+import { ConversationLink } from "../components/ConversationLink";
 import { Source } from "../components/icons";
 import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
 import { cn, dateTime, digits, phone, phoneMask } from "../lib/format";
@@ -133,7 +135,14 @@ export function LeadDrawer() {
         (lead.leadId ? (
           <LeadView key={lead.leadId} id={lead.leadId} />
         ) : (
-          <NewLeadForm key={`${lead.mode}-${lead.clientId ?? ""}-${lead.callId ?? ""}`} mode={lead.mode} clientId={lead.clientId} callId={lead.callId} phone={lead.phone} />
+          <NewLeadForm
+            key={`${lead.mode}-${lead.clientId ?? ""}-${lead.callId ?? ""}-${lead.conversationId ?? ""}`}
+            mode={lead.mode}
+            clientId={lead.clientId}
+            callId={lead.callId}
+            phone={lead.phone}
+            conversationId={lead.conversationId}
+          />
         ))}
     </Drawer>
   );
@@ -156,7 +165,20 @@ function useDebounced<T>(value: T, delay = 250): T {
 
 const AI_CHIP = "inline-flex h-9 items-center gap-1.5 rounded-[9px] border border-[#e2d9ff] bg-white px-3 text-[13px] font-semibold text-ink-2 hover:border-violet hover:text-violet disabled:opacity-60";
 
-function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromProps }: { mode: "lead" | "order"; clientId?: string; callId?: string; phone?: string }) {
+function NewLeadForm({
+  mode,
+  clientId,
+  callId: callFromProps,
+  phone: phoneFromProps,
+  conversationId,
+}: {
+  mode: "lead" | "order";
+  clientId?: string;
+  callId?: string;
+  phone?: string;
+  /** Заявка из «Сообщений»: форма заполняется по переписке, заявка связывается с диалогом. */
+  conversationId?: string;
+}) {
   const nav = useNavigate();
   const close = useUi((s) => s.closeLead);
   const openLead = useUi((s) => s.openLead);
@@ -253,6 +275,17 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
     setSource((x) => x || "phone");
   };
 
+  // Заявка из «Сообщений»: номер, имя и разбор переписки — сразу в форму, оператор проверяет и сохраняет.
+  const chatBusy = useConversationDraft(conversationId, (d) => {
+    if (d.phone) setPh((x) => (digits(x).length === 11 ? x : phoneMask(d.phone!)));
+    if (d.name) setName((n) => (n.trim() ? n : d.name!));
+    setSource((x) => x || d.channel);
+    if (d.ai) apply(d.draft, d.ai);
+    else if (d.draft.description) setDescription((x) => x || d.draft.description!);
+    if (d.text) setComment((c) => c || `Сообщение клиента: «${d.text.slice(0, 900)}»`);
+    if (d.ai) toast("AI заполнил заявку по переписке — проверьте поля", "info");
+  });
+
   // Пока форма была открыта, AI мог сам создать заявку из этого звонка — второй не нужно.
   const taken = !busy && callData?.lead ? callData.lead : null;
 
@@ -266,6 +299,10 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
     setBusy(true);
     const res = await createLead({ clientId: client?.id, clientName: name, phone: ph, source, serviceId, city, description, urgency, comment, ai, callId });
     if (!res.ok) return (setBusy(false), setError(res.error));
+    if (conversationId) {
+      const linked = await linkConversationLead(conversationId, res.value.id);
+      if (!linked.ok) toast(`Заявка №${res.value.number} сохранена, но не связалась с перепиской: ${linked.error}`, "bad");
+    }
     if (!asOrder) {
       toast(`Заявка №${res.value.number} сохранена`);
       close();
@@ -279,8 +316,15 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
     nav(`/orders/${o.value.id}`);
   };
 
-  const aiPanel =
-    call?.aiStatus === "pending" ? (
+  const aiPanel = chatBusy ? (
+    <div className="flex items-start gap-3 rounded-[14px] border border-[#dccfff] bg-violet-bg/60 p-4" role="status">
+      <span className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[#d6c9ff] border-t-violet" />
+      <div className="text-[14px] text-ink-2">
+        <div className="font-semibold text-ink">Читаем переписку…</div>
+        Номер, имя и суть обращения подставятся сами.
+      </div>
+    </div>
+  ) : call?.aiStatus === "pending" ? (
       <div className="flex items-start gap-3 rounded-[14px] border border-[#dccfff] bg-violet-bg/60 p-4" role="status">
         <span className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-[#d6c9ff] border-t-violet" />
         <div className="text-[14px] text-ink-2">
@@ -297,7 +341,7 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
         </Button>
       </div>
     ) : ai ? (
-      <AiCard ai={ai} title={callId ? "AI-разбор звонка" : "AI-разбор сообщения"} compact />
+      <AiCard ai={ai} title={callId ? "AI-разбор звонка" : conversationId ? "AI-разбор переписки" : "AI-разбор сообщения"} compact />
     ) : pasting ? (
       <div className="rounded-[14px] border border-[#dccfff] bg-[linear-gradient(180deg,#f7f3ff,#fff)] p-4">
         <div className="mb-2 flex items-center gap-2 text-[14.5px] font-semibold text-ink">
@@ -533,6 +577,7 @@ function LeadView({ id }: { id: string }) {
         <div className="mt-3 flex items-center gap-2 border-t border-line pt-3 text-[14px] text-ink-2">
           <span className="text-muted">Источник:</span>
           <Source source={lead.source} />
+          <ConversationLink leadId={lead.id} onOpen={close} />
           {lead.callId && !lead.ai && me?.role !== "manager" && (
             <button onClick={() => (close(), nav(`/calls?open=${lead.callId}`))} className="ml-auto inline-flex items-center gap-1 text-[13px] font-semibold text-brand-ink hover:underline">
               <PhoneCall size={14} aria-hidden /> Звонок

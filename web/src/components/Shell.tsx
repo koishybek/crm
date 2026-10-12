@@ -10,6 +10,7 @@ import {
   House,
   LogOut,
   Menu as MenuIcon,
+  MessagesSquare,
   PhoneCall,
   Plus,
   Search,
@@ -28,6 +29,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { APP_NAME, ROLE_LABEL } from "../data/catalog";
 import { useNow, useUi } from "../data/hooks";
+import { useInboxUnread } from "../data/inbox";
 import { markAllRead, report, telegramLink, telegramUnlink, toast } from "../data/store";
 import type { User } from "../data/types";
 import { cn, whenShort } from "../lib/format";
@@ -42,6 +44,7 @@ const STAFF_NAV: NavItem[] = [
   { to: "/", label: "Главная", icon: House, end: true },
   { to: "/leads", label: "Заявки", icon: FileText },
   { to: "/calls", label: "Звонки", icon: PhoneCall },
+  { to: "/inbox", label: "Сообщения", icon: MessagesSquare },
   { to: "/orders", label: "Заказы", icon: Briefcase },
   { to: "/clients", label: "Клиенты", icon: Users },
   { to: "/executors", label: "Исполнители", icon: UserRound },
@@ -59,9 +62,10 @@ const navFor = (u: User) =>
     ? EXEC_NAV
     : u.role === "owner"
       ? STAFF_NAV
-      : STAFF_NAV.filter((n) => n.to !== "/analytics" && n.to !== "/settings" && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls")));
+      : STAFF_NAV.filter((n) => n.to !== "/analytics" && n.to !== "/settings" && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls" && n.to !== "/inbox")));
 
-function SideNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
+/** badges — счётчики у пунктов меню (непрочитанные «Сообщения»). */
+function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?: () => void; badges?: Record<string, number> }) {
   return (
     <nav className="flex flex-col gap-1.5" aria-label="Разделы">
       {items.map((n) => (
@@ -83,6 +87,11 @@ function SideNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => v
             <>
               <n.icon size={23} strokeWidth={isActive ? 2.1 : 1.7} className={isActive ? "fill-brand/25 text-brand" : "text-[#a9a59c]"} aria-hidden />
               {n.label}
+              {!!badges?.[n.to] && (
+                <span className="ml-auto inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-brand px-1.5 text-[12px] font-bold text-on-brand" aria-label={`непрочитанных: ${badges[n.to]}`}>
+                  {badges[n.to]! > 99 ? "99+" : badges[n.to]}
+                </span>
+              )}
             </>
           )}
         </NavLink>
@@ -353,6 +362,8 @@ function PrimaryAction({ me }: { me: User }) {
 export function Shell({ me, children }: { me: User; children?: ReactNode }) {
   const items = navFor(me);
   const ui = useUi();
+  const unread = useInboxUnread(me);
+  const badges = { "/inbox": unread };
   const [mobileSearch, setMobileSearch] = useState(false);
   const isExec = me.role === "executor";
 
@@ -363,7 +374,7 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
         <div className="mb-8 px-3">
           <Logo onDark />
         </div>
-        <SideNav items={items} />
+        <SideNav items={items} badges={badges} />
         <div className="mt-auto">
           <CompanyCard />
         </div>
@@ -378,7 +389,7 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
               <Logo onDark />
               <IconButton icon={X} label="Закрыть меню" onClick={() => ui.setNav(false)} className="text-[#a9a59c] hover:bg-white/10 hover:text-white" />
             </div>
-            <SideNav items={items} onNavigate={() => ui.setNav(false)} />
+            <SideNav items={items} badges={badges} onNavigate={() => ui.setNav(false)} />
             <div className="mt-auto">
               <CompanyCard />
             </div>
@@ -389,7 +400,12 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
       <div className="lg:pl-[248px]">
         <header className="sticky top-0 z-20 border-b border-line/60 bg-white/95 backdrop-blur">
           <div className="flex h-[68px] items-center gap-1 px-4 sm:gap-3 sm:px-6 lg:h-[76px] lg:px-8">
-            {!isExec && <IconButton icon={MenuIcon} label="Меню" onClick={() => ui.setNav(true)} className="h-10 w-10 lg:hidden" />}
+            {!isExec && (
+              <span className="relative lg:hidden">
+                <IconButton icon={MenuIcon} label={unread ? `Меню: непрочитанных сообщений ${unread}` : "Меню"} onClick={() => ui.setNav(true)} className="h-10 w-10" />
+                {unread > 0 && <span className="pointer-events-none absolute top-1.5 right-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-brand" />}
+              </span>
+            )}
             <div className="lg:hidden">
               <Logo />
             </div>

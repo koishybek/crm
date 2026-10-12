@@ -1,18 +1,23 @@
 // Заявки от клиентов через Telegram-бота (ТЗ п.6, источник «Telegram»).
-// Клиент пишет (текстом или голосом) → делится номером одной кнопкой → заявка с AI-разбором в CRM.
+// Клиент пишет (текстом или голосом) → делится номером одной кнопкой (или пишет его текстом) → заявка с AI-разбором.
+// Вся переписка параллельно ложится в «Сообщения» (inbox.ts), заявка связывается с диалогом.
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery } from "./_generated/server";
-import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
+import { notify, nowIso, staffIds } from "./lib/domain";
+import { intakeLead } from "./lib/intake";
 import { normalizeLogin } from "./lib/login";
-import { insertClient } from "./clients";
+import { hitLimit } from "./lib/rateLimit";
+import { linkConversation } from "./inbox";
 import { loadCatalog } from "./catalog";
-import { env } from "./env";
 import { aiSummary } from "./schema";
-import { CITIES } from "../src/data/catalog";
 
 const OPEN_LEAD_DAYS = 3;
 const MAX_DRAFT = 3000;
+/** Антиспам (ТЗ п.26): сообщений от одного чата в минуту и новых заявок от одного чата в сутки. */
+const CHAT_MESSAGES_PER_MIN = 20;
+const CHAT_LEADS_PER_DAY = 3;
+const LEAD_NOTIFY_EVERY_MS = 10 * 60_000;
 
 /** Состояние диалога с клиентом + есть ли у него свежая открытая заявка. */
 export const _state = internalQuery({
@@ -29,6 +34,12 @@ export const _state = internalQuery({
   },
 });
 
+/** Флуд из одного чата не разбираем: false — лимит сообщений исчерпан. */
+export const _allow = internalMutation({
+  args: { chatId: v.string() },
+  handler: (ctx, { chatId }): Promise<boolean> => hitLimit(ctx, `tg:chat:${chatId}`, CHAT_MESSAGES_PER_MIN, 60_000),
+});
+
 /** Копим описание, пока клиент не поделился номером. */
 export const _addDraft = internalMutation({
   args: { chatId: v.string(), text: v.string(), name: v.optional(v.string()) },
@@ -40,7 +51,7 @@ export const _addDraft = internalMutation({
   },
 });
 
-/** Новое сообщение по уже открытой заявке — оператору в историю клиента и уведомлением. */
+/** Новое сообщение по уже открытой заявке — оператору в историю клиента и уведомлением (не чаще раза в 10 минут). */
 export const _toOpenLead = internalMutation({
   args: { chatId: v.string(), leadId: v.id("leads"), text: v.string() },
   handler: async (ctx, { chatId, leadId, text }) => {
@@ -51,13 +62,17 @@ export const _toOpenLead = internalMutation({
     await ctx.db.patch(l.clientId, { lastActivityAt: at });
     const row = await ctx.db.query("botChats").withIndex("by_chat", (q) => q.eq("chatId", chatId)).first();
     if (row) await ctx.db.patch(row._id, { updatedAt: at });
+    await linkConversation(ctx, "telegram", chatId, { leadId, clientId: l.clientId });
+    if (!(await hitLimit(ctx, `tg:lead-notify:${leadId}`, 1, LEAD_NOTIFY_EVERY_MS))) return;
     const cat = await loadCatalog(ctx);
     const category = cat.services.find((s) => s.id === l.serviceId)?.category;
     await notify(ctx, await staffIds(ctx, category), `${l.clientName} написал(а) в Telegram по заявке №${l.number}: «${text.slice(0, 80)}»`, { link: `/leads?open=${leadId}` });
   },
 });
 
-/** Клиент поделился номером — создаём (или находим) клиента и заявку. */
+export type BotLeadResult = { ok: true; number: number; existing: boolean } | { ok: false; reason: "phone" | "limit" | "setup" };
+
+/** Клиент дал номер — создаём (или находим) клиента и заявку. Повторный номер к открытой заявке второй заявки не создаёт. */
 export const _createLead = internalMutation({
   args: {
     chatId: v.string(),
@@ -70,49 +85,43 @@ export const _createLead = internalMutation({
     urgency: v.optional(v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"))),
     description: v.optional(v.string()),
   },
-  handler: async (ctx, a): Promise<{ number: number; repeat: boolean } | null> => {
+  handler: async (ctx, a): Promise<BotLeadResult> => {
     const phone = normalizeLogin(a.phone);
-    if (!/^7\d{10}$/.test(phone)) return null;
+    if (!/^7\d{10}$/.test(phone)) return { ok: false, reason: "phone" };
     const row = await ctx.db.query("botChats").withIndex("by_chat", (q) => q.eq("chatId", a.chatId)).first();
     const draft = row?.draft?.trim() ?? "";
-    const cat = await loadCatalog(ctx);
-    const active = cat.services.filter((s) => s.active !== false);
-    const svc = active.find((s) => s.id === a.serviceId) ?? active.find((s) => s.id === "other") ?? active[0]!;
-    const city = a.city ?? env("COMPANY_CITY") ?? CITIES[0];
-    let client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", phone)).first();
-    const repeat = !!client;
-    if (!client) {
-      const id = await insertClient(ctx, { name: a.name?.trim() || `Клиент из Telegram`, phone, city, address: a.address, source: "telegram", preferredChannel: "telegram" });
-      client = (await ctx.db.get(id))!;
-    }
-    const owner = await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).first();
-    if (!owner) return null;
     const at = nowIso();
-    const number = await nextNumber(ctx);
-    const description = (a.description || draft || "Клиент оставил заявку в Telegram").slice(0, 2000);
-    const leadId = await ctx.db.insert("leads", {
-      tenantId: TENANT,
-      number,
-      clientId: client._id,
-      clientName: client.name,
-      clientPhone: client.phone,
+
+    // Номер прислали ещё раз (двойное нажатие, «на всякий случай») — заявка уже у оператора: дописываем к ней.
+    const fresh = row?.leadId && Date.now() - Date.parse(row.updatedAt) < OPEN_LEAD_DAYS * 86400_000 ? await ctx.db.get(row.leadId) : null;
+    if (row && fresh && fresh.status !== "rejected" && fresh.status !== "converted" && fresh.clientPhone === phone) {
+      if (draft) await ctx.db.insert("interactions", { clientId: fresh.clientId, kind: "message", channel: "telegram", title: "Сообщение в Telegram", text: draft.slice(0, 1000), at, leadId: fresh._id });
+      await ctx.db.patch(row._id, { state: "idle", draft: undefined, updatedAt: at });
+      await linkConversation(ctx, "telegram", a.chatId, { leadId: fresh._id, clientId: fresh.clientId, phone });
+      return { ok: true, number: fresh.number, existing: true };
+    }
+    if (!(await hitLimit(ctx, `tg:leads:${a.chatId}`, CHAT_LEADS_PER_DAY, 86400_000))) return { ok: false, reason: "limit" };
+
+    const res = await intakeLead(ctx, {
       source: "telegram",
-      serviceId: svc.id,
-      city,
-      description,
-      urgency: a.urgency ?? "normal",
-      status: "new",
-      operatorId: owner._id,
-      createdAt: at,
-      ai: a.ai,
+      phone,
+      name: a.name,
+      fallbackName: "Клиент из Telegram",
+      serviceId: a.serviceId,
+      city: a.city,
+      address: a.address,
+      urgency: a.urgency,
+      description: a.description || draft || "Клиент оставил заявку в Telegram",
       comment: draft && a.description && draft !== a.description ? `Сообщение клиента: ${draft.slice(0, 1500)}` : undefined,
+      ai: a.ai,
+      message: { title: "Сообщение в Telegram", text: draft || "Заявка через бота" },
+      actor: "Telegram",
+      via: "из Telegram",
     });
-    await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: "telegram", title: "Сообщение в Telegram", text: draft.slice(0, 1000) || "Заявка через бота", at });
-    await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: "telegram", title: "Новая заявка", text: svc.label, at, leadId });
-    await ctx.db.patch(client._id, { lastActivityAt: at });
-    if (row) await ctx.db.patch(row._id, { state: "idle", draft: undefined, leadId, updatedAt: at });
-    else await ctx.db.insert("botChats", { chatId: a.chatId, state: "idle", leadId, updatedAt: at });
-    await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number} из Telegram: ${svc.id === "other" ? "услугу уточнить" : svc.label} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info" });
-    return { number, repeat };
+    if (!res) return { ok: false, reason: "setup" };
+    if (row) await ctx.db.patch(row._id, { state: "idle", draft: undefined, leadId: res.leadId, updatedAt: at });
+    else await ctx.db.insert("botChats", { chatId: a.chatId, state: "idle", leadId: res.leadId, updatedAt: at });
+    await linkConversation(ctx, "telegram", a.chatId, { leadId: res.leadId, clientId: res.clientId, phone });
+    return { ok: true, number: res.number, existing: false };
   },
 });

@@ -2,16 +2,22 @@
 // Нет TELEGRAM_BOT_TOKEN — всё тихо выключено.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { action, internalAction, internalMutation, mutation, query, type ActionCtx } from "./_generated/server";
 import { currentUser } from "./lib/access";
+import { PLACEHOLDER } from "./lib/chat";
+import { findKzPhone } from "./lib/phone";
 import { cardHtml, esc, workerButtons, type CardData, type TgButton } from "./lib/tg";
 import { canExtract, canTranscribe, extract, toSummary, transcribe, type CatalogHint } from "./ai";
 import { env } from "./env";
 import { APP_NAME } from "../src/data/catalog";
+import { phone as fmtPhone } from "../src/lib/format";
+import type { MessageKind } from "../src/data/types";
 
 type Markup = { inline_keyboard: { text: string; callback_data?: string; url?: string }[][] } | { keyboard: unknown[][]; resize_keyboard?: boolean; one_time_keyboard?: boolean } | { remove_keyboard: true };
 
-async function tg(method: string, body: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; description?: string } | null> {
+/** Вызов Bot API. null — бот не настроен или Telegram не ответил. */
+export async function tg(method: string, body: Record<string, unknown>): Promise<{ ok: boolean; result?: unknown; description?: string } | null> {
   const token = env("TELEGRAM_BOT_TOKEN");
   if (!token) return null;
   try {
@@ -98,17 +104,25 @@ export const linkChat = internalMutation({
 
 // ── Входящие обновления ──────────────────────────────────────────────────────
 
-type TgUser = { id: number; first_name?: string; last_name?: string };
+type TgUser = { id: number; first_name?: string; last_name?: string; username?: string };
+type TgFile = { file_id: string; file_size?: number };
 type TgMessage = {
   message_id: number;
+  date?: number;
   chat: { id: number; type?: string };
   from?: TgUser;
   text?: string;
   caption?: string;
   contact?: { phone_number: string; first_name?: string; last_name?: string; user_id?: number };
-  voice?: { file_id: string; duration?: number };
-  audio?: { file_id: string; duration?: number };
-  photo?: unknown[];
+  voice?: TgFile & { duration?: number };
+  audio?: TgFile & { duration?: number; file_name?: string };
+  photo?: (TgFile & { width?: number; height?: number })[];
+  document?: TgFile & { file_name?: string; mime_type?: string };
+  video?: TgFile & { file_name?: string };
+  video_note?: TgFile;
+  animation?: TgFile & { file_name?: string };
+  sticker?: { emoji?: string };
+  location?: { latitude: number; longitude: number };
 };
 type TgUpdate = { message?: TgMessage; callback_query?: { id: string; data?: string; from: TgUser; message?: TgMessage } };
 
@@ -129,53 +143,172 @@ async function sendCards(chatId: string, cards: CardData[], header: (c: CardData
   for (const c of cards) await sendHtml(chatId, cardHtml(c, header(c)), inline(workerButtons(c.status, c.id, app)));
 }
 
-/** Скачать файл из Telegram (голосовое клиента). */
+// ── Клиенты: заявка через бота, вся переписка — в «Сообщениях» ─────────────
+
+/** Bot API отдаёт файлы до 20 МБ. */
+const MAX_FILE = 20 * 1024 * 1024;
+
+/** Скачать файл клиента из Telegram. null — бот не настроен, файл больше 20 МБ или Telegram его не отдал. */
 async function download(fileId: string): Promise<Blob | null> {
   const token = env("TELEGRAM_BOT_TOKEN");
   const f = await tg("getFile", { file_id: fileId });
-  const path = (f?.result as { file_path?: string } | undefined)?.file_path;
-  if (!token || !path) return null;
-  const res = await fetch(`https://api.telegram.org/file/bot${token}/${path}`);
-  return res.ok ? await res.blob() : null;
+  const info = f?.result as { file_path?: string; file_size?: number } | undefined;
+  if (!token || !info?.file_path || (info.file_size ?? 0) > MAX_FILE) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${info.file_path}`);
+    return res.ok ? await res.blob() : null;
+  } catch (e) {
+    console.warn(`telegram: файл клиента не скачан: ${e instanceof Error ? e.name : "ошибка"}`);
+    return null;
+  }
 }
 
-async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
-  let text = (msg.text ?? msg.caption ?? "").trim();
-  if (msg.voice || msg.audio) {
-    if (!canTranscribe()) {
-      await sendHtml(chatId, "Голосовые пока не разбираю — напишите, пожалуйста, текстом 🙏");
-      return;
-    }
-    const blob = await download((msg.voice ?? msg.audio)!.file_id);
+/** Файл клиента → хранилище: оператор откроет фото, голосовое или документ прямо в «Сообщениях». */
+async function keep(ctx: ActionCtx, blob: Blob | null): Promise<Id<"_storage"> | undefined> {
+  if (!blob) return undefined;
+  try {
+    return await ctx.storage.store(blob);
+  } catch (e) {
+    console.warn(`telegram: файл клиента не сохранён: ${e instanceof Error ? e.name : "ошибка"}`);
+    return undefined;
+  }
+}
+
+/** Что прислал клиент: текст для «Сообщений», текст для черновика заявки и файл. */
+type Incoming = {
+  kind: MessageKind;
+  text: string;
+  /** В черновик заявки; пусто — сообщение только для «Сообщений» (стикер, неразобранное голосовое). */
+  draft: string;
+  fileId?: Id<"_storage">;
+  fileName?: string;
+  voice?: boolean;
+  /** Бот отвечает этим вместо обычного сценария. */
+  reply?: string;
+};
+
+async function readIncoming(ctx: ActionCtx, msg: TgMessage): Promise<Incoming | null> {
+  const caption = (msg.text ?? msg.caption ?? "").trim();
+  const voice = msg.voice ?? msg.audio;
+  if (voice) {
+    const blob = await download(voice.file_id);
+    const fileId = await keep(ctx, blob);
+    const fileName = msg.audio?.file_name ?? "voice.ogg";
+    if (!canTranscribe()) return { kind: "audio", text: PLACEHOLDER.voice, draft: "", fileId, fileName, reply: "Голосовые пока не разбираю — напишите, пожалуйста, текстом 🙏" };
+    let text = "";
     try {
       text = blob ? (await transcribe(blob)).text : "";
     } catch (e) {
       console.warn(`telegram: голосовое не расшифровано: ${e instanceof Error ? e.message : "ошибка"}`);
-      text = "";
     }
-    if (!text) {
-      await sendHtml(chatId, "Не получилось разобрать голосовое — напишите, пожалуйста, текстом.");
-      return;
-    }
+    if (!text) return { kind: "audio", text: PLACEHOLDER.voiceFailed, draft: "", fileId, fileName, reply: "Не получилось разобрать голосовое — напишите, пожалуйста, текстом." };
+    return { kind: "audio", text, draft: text, fileId, fileName, voice: true };
   }
-  if (msg.photo && !text) text = "[клиент отправил фото]";
-  if (!text) return;
-
-  const st = await ctx.runQuery(internal.bot._state, { chatId });
-  if (st.openLead && st.state === "idle") {
-    await ctx.runMutation(internal.bot._toOpenLead, { chatId, leadId: st.openLead.id, text });
-    await sendHtml(chatId, `Передали оператору по заявке №${st.openLead.number} ✅`);
-    return;
+  if (msg.photo?.length) {
+    // Размеры идут по возрастанию — берём самый большой, который Telegram отдаст.
+    const best = [...msg.photo].reverse().find((p) => (p.file_size ?? 0) <= MAX_FILE) ?? msg.photo[0]!;
+    const fileId = await keep(ctx, await download(best.file_id));
+    return { kind: "image", text: caption || PLACEHOLDER.image, draft: caption || "[клиент отправил фото]", fileId, fileName: "photo.jpg" };
   }
-  await ctx.runMutation(internal.bot._addDraft, { chatId, text, name: fullName(msg.from) });
-  await sendHtml(chatId, msg.voice ? `Записал: «${esc(text.slice(0, 300))}»\n\nОстался номер телефона — нажмите кнопку ниже 👇` : "Принято! Чтобы оператор перезвонил, поделитесь номером — кнопка ниже 👇", {
-    keyboard: [[{ text: "📱 Отправить мой номер", request_contact: true }]],
-    resize_keyboard: true,
-    one_time_keyboard: true,
-  });
+  const video = msg.video ?? msg.animation ?? msg.video_note;
+  if (video) {
+    const fileId = await keep(ctx, await download(video.file_id));
+    const fileName = (msg.video ?? msg.animation)?.file_name ?? "video.mp4";
+    return { kind: "file", text: caption || PLACEHOLDER.video, draft: caption || "[клиент отправил видео]", fileId, fileName };
+  }
+  if (msg.document) {
+    const fileId = await keep(ctx, await download(msg.document.file_id));
+    const image = !!msg.document.mime_type?.startsWith("image/");
+    return { kind: image ? "image" : "file", text: caption || (image ? PLACEHOLDER.image : PLACEHOLDER.file), draft: caption || "[клиент отправил файл]", fileId, fileName: msg.document.file_name ?? "file" };
+  }
+  if (msg.location) {
+    const coords = `${msg.location.latitude.toFixed(6)}, ${msg.location.longitude.toFixed(6)}`;
+    return { kind: "location", text: coords, draft: `Геопозиция клиента: ${coords}` };
+  }
+  if (msg.sticker) return { kind: "text", text: `Стикер ${msg.sticker.emoji ?? ""}`.trim(), draft: "" };
+  return caption ? { kind: "text", text: caption, draft: caption } : null;
 }
 
+/**
+ * Время сообщения. Telegram даёт его с точностью до секунды: свежее сообщение ставим по часам сервера, иначе ответ бота
+ * в ту же секунду окажется в ленте выше сообщения клиента. Своё время — только у задержанных (бот был недоступен).
+ */
+const tgDate = (unix?: number) => (unix && Date.now() - unix * 1000 > 60_000 ? new Date(unix * 1000).toISOString() : undefined);
+const tgMeta = (u?: TgUser) => (u?.username ? { username: u.username.slice(0, 64) } : undefined);
+const htmlText = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/** Ответ бота клиенту + копия в «Сообщения» серым системным сообщением. */
+async function say(ctx: ActionCtx, chatId: string, conversationId: Id<"conversations">, html: string, markup?: Markup) {
+  const res = await sendHtml(chatId, html, markup);
+  const id = (res?.result as { message_id?: number } | undefined)?.message_id;
+  await ctx.runMutation(internal.inbox._logBot, { conversationId, text: htmlText(html), ok: !!res?.ok, externalMessageId: id === undefined ? undefined : `${chatId}:${id}` });
+}
+
+const PHONE_BUTTON: Markup = { keyboard: [[{ text: "📱 Отправить мой номер", request_contact: true }]], resize_keyboard: true, one_time_keyboard: true };
+
+/** Сообщение клиента: в «Сообщения», дальше обычный сценарий бота — дописать к заявке или собрать черновик и попросить номер. */
+async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
+  const externalMessageId = `${chatId}:${msg.message_id}`;
+  // Повтор вебхука — уже записано (и голосовое уже расшифровано).
+  if (await ctx.runQuery(internal.inbox._seen, { channel: "telegram", externalMessageId })) return;
+  const inc = await readIncoming(ctx, msg);
+  if (!inc) return;
+  const st = await ctx.runQuery(internal.bot._state, { chatId });
+  const toLead = !!st.openLead && st.state === "idle";
+  const phone = inc.draft && !toLead ? findKzPhone(inc.draft) : null;
+  const r = await ctx.runMutation(internal.inbox.ingest, {
+    channel: "telegram",
+    externalId: chatId,
+    contactName: fullName(msg.from),
+    text: inc.text,
+    kind: inc.kind,
+    externalMessageId,
+    at: tgDate(msg.date),
+    fileId: inc.fileId,
+    fileName: inc.fileName,
+    meta: tgMeta(msg.from),
+    // О заявке (по открытой или по номеру в тексте) команде сообщит сам бот; стикер — не повод для уведомления.
+    notify: !toLead && !phone && (!!inc.draft || !!inc.reply),
+    autoLead: false,
+  });
+  if (r.duplicate) return;
+  const conv = r.conversationId;
+  if (inc.reply) return void (await say(ctx, chatId, conv, inc.reply));
+  if (!inc.draft) return;
+  if (toLead) {
+    await ctx.runMutation(internal.bot._toOpenLead, { chatId, leadId: st.openLead!.id, text: inc.draft });
+    return void (await say(ctx, chatId, conv, `Передали оператору по заявке №${st.openLead!.number} ✅`));
+  }
+  await ctx.runMutation(internal.bot._addDraft, { chatId, text: inc.draft, name: fullName(msg.from) });
+  // Номер написали текстом («мой номер 8 701 …») — заявка сразу, без кнопки.
+  if (phone) return void (await finishLead(ctx, chatId, conv, phone, msg.from));
+  await say(ctx, chatId, conv, inc.voice ? `Записал: «${esc(inc.draft.slice(0, 300))}»\n\nОстался номер телефона — нажмите кнопку ниже 👇` : "Принято! Чтобы оператор перезвонил, поделитесь номером — кнопка ниже 👇", PHONE_BUTTON);
+}
+
+/** Клиент поделился контактом кнопкой. */
 async function clientContact(ctx: ActionCtx, chatId: string, msg: TgMessage) {
+  const externalMessageId = `${chatId}:${msg.message_id}`;
+  if (await ctx.runQuery(internal.inbox._seen, { channel: "telegram", externalMessageId })) return;
+  const contact = msg.contact!;
+  const r = await ctx.runMutation(internal.inbox.ingest, {
+    channel: "telegram",
+    externalId: chatId,
+    contactName: fullName(msg.from) ?? fullName(contact),
+    contactPhone: contact.phone_number,
+    text: `Поделился номером: ${fmtPhone(contact.phone_number)}`,
+    kind: "text",
+    externalMessageId,
+    at: tgDate(msg.date),
+    meta: tgMeta(msg.from),
+    notify: false,
+    autoLead: false,
+  });
+  if (r.duplicate) return;
+  await finishLead(ctx, chatId, r.conversationId, contact.phone_number, contact.first_name ? contact : msg.from);
+}
+
+/** Номер есть (кнопкой или текстом) — заявка с AI-разбором черновика. */
+async function finishLead(ctx: ActionCtx, chatId: string, conv: Id<"conversations">, phone: string, who?: { first_name?: string; last_name?: string }) {
   const st = await ctx.runQuery(internal.bot._state, { chatId });
   let parsed: { ai?: ReturnType<typeof toSummary>["ai"]; draft?: ReturnType<typeof toSummary>["draft"] } = {};
   if (st.draft && canExtract()) {
@@ -183,14 +316,15 @@ async function clientContact(ctx: ActionCtx, chatId: string, msg: TgMessage) {
       const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
       const x = await extract(st.draft, hint, "message");
       parsed = toSummary(x, (id) => hint.services.find((s) => s.id === id)?.label ?? id);
-    } catch {
-      /* без AI — заявка всё равно создаётся с текстом клиента */
+    } catch (e) {
+      // Без AI заявка всё равно создаётся с текстом клиента.
+      console.warn(`telegram: черновик без AI-разбора: ${e instanceof ConvexError ? String(e.data) : "ошибка"}`);
     }
   }
-  const name = parsed.draft?.clientName ?? fullName(msg.contact) ?? fullName(msg.from);
+  const name = parsed.draft?.clientName ?? fullName(who);
   const res = await ctx.runMutation(internal.bot._createLead, {
     chatId,
-    phone: msg.contact!.phone_number,
+    phone,
     name,
     ai: parsed.ai,
     serviceId: parsed.draft?.serviceId,
@@ -199,12 +333,22 @@ async function clientContact(ctx: ActionCtx, chatId: string, msg: TgMessage) {
     urgency: parsed.draft?.urgency,
     description: parsed.draft?.description,
   });
-  if (!res) {
-    await sendHtml(chatId, "Не получилось принять номер — пришлите, пожалуйста, ещё раз или напишите его текстом.", { remove_keyboard: true });
-    return;
+  if (!res.ok) {
+    const text =
+      res.reason === "limit"
+        ? "Ваши заявки уже у оператора — он свяжется с вами. Подробности можно просто написать сюда."
+        : res.reason === "phone"
+          ? "Не получилось принять номер — пришлите, пожалуйста, ещё раз или напишите его текстом."
+          : "Сейчас не получилось принять заявку — попробуйте, пожалуйста, чуть позже.";
+    return void (await say(ctx, chatId, conv, text, { remove_keyboard: true }));
   }
-  await sendHtml(
+  if (res.existing) {
+    return void (await say(ctx, chatId, conv, `Заявка <b>№${res.number}</b> уже у оператора ✅ Он свяжется с вами в ближайшее время.`, { remove_keyboard: true }));
+  }
+  await say(
+    ctx,
     chatId,
+    conv,
     `Спасибо${name ? `, ${esc(name.split(" ")[0]!)}` : ""}! Заявка <b>№${res.number}</b> принята 🙌\nОператор свяжется с вами в ближайшее время. Если вспомните детали — просто напишите сюда.`,
     { remove_keyboard: true },
   );
@@ -286,9 +430,14 @@ export const handleUpdate = internalAction({
       return void (await sendHtml(chatId, esc(who.role === "executor" ? HELP_EXECUTOR : HELP_STAFF)));
     }
 
-    // Клиент.
+    // Клиент. Флуд из одного чата не разбираем — ни AI, ни заявок, ни уведомлений.
+    if (!(await ctx.runMutation(internal.bot._allow, { chatId }))) return;
     if (msg.contact) return void (await clientContact(ctx, chatId, msg));
-    if (text === "/start" || text === "/help" || text.startsWith("/")) return void (await sendHtml(chatId, esc(HELP_CLIENT), { remove_keyboard: true }));
+    if (text.startsWith("/")) {
+      // Команда — не обращение: новый диалог не заводим, но в уже идущий ответ бота записываем.
+      const conv = await ctx.runQuery(internal.inbox._find, { channel: "telegram", externalId: chatId });
+      return void (conv ? await say(ctx, chatId, conv, esc(HELP_CLIENT), { remove_keyboard: true }) : await sendHtml(chatId, esc(HELP_CLIENT), { remove_keyboard: true }));
+    }
     await clientMessage(ctx, chatId, msg);
   },
 });
