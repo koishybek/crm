@@ -17,8 +17,10 @@ const envLocal = Object.fromEntries(
 );
 const url = process.env.CONVEX_URL ?? envLocal.VITE_CONVEX_URL;
 const secret = process.env.SEED_SECRET;
-const password = process.env.DEMO_PASSWORD ?? "Demo-2026";
+// Пароль демо-аккаунтов — только из окружения: в публичном репозитории его быть не должно.
+const password = process.env.DEMO_PASSWORD;
 if (!url || !secret) throw new Error("Нужны CONVEX_URL (или .env.local) и SEED_SECRET");
+if (!password || password.length < 10) throw new Error("Нужен DEMO_PASSWORD (не короче 10 символов) — пароль демо-аккаунтов");
 
 const client = new ConvexHttpClient(url);
 type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls";
@@ -218,7 +220,7 @@ async function main() {
   await client.mutation(api.seed.processCalls, { secret: secret!, ids: callIds.slice(-liveRows.length) as Id<"calls">[] });
   console.log(`AI разбирает записи звонков: ${liveRows.length}. Через ~30–60 секунд появятся новые заявки.`);
   if (links.length) console.log(`Привязки Telegram сохранены: ${links.length}`);
-  console.log(`Готово. Логины: ${logins.slice(0, 5).map((l) => l.login).join(", ")}… пароль «${password}»`);
+  console.log(`Готово. Логины: ${logins.slice(0, 5).map((l) => l.login).join(", ")}… (пароль — из DEMO_PASSWORD)`);
 }
 
 main().catch((e) => {
