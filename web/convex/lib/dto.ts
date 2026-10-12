@@ -124,6 +124,7 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   paidAt: o.paidAt,
   closedAt: o.closedAt,
   cancelReason: o.cancelReason,
+  requiredSkills: o.requiredSkills,
   files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })),
 });
 
@@ -153,6 +154,7 @@ export async function toWorkerOrder(ctx: QueryCtx, o: Doc<"orders">, opts: { con
     address: opts.contacts ? o.address : undefined,
     clientName: opts.contacts ? o.clientName : undefined,
     clientPhone: opts.contacts ? o.clientPhone : undefined,
+    requiredSkills: o.requiredSkills,
     files: opts.files ? await withUrls(ctx, o.files) : [],
   };
 }

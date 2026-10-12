@@ -203,6 +203,8 @@ export interface WorkerOrder {
   address?: string;
   clientName?: string;
   clientPhone?: string;
+  /** Навыки, которые нужны для заказа (мастер видит заказ, только если они у него есть). */
+  requiredSkills?: string[];
   files: Attachment[];
 }
 
