@@ -46,7 +46,7 @@ export function TelegramCard() {
             <b className="text-ink">Команда.</b> Каждый подключает уведомления сам: меню профиля → «Подключить Telegram». Исполнители берут новые заказы и ведут их кнопками прямо в чате, в 9:00 всем приходит сводка.
           </p>
           <p>
-            <b className="text-ink">Клиенты.</b> Пишут боту текстом или голосом и делятся номером — заявка появляется в CRM с AI-разбором. Ссылку на бота можно поставить в объявления OLX, Instagram и на сайт.
+            <b className="text-ink">Клиенты.</b> Пишут боту текстом или голосом и делятся номером — заявка сразу появляется у операторов с AI-разбором. Ссылку на бота можно поставить в объявления OLX, Instagram и на сайт.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="secondary" icon={Copy} onClick={() => copy(link)}>
@@ -96,7 +96,7 @@ export function TelephonyCard() {
   return (
     <Card icon={PhoneCall} title="Телефония (АТС)">
       <p className="text-[13.5px] text-muted">
-        Облачная АТС (Binotel, Mango Office, Zadarma, OnlinePBX, Asterisk) присылает события звонков: CRM находит клиента по номеру, показывает оператору карточку звонящего, а запись разговора разбирает AI и
+        Облачная АТС (Binotel, Mango Office, Zadarma, OnlinePBX, Asterisk) присылает события звонков: система находит клиента по номеру, показывает оператору карточку звонящего, а запись разговора разбирает AI и
         создаёт заявку.
       </p>
       {s === undefined ? (
@@ -132,8 +132,8 @@ export function TelephonyCard() {
               </p>
               <pre className="scroll-thin mt-2 overflow-x-auto rounded-[9px] bg-side p-3 font-mono text-[11.5px] leading-relaxed text-[#e9e6dd]">{EVENTS}</pre>
               <p className="mt-2">
-                Понимаем и другие названия полей: <code>caller</code>, <code>callee</code>, <code>call_id</code>, <code>billsec</code>, <code>record_url</code>… В <code>operator</code> — логин сотрудника в CRM
-                (email или телефон). Запись по ссылке CRM скачает сама.
+                Понимаем и другие названия полей: <code>caller</code>, <code>callee</code>, <code>call_id</code>, <code>billsec</code>, <code>record_url</code>… В <code>operator</code> — логин сотрудника
+                (email или телефон). Запись по ссылке система скачает сама.
               </p>
             </div>
           </details>
@@ -149,12 +149,21 @@ export function AiStatusCard() {
     <Card icon={Sparkles} title="AI-помощник">
       {s === undefined ? (
         <Loading className="py-6" />
-      ) : (
+      ) : !s ? null : (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={s.enabled ? "green" : "gray"}>{s.enabled ? "Работает" : "Не подключён"}</Badge>
-            {s.provider && <span className="text-[13px] text-muted">{s.provider}</span>}
-          </div>
+          <Badge tone={s.enabled ? "green" : "gray"}>{s.enabled ? "Работает" : "Не подключён"}</Badge>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[13.5px]">
+            <dt className="text-muted">Разбор обращений</dt>
+            <dd className="font-medium text-ink">{s.llm ?? "—"}</dd>
+            {s.fallback && (
+              <>
+                <dt className="text-muted">Если недоступен</dt>
+                <dd className="text-ink-2">{s.fallback}</dd>
+              </>
+            )}
+            <dt className="text-muted">Расшифровка</dt>
+            <dd className="font-medium text-ink">{s.stt ?? "—"}</dd>
+          </dl>
           <ul className="mt-3 space-y-1.5 text-[14px] text-ink-2">
             {[
               "Расшифровывает записи звонков и голосовые из Telegram",
@@ -168,7 +177,7 @@ export function AiStatusCard() {
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-[12.5px] text-muted">AI только предлагает: цены, статусы заказов и деньги он не меняет. Провайдера можно сменить без доработки CRM.</p>
+          <p className="mt-3 text-[12.5px] text-muted">AI только предлагает: цены, статусы заказов и деньги он не меняет. Провайдера можно сменить без доработок.</p>
         </>
       )}
     </Card>

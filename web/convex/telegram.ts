@@ -5,7 +5,7 @@ import { internal } from "./_generated/api";
 import { action, internalAction, internalMutation, mutation, query, type ActionCtx } from "./_generated/server";
 import { currentUser } from "./lib/access";
 import { cardHtml, esc, workerButtons, type CardData, type TgButton } from "./lib/tg";
-import { aiProvider, extract, toSummary, transcribe, type CatalogHint } from "./ai";
+import { canExtract, canTranscribe, extract, toSummary, transcribe, type CatalogHint } from "./ai";
 import { env } from "./env";
 import { APP_NAME } from "../src/data/catalog";
 
@@ -142,14 +142,15 @@ async function download(fileId: string): Promise<Blob | null> {
 async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
   let text = (msg.text ?? msg.caption ?? "").trim();
   if (msg.voice || msg.audio) {
-    if (!aiProvider()) {
+    if (!canTranscribe()) {
       await sendHtml(chatId, "Голосовые пока не разбираю — напишите, пожалуйста, текстом 🙏");
       return;
     }
     const blob = await download((msg.voice ?? msg.audio)!.file_id);
     try {
       text = blob ? (await transcribe(blob)).text : "";
-    } catch {
+    } catch (e) {
+      console.warn(`telegram: голосовое не расшифровано: ${e instanceof Error ? e.message : "ошибка"}`);
       text = "";
     }
     if (!text) {
@@ -177,7 +178,7 @@ async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
 async function clientContact(ctx: ActionCtx, chatId: string, msg: TgMessage) {
   const st = await ctx.runQuery(internal.bot._state, { chatId });
   let parsed: { ai?: ReturnType<typeof toSummary>["ai"]; draft?: ReturnType<typeof toSummary>["draft"] } = {};
-  if (st.draft && aiProvider()) {
+  if (st.draft && canExtract()) {
     try {
       const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
       const x = await extract(st.draft, hint, "message");
@@ -261,7 +262,7 @@ export const handleUpdate = internalAction({
     const m = /^\/start\s+([0-9a-f]{24})$/.exec(text);
     if (m) {
       const linked = await ctx.runMutation(internal.telegram.linkChat, { code: m[1]!, chatId });
-      if (!linked) return void (await sendHtml(chatId, `Ссылка устарела. Откройте CRM ${APP_NAME} → меню профиля → «Подключить Telegram» ещё раз.`));
+      if (!linked) return void (await sendHtml(chatId, `Ссылка устарела. Откройте ${APP_NAME} → меню профиля → «Подключить Telegram» ещё раз.`));
       const first = linked.name.split(" ")[0];
       await sendHtml(chatId, `Готово${first ? `, ${esc(first)}` : ""}! 🎉 Telegram подключён к ${APP_NAME}.\n\n${esc(linked.role === "executor" ? HELP_EXECUTOR : HELP_STAFF)}`);
       return;
@@ -274,7 +275,7 @@ export const handleUpdate = internalAction({
         if (who.role !== "executor") {
           const snap = await ctx.runQuery(internal.digest._staffSnapshot, { chatId });
           const app = appUrl();
-          return void (await sendHtml(chatId, snap ?? HELP_STAFF, app ? inline([[{ text: "Открыть CRM", url: app }]]) : undefined));
+          return void (await sendHtml(chatId, snap ?? HELP_STAFF, app ? inline([[{ text: "Открыть кабинет", url: app }]]) : undefined));
         }
         const r = await ctx.runQuery(internal.worker._forChat, { chatId, what: text === "/feed" ? "feed" : "orders" });
         if (!r.cards.length) return void (await sendHtml(chatId, text === "/feed" ? "Свободных заказов по вашей специализации сейчас нет. Пришлю, как только появятся 👌" : "Активных заказов нет. Свободные — /feed"));

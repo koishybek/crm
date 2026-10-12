@@ -86,6 +86,6 @@ export function workerButtons(status: OrderStatus, id: string, appUrl?: string):
   if (status === "accepted") rows.push([{ text: "▶️ Начать работу", data: `act:start:${id}` }], [{ text: "✖️ Отказаться", data: `act:decline:${id}` }]);
   if (status === "in_progress") rows.push([{ text: "✅ Работа выполнена", data: `act:done:${id}` }], [{ text: "⏸ Жду клиента / деталь", data: `act:wait:${id}` }]);
   if (status === "awaiting_client") rows.push([{ text: "▶️ Продолжить работу", data: `act:resume:${id}` }], [{ text: "✅ Работа выполнена", data: `act:done:${id}` }]);
-  if (appUrl && status !== "awaiting_executor") rows.push([{ text: "Открыть в CRM", url: `${appUrl.replace(/\/$/, "")}/w/orders/${id}` }]);
+  if (appUrl && status !== "awaiting_executor") rows.push([{ text: "Открыть в кабинете", url: `${appUrl.replace(/\/$/, "")}/w/orders/${id}` }]);
   return rows;
 }

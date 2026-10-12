@@ -232,6 +232,8 @@ describe("запись звонка → AI", () => {
 describe("утренняя сводка", () => {
   test("владельцу уходит сводка с деньгами, мастеру — заказы на сегодня", async () => {
     vi.useFakeTimers();
+    // 9:00 по Алматы: «срок через час» гарантированно сегодня (около полуночи тест иначе плавал бы).
+    vi.setSystemTime(new Date("2026-10-12T04:00:00Z"));
     const { t, ids } = await setup();
     await t.run(async (ctx) => {
       await ctx.db.patch(ids.exUser, { telegramChatId: "555" });

@@ -84,7 +84,7 @@ export const run = internalMutation({
         continue;
       }
       const n = await numbers(ctx, u, now);
-      await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId!, text: "", html: staffText(u, n, true), buttons: appUrl ? [[{ text: "Открыть CRM", url: appUrl }]] : undefined });
+      await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId!, text: "", html: staffText(u, n, true), buttons: appUrl ? [[{ text: "Открыть кабинет", url: appUrl }]] : undefined });
     }
   },
 });

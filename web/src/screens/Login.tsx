@@ -110,7 +110,7 @@ export default function Login() {
     <div className="grid min-h-dvh bg-[#fbfaf6] lg:grid-cols-[1.04fr_1fr]">
       <section className="relative hidden overflow-hidden bg-[linear-gradient(160deg,#fffaf0_0%,#fff3d6_55%,#f6faff_100%)] px-14 pt-12 xl:px-24 lg:block">
         <Logo />
-        <div className="mt-16 text-[13px] font-semibold tracking-[0.32em] text-muted">CRM ДЛЯ СЕРВИСНОГО БИЗНЕСА</div>
+        <div className="mt-16 text-[13px] font-semibold tracking-[0.32em] text-muted">ЗАЯВКИ · ЗАКАЗЫ · МАСТЕРА</div>
         <h1 className="mt-4 max-w-[620px] text-[46px] leading-[1.08] font-bold tracking-[-0.035em] text-ink xl:text-[52px]">Больше довольных клиентов. Больше роста.</h1>
         <p className="mt-5 max-w-[480px] text-[18px] leading-relaxed text-muted">{APP_NAME} — заявки, клиенты, выездные мастера и деньги в одном месте.</p>
         <div className="mt-9 space-y-6">
@@ -135,7 +135,7 @@ export default function Login() {
                 <Logo />
               </div>
               <h2 className="mt-6 text-center text-[30px] font-bold tracking-[-0.025em] text-ink sm:text-[34px]">Вход в систему</h2>
-              <p className="mx-auto mt-2 max-w-[360px] text-center text-[15.5px] leading-snug text-balance text-muted">Войдите в аккаунт, чтобы продолжить работу в CRM {APP_NAME}.</p>
+              <p className="mx-auto mt-2 max-w-[360px] text-center text-[15.5px] leading-snug text-balance text-muted">Войдите, чтобы продолжить работу в {APP_NAME}.</p>
 
               <label className="mt-8 mb-2 block text-[15px] font-medium text-ink" htmlFor="email">
                 Email или телефон

@@ -166,7 +166,9 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
   const call = callData?.call;
   const presetId = clientId ?? call?.clientId;
   const preset = useQuery(api.clients.get, presetId ? { id: presetId as Id<"clients"> } : "skip");
-  const aiOn = useQuery(api.ai.status)?.enabled ?? false;
+  const aiStatus = useQuery(api.ai.status);
+  const aiOn = aiStatus?.enabled ?? false;
+  const sttOn = aiStatus?.canTranscribe ?? false;
 
   const [client, setClient] = useState<Client | undefined>();
   const [name, setName] = useState("");
@@ -320,7 +322,7 @@ function NewLeadForm({ mode, clientId, callId: callFromProps, phone: phoneFromPr
           Вставить переписку
         </button>
         {/* У звонка от АТС запись придёт сама — второй звонок из формы не создаём. */}
-        {!callId && (
+        {!callId && sttOn && (
           <>
             <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.amr" className="hidden" onChange={(e) => (e.target.files?.[0] && void uploadRecording(e.target.files[0]), (e.target.value = ""))} />
             <button type="button" className={AI_CHIP} disabled={aiBusy} onClick={() => fileRef.current?.click()}>
