@@ -1,0 +1,9 @@
+// AI-сервис СервисПро: расшифровка звонков и разбор заявок на Workers AI.
+// Отдельный сервис (ТЗ п.20): CRM ходит сюда по HTTP, провайдера можно сменить, не трогая CRM.
+{
+  "name": "servicepro-ai",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-26",
+  "ai": { "binding": "AI" },
+  "observability": { "enabled": true }
+}

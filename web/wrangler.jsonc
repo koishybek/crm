@@ -1,0 +1,9 @@
+// Демо для заказчика: статика из dist/, любые пути отдают index.html (SPA).
+{
+  "name": "servicepro-demo",
+  "compatibility_date": "2026-09-26",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+/* Токены сняты с макетов ServicePro Design System Lite (design-system/tokens.css). */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+
+  /* Бренд: жёлтый — заливки (кнопки, активные элементы), янтарный — текст и ссылки на светлом. */
+  --color-brand: #ffc629;
+  --color-brand-hover: #f5b800;
+  --color-brand-soft: #fff4d4;
+  --color-brand-line: #f1d88c;
+  --color-brand-ink: #b07200;
+  --color-brand-deep: #855600;
+  --color-on-brand: #1a1a1a;
+  --color-blue: #086bfa;
+  --color-blue-soft: #e8f2ff;
+
+  --color-page: #f7f6f2;
+  --color-side: #1c1c1e;
+  --color-side-2: #2a2a2d;
+  --color-field: #f4f3ef;
+  --color-thead: #f6f5f1;
+  --color-hover: #f5f3ed;
+  --color-ink: #141414;
+  --color-ink-2: #2b2b2b;
+  --color-muted: #77736b;
+  --color-faint: #a6a196;
+  --color-line: #ece9e2;
+  --color-line-strong: #e0dbd0;
+
+  --color-ok: #09b76b;
+  --color-ok-bg: #e3f9ed;
+  --color-ok-ink: #089a59;
+  --color-warn: #e99112;
+  --color-warn-bg: #fff2db;
+  --color-warn-ink: #c77f00;
+  --color-bad: #f43f58;
+  --color-bad-bg: #ffe9ee;
+  --color-bad-ink: #e52a49;
+  --color-violet: #7251ef;
+  --color-violet-bg: #f0ebff;
+  --color-sky: #2f8cf5;
+  --color-sky-bg: #eaf4ff;
+  --color-orange: #e8730c;
+  --color-orange-bg: #fff0e2;
+  --color-slate-bg: #f1efea;
+
+  --shadow-card: 0 4px 22px rgba(60, 45, 10, 0.05);
+  --shadow-pop: 0 18px 50px rgba(20, 20, 20, 0.16);
+  --radius-card: 16px;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-ink);
+    outline-offset: 2px;
+  }
+  input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+  }
+}
+
+@layer components {
+  .card {
+    background: #fff;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .field {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 10px;
+    background: #fff;
+    padding: 0 13px;
+    font-size: 14px;
+    color: var(--color-ink);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+  .field:focus {
+    outline: none;
+    border-color: #e9b400;
+    box-shadow: 0 0 0 3px rgb(255 198 41 / 0.28);
+  }
+  textarea.field {
+    padding: 11px 13px;
+    line-height: 1.45;
+    resize: vertical;
+  }
+  .tbl {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+  }
+  .tbl th {
+    text-align: left;
+    background: var(--color-thead);
+    color: #6f6b63;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 11px 14px;
+    white-space: nowrap;
+  }
+  .tbl th:first-child {
+    border-radius: 10px 0 0 10px;
+  }
+  .tbl th:last-child {
+    border-radius: 0 10px 10px 0;
+  }
+  .tbl td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--color-line);
+    vertical-align: middle;
+  }
+  .tbl tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .tbl tbody tr.row-link {
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .tbl tbody tr.row-link:hover td {
+    background: #fbfaf6;
+  }
+  .scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: #ddd8cc;
+    border-radius: 8px;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    transform: translateY(6px) scale(0.98);
+    opacity: 0;
+  }
+}
+@keyframes toast-in {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+.anim-drawer {
+  animation: drawer-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.anim-fade {
+  animation: fade-in 0.18s ease-out;
+}
+.anim-pop {
+  animation: pop-in 0.16s ease-out;
+}
+.anim-toast {
+  animation: toast-in 0.2s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-drawer,
+  .anim-fade,
+  .anim-pop,
+  .anim-toast {
+    animation: none;
+  }
+}
