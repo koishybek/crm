@@ -5,9 +5,9 @@ import {
   LEAD_STATUS,
   ORDER_STATUS,
   WORK_STATUSES,
-  serviceById,
   type Tone,
 } from "./catalog";
+import { textKey } from "./skills";
 import type { Client, DB, Executor, Lead, Order, User } from "./types";
 
 export const payout = (o: Pick<Order, "payoutMode" | "payoutValue" | "clientPrice">) =>
@@ -96,23 +96,82 @@ export const executorStats = (e: Executor, orders: Order[], now = Date.now()) =>
   };
 };
 
-/** Лента исполнителя: только его специализации и город (ТЗ п.11). */
-export const feedFor = (e: Executor, orders: Order[]) =>
-  orders.filter((o) => o.status === "awaiting_executor" && !o.executorId && o.city === e.city && e.categories.includes(serviceById(o.serviceId).category));
+// ── Подбор исполнителя (ТЗ п.11, п.12) ──────────────────────────────────────
 
-/** Кандидаты для ручного назначения: сначала подходящие и свободные, потом по загрузке и рейтингу. */
-export const rankExecutors = (o: Pick<Order, "serviceId" | "city">, executors: Executor[], orders: Load[]) => {
-  const cat = serviceById(o.serviceId).category;
+/** Что нужно знать о мастере для подбора: и документ базы, и DTO подходят. */
+export type FitExecutor = Pick<Executor, "available" | "city" | "categories" | "skills">;
+/** Что нужно знать о заказе для подбора. */
+export type FitOrder = Pick<Order, "category" | "city"> & { requiredSkills?: readonly string[] };
+
+export interface Fit {
+  fits: boolean;
+  /** Почему не подходит — подсказка при ручном назначении: «выходной», «другой город», «нет навыка: …». */
+  reasons: string[];
+  /** Сколько требуемых навыков у мастера есть. */
+  matched: number;
+  /** Каких требуемых навыков нет. */
+  missing: string[];
+}
+
+/**
+ * Единственное правило «заказ подходит мастеру»: лента, уведомление «Новый заказ», «Взять заказ»
+ * и подбор при ручном назначении считают одинаково. Мастер на смене, город тот же,
+ * направление заказа — его, и все требуемые навыки у него есть (сравнение без учёта регистра и пробелов).
+ */
+export function fitsOrder(e: FitExecutor, o: FitOrder): Fit {
+  const reasons: string[] = [];
+  if (!e.available) reasons.push("выходной");
+  if (textKey(e.city) !== textKey(o.city)) reasons.push("другой город");
+  if (!e.categories.includes(o.category)) reasons.push("другая специализация");
+  const own = new Set(e.skills.map(textKey));
+  const required = o.requiredSkills ?? [];
+  const missing = required.filter((s) => !own.has(textKey(s)));
+  if (missing.length) reasons.push(`${missing.length === 1 ? "нет навыка" : "нет навыков"}: ${missing.join(", ")}`);
+  return { fits: reasons.length === 0, reasons, matched: required.length - missing.length, missing };
+}
+
+/** Заказ лежит в ленте и его ещё никто не взял. */
+export const isOpenForFeed = (o: Pick<Order, "status" | "executorId">) => o.status === "awaiting_executor" && !o.executorId;
+
+/** Лента исполнителя: свободные заказы, которые ему подходят (ТЗ п.11). */
+export const feedFor = <O extends FitOrder & Pick<Order, "status" | "executorId">>(e: FitExecutor, orders: O[]): O[] =>
+  orders.filter((o) => isOpenForFeed(o) && fitsOrder(e, o).fits);
+
+const STATE_RANK: Record<ExecState, number> = { free: 0, busy: 1, onsite: 2, off: 3 };
+
+export interface Candidate {
+  e: Executor;
+  state: ExecState;
+  /** Заказов в работе сейчас. */
+  load: number;
+  fits: boolean;
+  reasons: string[];
+  matched: number;
+}
+
+/**
+ * Кандидаты для ручного назначения (ТЗ п.12): сначала подходящие, затем у кого больше требуемых навыков,
+ * свободные раньше занятых, меньше загрузка, выше рейтинг. Неподходящие остаются в списке с причинами —
+ * среди них выше те, кому не хватает меньшего.
+ */
+export function rankExecutors(o: FitOrder, executors: Executor[], orders: Load[]): Candidate[] {
   return executors
-    .map((e) => {
-      const state = executorState(e, orders);
+    .map((e): Candidate => {
+      const fit = fitsOrder(e, o);
       const load = orders.filter((x) => x.executorId === e.id && isInWork(x)).length;
-      const fits = e.categories.includes(cat) && e.city === o.city;
-      const score = (fits ? 100 : 0) + (state === "off" ? -60 : 0) + (state === "free" ? 20 : 0) - load * 6 + e.rating * 4;
-      return { e, state, load, fits, score };
+      return { e, state: executorState(e, orders), load, fits: fit.fits, reasons: fit.reasons, matched: fit.matched };
     })
-    .sort((a, b) => b.score - a.score);
-};
+    .sort(
+      (a, b) =>
+        Number(b.fits) - Number(a.fits) ||
+        a.reasons.length - b.reasons.length ||
+        b.matched - a.matched ||
+        STATE_RANK[a.state] - STATE_RANK[b.state] ||
+        a.load - b.load ||
+        b.e.rating - a.e.rating ||
+        a.e.name.localeCompare(b.e.name, "ru"),
+    );
+}
 
 export type ClientState = { label: string; tone: Tone };
 /** Статус клиента по счётчикам, которые сервер держит на карточке клиента. */

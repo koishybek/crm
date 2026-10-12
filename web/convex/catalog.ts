@@ -4,9 +4,16 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { currentUser, OWNER, requireRole } from "./lib/access";
+import { audit } from "./lib/audit";
 import { CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type Tone } from "../src/data/catalog";
+import { normalizeSkills, skillsDiff, skillsDiffNote, SKILLS_PER_CATEGORY } from "../src/data/skills";
 
-const toCategory = (c: Doc<"categories">): Category => ({ id: c.key, label: c.label, tone: c.tone as Tone, active: c.active });
+/**
+ * Навыки направления. Строки, сохранённые до появления навыков (поля нет), получают навыки по умолчанию;
+ * пустой список — осознанный выбор владельца, его не трогаем.
+ */
+const skillsOf = (c: Doc<"categories">): string[] => c.skills ?? DEFAULT_CATEGORIES.find((d) => d.id === c.key)?.skills ?? [];
+const toCategory = (c: Doc<"categories">): Category => ({ id: c.key, label: c.label, tone: c.tone as Tone, active: c.active, skills: skillsOf(c) });
 const toService = (s: Doc<"services">): Service => ({
   id: s.key,
   category: s.category,
@@ -65,7 +72,7 @@ export const _categories = internalQuery({
 /** Перенести значения по умолчанию в базу перед первой правкой. */
 async function materialize(ctx: MutationCtx) {
   if ((await ctx.db.query("categories").first()) || (await ctx.db.query("services").first())) return;
-  for (const [i, c] of DEFAULT_CATEGORIES.entries()) await ctx.db.insert("categories", { key: c.id, label: c.label, tone: c.tone, order: i, active: true });
+  for (const [i, c] of DEFAULT_CATEGORIES.entries()) await ctx.db.insert("categories", { key: c.id, label: c.label, tone: c.tone, order: i, active: true, skills: c.skills ?? [] });
   for (const [i, s] of DEFAULT_SERVICES.entries()) {
     await ctx.db.insert("services", { key: s.id, category: s.category, label: s.label, icon: s.icon, priceMin: s.price[0], priceMax: s.price[1], payoutPct: s.payoutPct, examples: s.examples, order: i, active: true });
   }
@@ -73,20 +80,37 @@ async function materialize(ctx: MutationCtx) {
 
 const key = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
+/** skills не передан — навыки направления не меняются (старые вызовы без навыков). */
 export const saveCategory = mutation({
-  args: { id: v.optional(v.string()), label: v.string(), tone: v.string(), active: v.boolean() },
+  args: { id: v.optional(v.string()), label: v.string(), tone: v.string(), active: v.boolean(), skills: v.optional(v.array(v.string())) },
   handler: async (ctx, a) => {
-    await requireRole(ctx, OWNER);
-    if (!a.label.trim()) throw new ConvexError("Укажите название направления");
+    const me = await requireRole(ctx, OWNER);
+    const label = a.label.trim();
+    if (!label) throw new ConvexError("Укажите название направления");
+    if (label.length > 60) throw new ConvexError("Название направления — не длиннее 60 символов");
+    let skills: string[] | undefined;
+    if (a.skills) {
+      const r = normalizeSkills(a.skills, SKILLS_PER_CATEGORY);
+      if (!r.ok) throw new ConvexError(r.error);
+      skills = r.skills;
+    }
     await materialize(ctx);
     const existing = a.id ? await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", a.id!)).unique() : null;
     if (existing) {
-      await ctx.db.patch(existing._id, { label: a.label.trim(), tone: a.tone, active: a.active });
+      const before = skillsOf(existing);
+      // Поле skills кладём только когда его прислали: patch с undefined стёр бы навыки.
+      await ctx.db.patch(existing._id, { label, tone: a.tone, active: a.active, ...(skills ? { skills } : {}) });
+      const diff = skillsDiff(before, skills ?? before);
+      await audit(ctx, me, "catalog.category", `Направление «${label}» изменено${a.active ? "" : " (скрыто)"}${skillsDiffNote(diff)}`, {
+        entityId: existing.key,
+        meta: { active: a.active, ...diff },
+      });
       return existing.key;
     }
     const k = key("c");
     const count = (await ctx.db.query("categories").collect()).length;
-    await ctx.db.insert("categories", { key: k, label: a.label.trim(), tone: a.tone, order: count, active: a.active });
+    await ctx.db.insert("categories", { key: k, label, tone: a.tone, order: count, active: a.active, skills: skills ?? [] });
+    await audit(ctx, me, "catalog.category", `Добавлено направление «${label}»${skills?.length ? `, навыков: ${skills.length}` : ""}`, { entityId: k, meta: { skills: skills ?? [] } });
     return k;
   },
 });

@@ -30,16 +30,16 @@ export interface Category {
 
 /** Справочник по умолчанию — им заполняется пустая база. Рабочий справочник владелец правит в «Настройках». */
 export const DEFAULT_CATEGORIES: Category[] = [
-  { id: "ac", label: "Кондиционеры", tone: "blue" },
-  { id: "appliances", label: "Бытовая техника", tone: "green" },
-  { id: "plumbing", label: "Сантехника", tone: "sky" },
-  { id: "electric", label: "Электрика", tone: "amber" },
-  { id: "heating", label: "Отопление и котлы", tone: "orange" },
-  { id: "furniture", label: "Сборка мебели", tone: "orange" },
-  { id: "cleaning", label: "Уборка", tone: "violet" },
-  { id: "it", label: "Компьютеры и IT", tone: "blue" },
-  { id: "intercom", label: "Домофоны и видеонаблюдение", tone: "gray" },
-  { id: "other", label: "Другое", tone: "gray" },
+  { id: "ac", label: "Кондиционеры", tone: "blue", skills: ["Монтаж сплит-систем", "Ремонт кондиционеров", "Чистка кондиционеров", "Заправка фреоном", "Мульти-сплит системы", "Промышленный климат"] },
+  { id: "appliances", label: "Бытовая техника", tone: "green", skills: ["Стиральные машины", "Холодильники", "Посудомоечные машины", "Духовые шкафы и плиты", "Встраиваемая техника", "Диагностика"] },
+  { id: "plumbing", label: "Сантехника", tone: "sky", skills: ["Разводка труб", "Устранение протечек", "Смесители и краны", "Унитазы и раковины", "Прочистка засоров", "Счётчики воды"] },
+  { id: "electric", label: "Электрика", tone: "amber", skills: ["Электромонтаж", "Щиты и автоматы", "Розетки и выключатели", "Освещение и люстры", "Поиск неисправностей", "Заземление и УЗО"] },
+  { id: "heating", label: "Отопление и котлы", tone: "orange", skills: ["Газовые котлы", "Электрокотлы", "Бойлеры", "Тёплый пол", "Радиаторы отопления"] },
+  { id: "furniture", label: "Сборка мебели", tone: "orange", skills: ["Корпусная мебель", "Кухни", "ИКЕА", "Шкафы-купе", "Навеска полок и карнизов"] },
+  { id: "cleaning", label: "Уборка", tone: "violet", skills: ["Генеральная уборка", "После ремонта", "Мытьё окон", "Химчистка мебели", "Химчистка ковров", "Уборка офисов"] },
+  { id: "it", label: "Компьютеры и IT", tone: "blue", skills: ["Ремонт ПК и ноутбуков", "Сети и Wi‑Fi", "Windows и программы", "Принтеры и оргтехника", "Серверы", "Разработка сайтов"] },
+  { id: "intercom", label: "Домофоны и видеонаблюдение", tone: "gray", skills: ["Домофоны", "Видеонаблюдение", "Слаботочные сети", "Шлагбаумы и ворота", "СКУД и замки"] },
+  { id: "other", label: "Другое", tone: "gray", skills: ["Мастер на час", "Мелкий ремонт", "Монтаж ТВ на стену", "Двери и замки"] },
 ];
 export let CATEGORIES: Category[] = DEFAULT_CATEGORIES;
 export const categoryById = (id: CategoryId): Category => CATEGORIES.find((c) => c.id === id) ?? DEFAULT_CATEGORIES.find((c) => c.id === id) ?? { id, label: id, tone: "gray" };

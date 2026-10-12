@@ -278,6 +278,7 @@ export const handleUpdate = internalAction({
           return void (await sendHtml(chatId, snap ?? HELP_STAFF, app ? inline([[{ text: "Открыть кабинет", url: app }]]) : undefined));
         }
         const r = await ctx.runQuery(internal.worker._forChat, { chatId, what: text === "/feed" ? "feed" : "orders" });
+        if (text === "/feed" && r.available === false) return void (await sendHtml(chatId, "Вы на выходном — новые заказы не приходят. Включите приём заказов в кабинете, и лента откроется."));
         if (!r.cards.length) return void (await sendHtml(chatId, text === "/feed" ? "Свободных заказов по вашей специализации сейчас нет. Пришлю, как только появятся 👌" : "Активных заказов нет. Свободные — /feed"));
         await sendHtml(chatId, text === "/feed" ? `<b>Свободные заказы: ${r.cards.length}</b>` : `<b>Ваши заказы: ${r.cards.length}</b>`);
         await sendCards(chatId, r.cards, (c) => (text === "/feed" ? `🆕 Заказ №${c.number}` : `Заказ №${c.number}`));

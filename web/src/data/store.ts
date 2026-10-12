@@ -79,7 +79,7 @@ export const setLeadStatus = (id: string, status: Exclude<LeadStatus, "converted
 export const convertLead = (id: string) => run(convex.mutation(api.leads.convert, { id: lid(id) }));
 
 // ── Заказы ───────────────────────────────────────────────────────────────────
-export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority">) =>
+export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority"> & { requiredSkills?: string[] }) =>
   run(convex.mutation(api.orders.updateInfo, { id: oid(id), ...a }));
 export const updateFinance = (id: string, f: { clientPrice: number; payoutMode: Order["payoutMode"]; payoutValue: number; payoutPaid: boolean }) =>
   run(convex.mutation(api.orders.updateFinance, { id: oid(id), ...f }));

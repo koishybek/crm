@@ -25,6 +25,7 @@ import {
   BadgeCheck,
   CircleDollarSign,
   CircleCheck,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { useQuery } from "convex/react";
@@ -39,6 +40,8 @@ import { addPayment, assignExecutor, changeStatus, toast, updateFinance, updateO
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, PaymentMethod, Urgency, User } from "../data/types";
 import { OrderChat } from "../components/OrderChat";
 import { Source, ServiceGlyph } from "../components/icons";
+import { SkillChips, SkillPicker } from "../components/SkillChips";
+import { hasSkill } from "../data/skills";
 import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, FormRow, IconTile, Input, Loading, Menu, MenuItem, Modal, Segmented, Select, Textarea, Toggle } from "../components/ui";
 import { CitySelect, ServiceSelect } from "./drawers";
 import { cn, dateTime, digits, money, num, phone, shortName, toLocalInput } from "../lib/format";
@@ -99,7 +102,10 @@ export default function OrderDetail() {
       if (to === "awaiting_executor") setModal("finance");
       return;
     }
-    toast(to === "awaiting_executor" ? `Заказ №${o.number} в ленте — подходящие исполнители получили уведомление` : `Статус: ${ORDER_STATUS[to].label}`);
+    const notified = r.value?.notified;
+    if (to !== "awaiting_executor") return toast(`Статус: ${ORDER_STATUS[to].label}`);
+    if (notified) return toast(`Заказ №${o.number} в ленте — уведомили подходящих исполнителей: ${notified}`);
+    toast(`Заказ №${o.number} в ленте, но подходящих исполнителей сейчас нет — назначьте вручную или ослабьте требования`, "info");
   };
 
   return (
@@ -171,6 +177,9 @@ export default function OrderDetail() {
             <dl className="divide-y divide-line">
               <InfoRow icon={<ServiceGlyph serviceId={o.serviceId} />} label="Услуга">
                 {serviceById(o.serviceId).label}
+              </InfoRow>
+              <InfoRow icon={<Wrench size={20} className="text-muted" />} label="Нужные навыки">
+                <SkillChips skills={o.requiredSkills} variant="outline" className="pt-0.5" empty={<span className="font-normal text-muted">не требуются — хватит специализации и города</span>} />
               </InfoRow>
               <InfoRow icon={<AlignLeft size={20} className="text-muted" />} label="Описание">
                 <span className="font-normal text-ink-2">{o.description}</span>
@@ -346,7 +355,8 @@ function FinanceTiles({ o }: { o: Order }) {
 /** Подсказка «что делать дальше» — главный способ сделать CRM простой. */
 function NextStep({ o, onFinance, onAssign, onPay, go }: { o: Order; onFinance: () => void; onAssign: () => void; onPay: () => void; go: (s: OrderStatus) => void | Promise<void> }) {
   const db = useDetail();
-  const fits = useMemo(() => rankExecutors(o, db.executors, db.orders).filter((x) => x.fits && x.state !== "off").length, [o, db.executors, db.orders]);
+  // Тот же подбор, что у ленты и уведомлений: на смене, город, специализация, навыки.
+  const fits = useMemo(() => rankExecutors(o, db.executors, db.orders).filter((x) => x.fits).length, [o, db.executors, db.orders]);
   let icon: LucideIcon = Rocket;
   let tone: "yellow" | "amber" | "green" | "violet" = "yellow";
   let text: ReactNode = null;
@@ -356,7 +366,11 @@ function NextStep({ o, onFinance, onAssign, onPay, go }: { o: Order; onFinance: 
     text = <><b>Шаг 1 из 2.</b> Укажите цену для клиента и выплату исполнителю.</>;
     action = <Button size="sm" onClick={onFinance}>Указать цену</Button>;
   } else if (o.status === "new") {
-    text = <><b>Шаг 2 из 2.</b> Опубликуйте заказ в ленту — его увидят {fits} подходящих исполнителей. Или назначьте вручную.</>;
+    text = fits ? (
+      <><b>Шаг 2 из 2.</b> Опубликуйте заказ в ленту — его увидят подходящие исполнители: {fits}. Или назначьте вручную.</>
+    ) : (
+      <><b>Шаг 2 из 2.</b> Сейчас заказ никому не подходит — проверьте нужные навыки и город или назначьте исполнителя вручную.</>
+    );
     action = (
       <div className="flex gap-2">
         <Button size="sm" variant="secondary" onClick={onAssign}>Назначить</Button>
@@ -366,7 +380,11 @@ function NextStep({ o, onFinance, onAssign, onPay, go }: { o: Order; onFinance: 
   } else if (o.status === "awaiting_executor") {
     tone = "violet";
     icon = Search;
-    text = <>Заказ в ленте. Ждём, когда исполнитель возьмёт его (подходят: {fits}). Можно не ждать и назначить вручную.</>;
+    text = fits ? (
+      <>Заказ в ленте. Ждём, когда исполнитель возьмёт его (подходят: {fits}). Можно не ждать и назначить вручную.</>
+    ) : (
+      <>Заказ в ленте, но сейчас он никому не подходит — проверьте нужные навыки и город или назначьте исполнителя вручную.</>
+    );
     action = <Button size="sm" variant="secondary" onClick={onAssign}>Назначить вручную</Button>;
   } else if (o.status === "assigned") {
     tone = "amber";
@@ -449,21 +467,30 @@ function HistoryList({ limit = 8 }: { limit?: number }) {
 
 function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const db = useDetail();
+  const me = useMe();
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
   const [showAll, setShowAll] = useState(false);
   const ranked = rankExecutors(o, db.executors, db.orders);
   const list = ranked.filter((x) => (showAll || x.fits) && (!q || x.e.name.toLowerCase().includes(q.toLowerCase())));
   const noPrice = o.clientPrice <= 0 || payout(o) <= 0;
+  // Мастера на выходном назначает только владелец — так же проверяет сервер.
+  const canOverrideOff = me?.role === "owner";
   return (
     <Modal open onClose={onClose} title="Назначить исполнителя" width={640}>
       <p className="-mt-1 mb-3 text-[14px] text-muted">
-        {serviceById(o.serviceId).label} · {o.city}. Сверху — подходящие по специализации и городу, свободные и с высоким рейтингом.
+        {serviceById(o.serviceId).label} · {o.city}. Сверху — подходящие по специализации, навыкам и городу: свободные, с меньшей загрузкой и высоким рейтингом.
       </p>
+      {!!o.requiredSkills?.length && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-[13.5px] text-ink-2">
+          <span className="font-medium">Нужны навыки:</span>
+          <SkillChips skills={o.requiredSkills} variant="outline" />
+        </div>
+      )}
       {noPrice && <div className="mb-3 rounded-[10px] bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-ink">Сначала укажите цену клиента и выплату — исполнитель должен видеть, сколько получит.</div>}
       <Input icon={Search} placeholder="Поиск по имени" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="mt-3 flex flex-col gap-2">
-        {list.map(({ e, state, load, fits }) => (
+        {list.map(({ e, state, load, fits, reasons }) => (
           <div key={e.id} className={cn("flex items-center gap-3 rounded-[12px] border p-3", o.executorId === e.id ? "border-brand bg-brand-soft/40" : "border-line")}>
             <Avatar name={e.name} size={44} variant="person" />
             <div className="min-w-0 flex-1">
@@ -472,16 +499,25 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
                 <Badge tone={EXEC_STATE[state].tone} size="sm">
                   {EXEC_STATE[state].label}
                 </Badge>
-                {!fits && <Badge tone="gray" size="sm">не профиль</Badge>}
               </div>
               <div className="mt-0.5 truncate text-[13px] text-muted">
                 {e.city} · {e.categories.map((c) => categoryById(c).label).join(", ")} · в работе: {load} · <Star size={12} className="inline -translate-y-px fill-[#ffb547] text-[#ffb547]" /> {e.rating}
               </div>
+              {!fits && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Почему не подходит">
+                  {reasons.map((r) => (
+                    <span key={r} className="rounded-[7px] bg-warn-bg px-2 py-[2px] text-[12px] font-semibold text-warn-ink">
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <Button
               size="sm"
               variant={o.executorId === e.id ? "soft" : "primary"}
-              disabled={busy || state === "off" || noPrice || o.executorId === e.id}
+              title={state === "off" && !canOverrideOff ? "Исполнитель на выходном — назначить его может только владелец" : undefined}
+              disabled={busy || (state === "off" && !canOverrideOff) || noPrice || o.executorId === e.id}
               onClick={async () => {
                 setBusy(true);
                 const r = await assignExecutor(o.id, e.id);
@@ -495,7 +531,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
             </Button>
           </div>
         ))}
-        {list.length === 0 && <div className="py-6 text-center text-[14px] text-muted">Подходящих исполнителей нет.</div>}
+        {list.length === 0 && <div className="py-6 text-center text-[14px] text-muted">{showAll ? "Никого не нашли." : "Подходящих исполнителей нет — покажите всех, чтобы назначить вручную."}</div>}
       </div>
       {!showAll && (
         <button onClick={() => setShowAll(true)} className="mt-3 text-[14px] font-medium text-brand-ink">
@@ -513,6 +549,13 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const [address, setAddress] = useState(o.address);
   const [dl, setDl] = useState(toLocalInput(o.deadline));
   const [priority, setPriority] = useState<Urgency>(o.priority);
+  const [skills, setSkills] = useState<string[]>(o.requiredSkills ?? []);
+  const category = categoryById(serviceById(serviceId).category);
+  const options = category.skills ?? [];
+  // Как на сервере: навыки — из справочника направления; уже стоявшие на заказе остаются,
+  // пока направление то же; при смене услуги на другое направление навыки старого не переносятся.
+  const kept = category.id === o.category ? (o.requiredSkills ?? []) : [];
+  const required = skills.filter((s) => hasSkill(options, s) || hasSkill(kept, s));
   return (
     <Modal
       open
@@ -525,9 +568,10 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
           </Button>
           <Button
             onClick={async () => {
-              const r = await updateOrderInfo(o.id, { serviceId, description, city, address, deadline: new Date(dl).toISOString(), priority });
+              if (Number.isNaN(Date.parse(dl))) return toast("Укажите дедлайн", "bad");
+              const r = await updateOrderInfo(o.id, { serviceId, description, city, address, deadline: new Date(dl).toISOString(), priority, requiredSkills: required });
               if (!r.ok) return toast(r.error, "bad");
-              toast("Заказ обновлён");
+              toast(r.value.notified ? `Заказ обновлён — он стал подходить ещё исполнителям: ${r.value.notified}, они получили уведомление` : "Заказ обновлён");
               onClose();
             }}
           >
@@ -538,6 +582,15 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
     >
       <div className="flex flex-col gap-4">
         <FormRow label="Услуга">{(id) => <ServiceSelect id={id} value={serviceId} onChange={setServiceId} />}</FormRow>
+        <div>
+          <div className="mb-1 text-[14px] font-semibold text-ink">Нужные навыки</div>
+          <p className="mb-2 text-[12.5px] text-muted">
+            {options.length || kept.length
+              ? "Заказ увидят и получат уведомление только исполнители с этими навыками. Ничего не выбрано — хватит специализации и города."
+              : `Для направления «${category.label}» навыки в справочнике не заданы — их добавляет владелец в «Настройках».`}
+          </p>
+          <SkillPicker label="Нужные навыки" options={options} value={required} onChange={setSkills} />
+        </div>
         <FormRow label="Описание и ТЗ">{(id) => <Textarea id={id} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />}</FormRow>
         <div className="grid grid-cols-2 gap-3">
           <FormRow label="Город">{(id) => <CitySelect id={id} value={city} onChange={setCity} />}</FormRow>

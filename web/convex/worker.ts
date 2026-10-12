@@ -2,13 +2,15 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { EXECUTOR, requireRole } from "./lib/access";
+import { audit } from "./lib/audit";
 import { log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
 import { toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
-import type { CardData } from "./lib/tg";
+import { openOrdersFor, suitableUsers } from "./lib/matching";
+import { cardHtml, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
-import { payout } from "../src/data/logic";
+import { fitsOrder, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
-import { shortName } from "../src/lib/format";
+import { money, shortName } from "../src/lib/format";
 
 async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
   const me = await requireRole(ctx, EXECUTOR);
@@ -17,22 +19,20 @@ async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
   return { me, ex };
 }
 
-/** Лента: только заказы по моим специализациям в моём городе (ТЗ п.11). */
+/**
+ * Лента: свободные заказы, которые мне подходят (ТЗ п.11) — специализация, навыки, город и «на смене».
+ * На выходном лента пуста: те же правила, что у уведомлений и «Взять заказ».
+ */
 export const feed = query({
   args: {},
   handler: async (ctx) => {
     const { ex } = await myExecutor(ctx);
     return {
       executor: toExecutor(ex),
-      feed: await Promise.all((await feedOf(ctx, ex)).map((o) => toWorkerOrder(ctx, o, { contacts: false, files: false }))),
+      feed: await Promise.all((await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(ctx, o, { contacts: false, files: false }))),
     };
   },
 });
-
-async function feedOf(ctx: QueryCtx, ex: Doc<"executors">) {
-  const waiting = await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "awaiting_executor")).collect();
-  return waiting.filter((o) => !o.executorId && o.city === ex.city && ex.categories.includes(o.category));
-}
 
 /** Мои заказы (активные и история) — для «Мои заказы» и «Дохода». */
 export const mine = query({
@@ -80,8 +80,25 @@ export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean)
 }
 
 /**
+ * «Новый заказ» мастерам (ТЗ п.18): колокольчик + карточка с кнопкой «Взять заказ» в Telegram.
+ * Получателей считает вызывающий (suitableUsers) — так он может исключить тех, кому слать не нужно.
+ * again — заказ вернулся в ленту (мастер отказался), а не появился впервые.
+ */
+export async function announceOrder(ctx: MutationCtx, o: Doc<"orders">, users: Id<"users">[], opts: { again?: boolean } = {}): Promise<void> {
+  if (!users.length) return;
+  const service = (await loadCatalog(ctx)).label(o.serviceId);
+  const title = opts.again ? `Снова свободен заказ №${o.number}` : `Новый заказ №${o.number}`;
+  await notify(ctx, users, `${title}: ${service}, ${o.city}. Оплата исполнителю ${money(payout(o))}`, {
+    link: "/w",
+    html: cardHtml(await cardOf(ctx, o, false), `${opts.again ? "🔁" : "🆕"} ${title}`),
+    buttons: workerButtons("awaiting_executor", o._id),
+  });
+}
+
+/**
  * «Взять заказ». Мутации Convex — сериализуемые транзакции: если двое нажали одновременно,
  * вторая транзакция перечитает заказ, увидит executorId и получит отказ.
+ * Подходит ли заказ — проверяем здесь заново: прямой вызов мимо ленты не должен пройти.
  */
 export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id<"orders">): Promise<Doc<"orders">> {
   const me = await ctx.db.get(userId);
@@ -90,11 +107,14 @@ export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id
   if (!ex) throw new ConvexError("Профиль исполнителя не найден");
   const o = await ctx.db.get(orderId);
   if (!o) throw new ConvexError("Заказ не найден");
-  if (o.status !== "awaiting_executor" || o.executorId) throw new ConvexError("Этот заказ уже взял другой исполнитель");
-  if (!ex.available) throw new ConvexError("Вы на выходном — включите «На смене», чтобы брать заказы");
-  if (o.city !== ex.city || !ex.categories.includes(o.category)) throw new ConvexError("Заказ не подходит под вашу специализацию");
+  if (o.executorId) throw new ConvexError(o.executorId === ex._id ? "Этот заказ уже ваш" : "Этот заказ уже взял другой исполнитель");
+  if (o.status !== "awaiting_executor") throw new ConvexError("Заказ уже снят с ленты");
+  if (!ex.available) throw new ConvexError("Сначала включите приём заказов в профиле");
+  const fit = fitsOrder(ex, o);
+  if (!fit.fits) throw new ConvexError(`Этот заказ вам не подходит (${fit.reasons.join("; ")})`);
   await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted" });
   await log(ctx, orderId, "taken", "Исполнитель взял заказ из ленты", userActor(me._id));
+  await audit(ctx, me, "order.taken", `${shortName(ex.name)} взял заказ №${o.number} из ленты`, { entityId: orderId, meta: { executorId: ex._id } });
   await notify(ctx, await staffIds(ctx, o.category), `${shortName(ex.name)} взял заказ №${o.number}`, { link: `/orders/${orderId}`, tone: "ok" });
   return (await ctx.db.get(orderId))!;
 }
@@ -130,9 +150,16 @@ export async function actFor(ctx: MutationCtx, userId: Id<"users">, id: Id<"orde
   if (!(step.from as readonly string[]).includes(o.status)) throw new ConvexError("Статус уже изменился — обновите заказ");
   const extra: Partial<Doc<"orders">> = action === "decline" ? { executorId: undefined, assignedAt: undefined } : {};
   await setStatus(ctx, o, step.to, userActor(me._id), step.text, extra);
+  await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${step.text.toLowerCase()} (${shortName(ex.name)})`, {
+    entityId: id,
+    meta: { from: o.status, to: step.to },
+  });
   const tone = action === "decline" ? "warn" : action === "done" ? "ok" : "info";
   await notify(ctx, await staffIds(ctx, o.category), `Заказ №${o.number}: ${step.text.toLowerCase()} (${shortName(ex.name)})`, { link: `/orders/${id}`, tone });
-  return (await ctx.db.get(id))!;
+  const fresh = (await ctx.db.get(id))!;
+  // Отказ вернул заказ в ленту — остальные подходящие мастера должны узнать, что он снова свободен.
+  if (action === "decline") await announceOrder(ctx, fresh, (await suitableUsers(ctx, fresh)).filter((u) => u !== me._id), { again: true });
+  return fresh;
 }
 
 export const act = mutation({
@@ -193,10 +220,13 @@ export const actFromTelegram = internalMutation({
   },
 });
 
-/** Для /orders и /feed в боте: кто пишет и что ему показать. */
+/**
+ * Для /orders и /feed в боте: кто пишет и что ему показать.
+ * available=false — мастер на выходном: лента пуста не потому, что заказов нет.
+ */
 export const _forChat = internalQuery({
   args: { chatId: v.string(), what: v.union(v.literal("orders"), v.literal("feed")) },
-  handler: async (ctx, { chatId, what }): Promise<{ role: string | null; name: string; cards: CardData[] }> => {
+  handler: async (ctx, { chatId, what }): Promise<{ role: string | null; name: string; cards: CardData[]; available?: boolean }> => {
     const u = await chatUser(ctx, chatId);
     if (!u) return { role: null, name: "", cards: [] };
     if (u.role !== "executor" || !u.executorId) return { role: u.role ?? null, name: u.name ?? "", cards: [] };
@@ -204,9 +234,14 @@ export const _forChat = internalQuery({
     if (!ex) return { role: u.role, name: u.name ?? "", cards: [] };
     const rows =
       what === "feed"
-        ? await feedOf(ctx, ex)
+        ? await openOrdersFor(ctx, ex)
         : (await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", ex._id)).collect()).filter((o) => ACTIVE_STATUSES.includes(o.status));
     rows.sort((a, b) => a.deadline.localeCompare(b.deadline));
-    return { role: u.role, name: u.name ?? "", cards: await Promise.all(rows.slice(0, 8).map((o) => cardOf(ctx, o, what === "orders" && o.status !== "assigned"))) };
+    return {
+      role: u.role,
+      name: u.name ?? "",
+      available: ex.available,
+      cards: await Promise.all(rows.slice(0, 8).map((o) => cardOf(ctx, o, what === "orders" && o.status !== "assigned"))),
+    };
   },
 });

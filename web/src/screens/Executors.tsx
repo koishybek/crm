@@ -9,8 +9,10 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { report, resetPassword, setExecutorAvailable, setUserActive, toast } from "../data/store";
 import { useMe } from "../data/hooks";
-import type { CategoryId } from "../data/types";
+import type { CategoryId, Executor } from "../data/types";
 import { ServiceGlyph } from "../components/icons";
+import { SkillChips, SkillLine } from "../components/SkillChips";
+import { textKey } from "../data/skills";
 import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, Input, KpiCard, Loading, Menu, MenuItem, Modal, PageHeader, Select, Toggle } from "../components/ui";
 import { OrdersTable } from "./ClientDetail";
 import { date, money, phone } from "../lib/format";
@@ -39,13 +41,15 @@ export default function Executors() {
   const [st, setSt] = useState<ExecState | "">("");
   const [q, setQ] = useState("");
 
-  const rows = useMemo(
-    () =>
-      db.executors
-        .map((e) => ({ e, state: executorState(e, db.orders), active: db.orders.filter((o) => o.executorId === e.id && isInWork(o)).length }))
-        .filter(({ e, state }) => (!cat || e.categories.includes(cat as CategoryId)) && (!city || e.city === city) && (!st || state === st) && (!q || e.name.toLowerCase().includes(q.toLowerCase()) || e.phone.includes(q.replace(/\D/g, "") || "§"))),
-    [db.executors, db.orders, cat, city, st, q],
-  );
+  const rows = useMemo(() => {
+    // Поиск по имени, телефону и навыку: «фреон» найдёт мастеров с «Заправка фреоном».
+    const needle = textKey(q);
+    const matches = (e: Executor) =>
+      !needle || textKey(e.name).includes(needle) || e.phone.includes(q.replace(/\D/g, "") || "§") || e.skills.some((s) => textKey(s).includes(needle));
+    return db.executors
+      .map((e) => ({ e, state: executorState(e, db.orders), active: db.orders.filter((o) => o.executorId === e.id && isInWork(o)).length }))
+      .filter(({ e, state }) => (!cat || e.categories.includes(cat as CategoryId)) && (!city || e.city === city) && (!st || state === st) && matches(e));
+  }, [db.executors, db.orders, cat, city, st, q]);
   const all = db.executors.map((e) => executorState(e, db.orders));
   const count = (s: ExecState) => all.filter((x) => x === s).length;
 
@@ -100,7 +104,7 @@ export default function Executors() {
           </Select>
         </div>
         <div className="flex items-end">
-          <Input icon={Search} placeholder="Поиск по имени или телефону..." value={q} onChange={(e) => setQ(e.target.value)} className="w-full [&_input]:bg-field [&_input]:border-transparent" />
+          <Input icon={Search} placeholder="Имя, телефон или навык" value={q} onChange={(e) => setQ(e.target.value)} className="w-full [&_input]:bg-field [&_input]:border-transparent" />
         </div>
       </div>
 
@@ -113,7 +117,7 @@ export default function Executors() {
               <thead>
                 <tr>
                   <th>Исполнитель</th>
-                  <th>Специализация</th>
+                  <th>Специализация и навыки</th>
                   <th>Город</th>
                   <th>Статус</th>
                   <th>Рейтинг</th>
@@ -133,8 +137,9 @@ export default function Executors() {
                         </span>
                       </span>
                     </td>
-                    <td className="max-w-[220px] text-ink-2">
+                    <td className="max-w-[260px] text-ink-2">
                       <CategoryLabel cats={e.categories} />
+                      <SkillLine skills={e.skills} label="Навыки" className="mt-1" />
                     </td>
                     <td className="text-ink-2">
                       <span className="inline-flex items-center gap-1.5">
@@ -243,11 +248,17 @@ export function ExecutorDetail() {
                 {categoryById(c).label}
               </Badge>
             ))}
-            {e.skills.map((sk) => (
-              <Badge key={sk} tone="gray" className="px-3 py-1.5 text-[13px]">
-                {sk}
-              </Badge>
-            ))}
+          </div>
+          <div className="mt-2.5">
+            <SkillChips
+              skills={e.skills}
+              markCustom
+              empty={
+                <button onClick={() => ui.openExecutor(e.id)} className="text-[13.5px] font-medium text-brand-ink hover:text-brand-deep">
+                  Навыки не отмечены — отметьте, чтобы мастер видел заказы, где они нужны
+                </button>
+              }
+            />
           </div>
         </div>
         <div className="flex flex-col items-start gap-3 sm:items-end">

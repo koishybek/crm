@@ -2,14 +2,17 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { assertScope, currentUser, inScope, requireRole, scopeOf, TEAM } from "./lib/access";
+import { audit } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor } from "./lib/domain";
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
-import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS } from "../src/data/catalog";
+import { suitableUsers } from "./lib/matching";
+import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
-import { cardOf } from "./worker";
+import { announceOrder, cardOf } from "./worker";
 import { cardHtml, workerButtons } from "./lib/tg";
 import { env } from "./env";
-import { payout } from "../src/data/logic";
+import { fitsOrder, isOpenForFeed, payout } from "../src/data/logic";
+import { catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money, shortName } from "../src/lib/format";
 import { attachment, orderStatus, paymentMethod, urgency } from "./schema";
 
@@ -77,16 +80,81 @@ async function staffOrder(ctx: QueryCtx, id: Id<"orders">) {
   return o;
 }
 
+/** Поля карточки, которые правит updateInfo, — для текста истории и журнала. */
+const INFO_FIELDS = { serviceId: "услуга", description: "описание", city: "город", address: "адрес", deadline: "срок", priority: "приоритет" } as const;
+type InfoField = keyof typeof INFO_FIELDS;
+
+/**
+ * Требуемые навыки заказа (ТЗ п.11): только из справочника направления заказа и в его написании.
+ * Навык, который уже стоял на заказе этого направления, остаётся, даже если владелец потом убрал его
+ * из справочника, — иначе любая правка заказа упиралась бы в старые данные. При смене направления
+ * переносятся только навыки, которые есть и в новом. input не передан (старые вызовы) — навыки не меняются.
+ */
+function resolveSkills(categories: readonly Category[], o: Doc<"orders">, category: string, input: readonly string[] | undefined): string[] {
+  const options = catalogSkills(categories, [category]);
+  const kept = o.category === category ? (o.requiredSkills ?? []) : [];
+  const pick = (s: string): string | undefined => options.find((x) => textKey(x) === textKey(s)) ?? kept.find((x) => textKey(x) === textKey(s));
+  if (input === undefined) return (o.requiredSkills ?? []).map(pick).filter((s): s is string => s !== undefined);
+  const r = normalizeSkills(input, SKILLS_PER_CATEGORY);
+  if (!r.ok) throw new ConvexError(r.error);
+  const label = categories.find((c) => c.id === category)?.label ?? category;
+  return r.skills.map((s) => {
+    const found = pick(s);
+    if (!found) throw new ConvexError(`Навыка «${s}» нет в справочнике направления «${label}»`);
+    return found;
+  });
+}
+
 export const updateInfo = mutation({
-  args: { id: v.id("orders"), serviceId: v.string(), description: v.string(), city: v.string(), address: v.string(), deadline: v.string(), priority: urgency },
-  handler: async (ctx, { id, ...a }) => {
+  args: {
+    id: v.id("orders"),
+    serviceId: v.string(),
+    description: v.string(),
+    city: v.string(),
+    address: v.string(),
+    deadline: v.string(),
+    priority: urgency,
+    /** Навыки, без которых заказ мастеру не показываем. Не передан — не меняются. */
+    requiredSkills: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, { id, requiredSkills, ...a }) => {
     const me = await requireRole(ctx, TEAM);
-    await staffOrder(ctx, id);
+    const o = await staffOrder(ctx, id);
     if (Number.isNaN(Date.parse(a.deadline))) throw new ConvexError("Неверная дата");
-    const svc = (await loadCatalog(ctx)).service(a.serviceId);
+    const catalog = await loadCatalog(ctx);
+    const svc = catalog.service(a.serviceId);
     assertScope(me, svc.category);
-    await ctx.db.patch(id, { ...a, category: svc.category, description: a.description.trim(), address: a.address.trim(), deadline: new Date(a.deadline).toISOString(), soonNotified: false, overdueNotified: false });
-    await log(ctx, id, "edited", "Изменены данные заказа", userActor(me._id));
+    const skills = resolveSkills(catalog.categories, o, svc.category, requiredSkills);
+    const diff = skillsDiff(o.requiredSkills ?? [], skills);
+    const skillsChanged = diff.added.length > 0 || diff.removed.length > 0;
+    // Кому заказ из ленты подходил до правки — чтобы после неё позвать только новых подходящих.
+    const before = isOpenForFeed(o) ? new Set(await suitableUsers(ctx, o)) : null;
+
+    const info = { ...a, description: a.description.trim(), address: a.address.trim(), deadline: new Date(a.deadline).toISOString() };
+    const changed = (Object.keys(INFO_FIELDS) as InfoField[]).filter((k) => info[k] !== o[k]);
+    // Напоминания о сроке взводим заново, только если срок сдвинули: правка навыков не должна их повторять.
+    const rearm = changed.includes("deadline") ? { soonNotified: false, overdueNotified: false } : {};
+    await ctx.db.patch(id, { ...info, category: svc.category, requiredSkills: skills.length ? skills : undefined, ...rearm });
+
+    const actor = userActor(me._id);
+    if (changed.length) {
+      const what = changed.map((k) => INFO_FIELDS[k]).join(", ");
+      await log(ctx, id, "edited", `Изменены данные заказа: ${what}`, actor);
+      await audit(ctx, me, "order.info", `Заказ №${o.number}: изменены ${what}`, { entityId: id, meta: { fields: changed } });
+    }
+    let notified = 0;
+    if (before) {
+      const fresh = (await ctx.db.get(id))!;
+      const added = (await suitableUsers(ctx, fresh)).filter((u) => !before.has(u));
+      await announceOrder(ctx, fresh, added);
+      notified = added.length;
+    }
+    if (skillsChanged) {
+      const text = skills.length ? `Нужны навыки: ${skills.join(", ")}` : "Требования к навыкам сняты";
+      await log(ctx, id, "edited", text, actor);
+      await audit(ctx, me, "order.skills", `Заказ №${o.number}: ${text.charAt(0).toLowerCase()}${text.slice(1)}`, { entityId: id, meta: { skills, ...diff, notified } });
+    }
+    return { notified };
   },
 });
 
@@ -123,21 +191,27 @@ export const addPayment = mutation({
   },
 });
 
+/** Публикация возвращает, скольким мастерам ушло уведомление: ноль — повод назначить вручную. */
 export const changeStatus = mutation({
   args: { id: v.id("orders"), to: orderStatus, reason: v.optional(v.string()) },
-  handler: async (ctx, { id, to, reason }) => {
+  handler: async (ctx, { id, to, reason }): Promise<{ notified: number } | null> => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
     if (!STAFF_TRANSITIONS[o.status].includes(to)) throw new ConvexError(`Из статуса «${ORDER_STATUS[o.status].label}» нельзя перейти в «${ORDER_STATUS[to].label}»`);
     const actor = userActor(me._id);
     const extra: Partial<Doc<"orders">> = {};
+    // Публикация: заказ видят и получают уведомление только подходящие мастера (ТЗ п.11, п.18).
+    let recipients: Id<"users">[] = [];
     if (to === "awaiting_executor") {
       if (o.clientPrice <= 0 || payout(o) <= 0) throw new ConvexError("Сначала укажите цену клиента и выплату исполнителю");
+      const previous = o.executorId ? (await executorUser(ctx, o.executorId))?._id : undefined;
       if (o.executorId) {
-        await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Заказ №${o.number} снят с вас и возвращён в ленту`, { link: "/w", tone: "warn" });
+        await notify(ctx, [previous], `Заказ №${o.number} снят с вас и возвращён в ленту`, { link: "/w", tone: "warn" });
         extra.executorId = undefined;
         extra.assignedAt = undefined;
       }
+      // Снятому мастеру уже сообщили — «Новый заказ» ему не шлём.
+      recipients = (await suitableUsers(ctx, o)).filter((u) => u !== previous);
     }
     if (to === "paid") {
       const paid = o.payments.reduce((s, p) => s + p.amount, 0);
@@ -146,26 +220,34 @@ export const changeStatus = mutation({
         await log(ctx, id, "payment", `Внесена оплата ${money(o.clientPrice - paid)}`, actor);
       }
     }
-    if (to === "cancelled") extra.cancelReason = reason ?? "Без причины";
+    if (to === "cancelled") extra.cancelReason = reason?.trim().slice(0, 300) || "Без причины";
     if (to === "new" && o.status === "cancelled") extra.cancelReason = undefined;
-    const text = to === "cancelled" ? `Заказ отменён: ${extra.cancelReason}` : to === "awaiting_executor" ? "Опубликован в ленту исполнителей" : undefined;
+    const published = recipients.length ? `Опубликован в ленту исполнителей — уведомлено: ${recipients.length}` : "Опубликован в ленту исполнителей — подходящих сейчас нет";
+    const text = to === "cancelled" ? `Заказ отменён: ${extra.cancelReason}` : to === "awaiting_executor" ? published : undefined;
     await setStatus(ctx, o, to, actor, text, extra);
+    await audit(
+      ctx,
+      me,
+      to === "awaiting_executor" ? "order.published" : "order.status",
+      to === "awaiting_executor" ? `Заказ №${o.number}: ${published.charAt(0).toLowerCase()}${published.slice(1)}` : `Заказ №${o.number}: «${ORDER_STATUS[o.status].label}» → «${ORDER_STATUS[to].label}»${to === "cancelled" ? ` (${extra.cancelReason})` : ""}`,
+      { entityId: id, meta: { from: o.status, to, ...(to === "awaiting_executor" ? { notified: recipients.length } : {}) } },
+    );
 
     if (to === "awaiting_executor") {
-      const fits = (await ctx.db.query("executors").collect()).filter((e) => e.available && e.city === o.city && e.categories.includes(o.category));
-      const users = await Promise.all(fits.map((e) => executorUser(ctx, e._id)));
-      const fresh = (await ctx.db.get(o._id))!;
-      await notify(ctx, users.map((u) => u?._id), `Новый заказ №${o.number}: ${(await loadCatalog(ctx)).label(o.serviceId)}, ${o.city}. Оплата исполнителю ${money(payout(o))}`, {
-        link: "/w",
-        html: cardHtml(await cardOf(ctx, fresh, false), `🆕 Новый заказ №${o.number}`),
-        buttons: workerButtons("awaiting_executor", o._id),
-      });
-    } else if (o.executorId) {
+      await announceOrder(ctx, (await ctx.db.get(o._id))!, recipients);
+      return { notified: recipients.length };
+    }
+    if (o.executorId) {
       await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Заказ №${o.number}: ${ORDER_STATUS[to].label.toLowerCase()}`, { link: `/w/orders/${o._id}`, tone: to === "cancelled" ? "bad" : "info" });
     }
+    return null;
   },
 });
 
+/**
+ * Ручное назначение (ТЗ п.12). Можно и мимо подбора — человек решает, — но причина попадает в историю.
+ * Мастера на выходном назначает только владелец: остальным система этого не даёт.
+ */
 export const assign = mutation({
   args: { id: v.id("orders"), executorId: v.id("executors") },
   handler: async (ctx, { id, executorId }) => {
@@ -173,14 +255,20 @@ export const assign = mutation({
     const o = await staffOrder(ctx, id);
     const e = await ctx.db.get(executorId);
     if (!e) throw new ConvexError("Исполнитель не найден");
-    if (!e.available) throw new ConvexError("Исполнитель на выходном");
+    const scope = scopeOf(me);
+    if (scope && !e.categories.some((c) => scope.includes(c))) throw new ConvexError("Это исполнитель другого направления");
+    if (!e.available && me.role !== "owner") throw new ConvexError("Исполнитель на выходном — назначить его может только владелец");
     if (!["new", "awaiting_executor", "assigned", "accepted"].includes(o.status)) throw new ConvexError("Исполнителя можно менять только до начала работ");
+    if (o.executorId === executorId) throw new ConvexError("Этот исполнитель уже назначен");
     if (o.clientPrice <= 0 || payout(o) <= 0) throw new ConvexError("Сначала укажите цену клиента и выплату исполнителю");
-    if (o.executorId && o.executorId !== executorId) {
+    if (o.executorId) {
       await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Заказ №${o.number} передан другому исполнителю`, { link: "/w", tone: "warn" });
     }
+    const fit = fitsOrder(e, o);
+    const outside = fit.fits ? "" : ` (вне подбора: ${fit.reasons.join("; ")})`;
     await ctx.db.patch(id, { executorId, assignedAt: nowIso(), status: "assigned" });
-    await log(ctx, id, "assigned", `Назначен исполнитель: ${shortName(e.name)}`, userActor(me._id));
+    await log(ctx, id, "assigned", `Назначен исполнитель: ${shortName(e.name)}${outside}`, userActor(me._id));
+    await audit(ctx, me, "order.assigned", `Заказ №${o.number}: назначен ${shortName(e.name)}${outside}`, { entityId: id, meta: { executorId, fits: fit.fits, reasons: fit.reasons } });
     const assigned = (await ctx.db.get(id))!;
     await notify(ctx, [(await executorUser(ctx, executorId))?._id], `Вам назначен заказ №${o.number}: ${(await loadCatalog(ctx)).label(o.serviceId)}. Подтвердите в кабинете`, {
       link: `/w/orders/${id}`,
