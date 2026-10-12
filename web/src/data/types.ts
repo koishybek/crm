@@ -44,6 +44,8 @@ export interface User {
   telegram?: boolean;
   /** Направления руководителя (role = manager). */
   categories?: string[];
+  /** Дублировать важные уведомления на email. */
+  notifyEmail?: boolean;
 }
 
 export interface Client {
@@ -176,6 +178,8 @@ export interface Order {
   paidAt?: string;
   closedAt?: string;
   cancelReason?: string;
+  /** Навыки, без которых заказ мастеру не показывается. */
+  requiredSkills?: string[];
   files: Attachment[];
 }
 
@@ -295,4 +299,73 @@ export interface DB {
   interactions: Interaction[];
   clientNotes: ClientNote[];
   notifications: Notification[];
+}
+
+// ── Каналы, журнал действий, отзывы ──────────────────────────────────────────
+
+/** Каналы переписки с клиентами в едином чате «Сообщения». */
+export type Channel = "telegram" | "whatsapp" | "olx" | "site";
+
+export type AuditEntity = "lead" | "order" | "client" | "executor" | "user" | "catalog" | "settings" | "integration" | "call" | "conversation" | "review" | "system";
+
+/** Запись журнала действий. actorName — «Система», «AI», «OLX»… если действовал не человек. */
+export interface AuditEntry {
+  id: string;
+  at: string;
+  actorId?: string;
+  actorName: string;
+  actorRole?: string;
+  action: string;
+  entity: AuditEntity;
+  entityId?: string;
+  summary: string;
+}
+
+export interface Conversation {
+  id: string;
+  channel: Channel;
+  contactName?: string;
+  contactPhone?: string;
+  clientId?: string;
+  leadId?: string;
+  subject?: string;
+  subjectUrl?: string;
+  lastMessageAt: string;
+  lastText: string;
+  lastDirection: "in" | "out";
+  unread: number;
+  status: "open" | "closed";
+  assigneeId?: string;
+  /** WhatsApp: до какого момента можно ответить свободным текстом (окно 24 часа). */
+  replyUntil?: string;
+}
+
+export type MessageKind = "text" | "image" | "audio" | "file" | "location" | "system";
+export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  direction: "in" | "out";
+  kind: MessageKind;
+  text: string;
+  at: string;
+  authorId?: string;
+  fileUrl?: string;
+  fileName?: string;
+  status?: MessageStatus;
+  error?: string;
+}
+
+export type ReviewVia = "operator" | "link" | "telegram" | "whatsapp";
+
+export interface Review {
+  id: string;
+  orderId: string;
+  executorId: string;
+  clientId: string;
+  rating: number;
+  text?: string;
+  via: ReviewVia;
+  at: string;
 }

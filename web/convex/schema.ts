@@ -57,6 +57,23 @@ export const historyKind = v.union(
   v.literal("published"),
 );
 export const tone = v.union(v.literal("info"), v.literal("ok"), v.literal("warn"), v.literal("bad"));
+/** Каналы переписки с клиентами (единый чат «Сообщения»). */
+export const channel = v.union(v.literal("telegram"), v.literal("whatsapp"), v.literal("olx"), v.literal("site"));
+/** Сущности журнала действий; действие пишется как «сущность.что» — «order.status», «user.access». */
+export const auditEntity = v.union(
+  v.literal("lead"),
+  v.literal("order"),
+  v.literal("client"),
+  v.literal("executor"),
+  v.literal("user"),
+  v.literal("catalog"),
+  v.literal("settings"),
+  v.literal("integration"),
+  v.literal("call"),
+  v.literal("conversation"),
+  v.literal("review"),
+  v.literal("system"),
+);
 export const aiSummary = v.object({
   summary: v.string(),
   extracted: v.array(v.object({ label: v.string(), value: v.string() })),
@@ -83,6 +100,8 @@ export default defineSchema({
     active: v.optional(v.boolean()),
     telegramChatId: v.optional(v.string()),
     telegramLinkCode: v.optional(v.string()),
+    /** Дублировать важные уведомления на email (ТЗ п.18). */
+    notifyEmail: v.optional(v.boolean()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -183,6 +202,8 @@ export default defineSchema({
     paidAt: v.optional(v.string()),
     closedAt: v.optional(v.string()),
     cancelReason: v.optional(v.string()),
+    /** Навыки, без которых заказ мастеру не показываем (ТЗ п.11). Пусто — хватает направления и города. */
+    requiredSkills: v.optional(v.array(v.string())),
     files: v.array(attachment),
     // Чтобы напоминания о сроке не уходили повторно.
     soonNotified: v.optional(v.boolean()),
@@ -241,7 +262,15 @@ export default defineSchema({
     .index("by_user_read", ["userId", "read"]),
 
   /** Справочник: направления и услуги с типичными ценами (владелец правит в «Настройках»). */
-  categories: defineTable({ key: v.string(), label: v.string(), tone: v.string(), order: v.number(), active: v.boolean() }).index("by_key", ["key"]),
+  categories: defineTable({
+    key: v.string(),
+    label: v.string(),
+    tone: v.string(),
+    order: v.number(),
+    active: v.boolean(),
+    /** Навыки направления (ТЗ п.12, п.21): из них мастер отмечает свои, оператор — требуемые в заказе. */
+    skills: v.optional(v.array(v.string())),
+  }).index("by_key", ["key"]),
   services: defineTable({
     key: v.string(),
     category: v.string(),
@@ -308,4 +337,139 @@ export default defineSchema({
 
   /** Сквозная нумерация заявок и заказов. */
   counters: defineTable({ name: v.string(), value: v.number() }).index("by_name", ["name"]),
+
+  /**
+   * Журнал ключевых действий (ТЗ п.20, п.26, п.27). Пишется в той же мутации, что и действие.
+   * Имя и роль автора — строкой: журнал читается и после удаления/переименования сотрудника.
+   */
+  audit: defineTable({
+    tenantId: v.string(),
+    at: v.string(),
+    actorId: v.optional(v.id("users")),
+    actorName: v.string(),
+    actorRole: v.optional(v.string()),
+    action: v.string(),
+    entity: auditEntity,
+    entityId: v.optional(v.string()),
+    summary: v.string(),
+    meta: v.optional(v.any()),
+  })
+    .index("by_at", ["at"])
+    .index("by_entity", ["entity", "entityId", "at"])
+    .index("by_actor", ["actorId", "at"]),
+
+  /** Единый чат с клиентами: один диалог на собеседника в канале (чат Telegram, номер WhatsApp, тред OLX, форма сайта). */
+  conversations: defineTable({
+    tenantId: v.string(),
+    channel,
+    externalId: v.string(),
+    contactName: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    clientId: v.optional(v.id("clients")),
+    leadId: v.optional(v.id("leads")),
+    /** Тема: для OLX — объявление, по которому пишет покупатель. */
+    subject: v.optional(v.string()),
+    subjectUrl: v.optional(v.string()),
+    lastMessageAt: v.string(),
+    lastText: v.string(),
+    lastDirection: v.union(v.literal("in"), v.literal("out")),
+    unread: v.number(),
+    status: v.union(v.literal("open"), v.literal("closed")),
+    assigneeId: v.optional(v.id("users")),
+    /** WhatsApp: до какого момента можно отвечать свободным текстом (окно 24 часа). */
+    replyUntil: v.optional(v.string()),
+    meta: v.optional(v.any()),
+  })
+    .index("by_channel_external", ["channel", "externalId"])
+    .index("by_last", ["lastMessageAt"])
+    .index("by_status_last", ["status", "lastMessageAt"])
+    .index("by_client", ["clientId", "lastMessageAt"])
+    .index("by_lead", ["leadId"]),
+
+  conversationMessages: defineTable({
+    conversationId: v.id("conversations"),
+    direction: v.union(v.literal("in"), v.literal("out")),
+    kind: v.union(v.literal("text"), v.literal("image"), v.literal("audio"), v.literal("file"), v.literal("location"), v.literal("system")),
+    text: v.string(),
+    at: v.string(),
+    /** Id сообщения во внешнем канале — защита от повторной доставки вебхука. */
+    externalId: v.optional(v.string()),
+    authorId: v.optional(v.id("users")),
+    fileId: v.optional(v.id("_storage")),
+    fileName: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("sending"), v.literal("sent"), v.literal("delivered"), v.literal("read"), v.literal("failed"))),
+    error: v.optional(v.string()),
+  })
+    .index("by_conversation", ["conversationId", "at"])
+    .index("by_external", ["externalId"]),
+
+  /** Подключённые внешние аккаунты (OLX, WhatsApp, email). Токены отдаются только внутренним функциям. */
+  integrations: defineTable({
+    provider: v.union(v.literal("olx"), v.literal("whatsapp"), v.literal("email")),
+    status: v.union(v.literal("disconnected"), v.literal("connected"), v.literal("error")),
+    accountId: v.optional(v.string()),
+    accountName: v.optional(v.string()),
+    accessToken: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
+    expiresAt: v.optional(v.string()),
+    /** Курсор синхронизации (последнее обработанное сообщение/время). */
+    cursor: v.optional(v.string()),
+    lastSyncAt: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    connectedBy: v.optional(v.id("users")),
+    connectedAt: v.optional(v.string()),
+  }).index("by_provider", ["provider"]),
+
+  /** Одноразовые state для OAuth (защита от CSRF при подключении OLX). */
+  oauthStates: defineTable({ state: v.string(), provider: v.string(), userId: v.id("users"), createdAt: v.string() }).index("by_state", ["state"]),
+
+  /** Ключи публичного API (ТЗ «API-first»): храним только хэш, сам ключ показываем один раз. */
+  apiKeys: defineTable({
+    name: v.string(),
+    prefix: v.string(),
+    hash: v.string(),
+    createdAt: v.string(),
+    createdBy: v.id("users"),
+    lastUsedAt: v.optional(v.string()),
+    revokedAt: v.optional(v.string()),
+  }).index("by_hash", ["hash"]),
+
+  /** Отзывы клиентов о выполненных заказах (ТЗ п.14, п.29): из них считается рейтинг мастера. */
+  reviews: defineTable({
+    tenantId: v.string(),
+    orderId: v.id("orders"),
+    executorId: v.id("executors"),
+    clientId: v.id("clients"),
+    rating: v.number(),
+    text: v.optional(v.string()),
+    via: v.union(v.literal("operator"), v.literal("link"), v.literal("telegram"), v.literal("whatsapp")),
+    at: v.string(),
+    authorId: v.optional(v.id("users")),
+  })
+    .index("by_order", ["orderId"])
+    .index("by_executor", ["executorId", "at"])
+    .index("by_at", ["at"]),
+
+  /** Ссылка «оцените работу» для клиента: неугадываемый токен, одноразовая, со сроком. */
+  reviewRequests: defineTable({ token: v.string(), orderId: v.id("orders"), createdAt: v.string(), expiresAt: v.string(), usedAt: v.optional(v.string()) })
+    .index("by_token", ["token"])
+    .index("by_order", ["orderId"]),
+
+  /** Расходы на рекламу по источникам за месяц (YYYY-MM) — для стоимости заявки и заказа (ТЗ п.17). */
+  adSpend: defineTable({ month: v.string(), source, amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "source"]),
+
+  /** Счётчики лимитов (антиспам публичных форм и API): ключ + окно. */
+  rateLimits: defineTable({ key: v.string(), windowStart: v.number(), count: v.number() }).index("by_key", ["key"]),
+
+  /** Состояние подсистем для владельца (ТЗ п.20 «мониторинг»): когда работало, последняя ошибка. */
+  systemStatus: defineTable({
+    key: v.string(),
+    okAt: v.optional(v.string()),
+    okNote: v.optional(v.string()),
+    errorAt: v.optional(v.string()),
+    error: v.optional(v.string()),
+  }).index("by_key", ["key"]),
+
+  /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
+  backups: defineTable({ at: v.string(), fileId: v.id("_storage"), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) }).index("by_at", ["at"]),
 });
