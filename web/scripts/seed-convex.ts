@@ -310,6 +310,57 @@ async function main() {
     ),
   );
 
+  // ── Журнал действий за две недели — из событий демо-заявок и заказов, чтобы журнал не был пустым ──
+  const userById = new Map(db.users.map((u) => [u.id, u]));
+  const orderById = new Map(db.orders.map((o) => [o.id, o]));
+  const AUDIT_KIND: Partial<Record<string, string>> = {
+    created: "order.created",
+    status: "order.status",
+    assigned: "order.assigned",
+    taken: "order.taken",
+    finance: "order.finance",
+    payment: "order.payment",
+    edited: "order.info",
+    published: "order.published",
+  };
+  const since = now - 14 * 86400_000;
+  const auditRows: Record<string, unknown>[] = [];
+  for (const l of db.leads) {
+    if (Date.parse(l.createdAt) < since) continue;
+    const u = userById.get(l.operatorId);
+    auditRows.push({
+      tenantId,
+      at: l.createdAt,
+      actorId: u ? userMap.get(u.id) : undefined,
+      actorName: u?.name ?? "Система",
+      actorRole: u?.role,
+      action: "lead.created",
+      entity: "lead",
+      entityId: leadMap.get(l.id),
+      summary: `Заявка №${l.number}: ${serviceById(l.serviceId).label} (${clientById.get(l.clientId)?.name ?? "клиент"})`,
+    });
+  }
+  for (const h of db.history) {
+    const action = AUDIT_KIND[h.kind];
+    if (!action || Date.parse(h.at) < since || h.actor.type === "client") continue;
+    const o = orderById.get(h.orderId);
+    if (!o) continue;
+    const u = h.actor.type === "user" ? userById.get(h.actor.id) : undefined;
+    auditRows.push({
+      tenantId,
+      at: h.at,
+      actorId: u ? userMap.get(u.id) : undefined,
+      actorName: u?.name ?? "Система",
+      actorRole: u?.role,
+      action,
+      entity: "order",
+      entityId: orderMap.get(o.id),
+      summary: `Заказ №${o.number}: ${h.text}`,
+    });
+  }
+  auditRows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  await insert("audit", auditRows);
+
   const logins = db.users.map((u) => ({ login: loginOf(u), password }));
   for (let i = 0; i < logins.length; i += 5) await client.action(api.seed.logins, { secret: secret!, logins: logins.slice(i, i + 5) });
   await client.mutation(api.seed.processCalls, { secret: secret!, ids: callIds.slice(-liveRows.length) as Id<"calls">[] });
