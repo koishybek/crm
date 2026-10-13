@@ -519,6 +519,7 @@ export function OlxCard() {
             <Badge tone={badge.tone}>{badge.label}</Badge>
             {s.status === "connected" && s.accountName && <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{s.accountName}</span>}
           </div>
+          {s.keyIssue && <Notice tone="bad">{s.keyIssue}</Notice>}
 
           {!s.configured ? (
             <>
@@ -570,7 +571,7 @@ export function OlxCard() {
                 Откроется OLX: войдите в аккаунт компании и нажмите «Разрешить». Если в браузере открыт личный аккаунт OLX, сначала выйдите из него — иначе подключится он.
               </p>
               <div>
-                <Button icon={LogIn} disabled={busy !== null} onClick={() => void connect()}>
+                <Button icon={LogIn} disabled={busy !== null || !!s.keyIssue} onClick={() => void connect()}>
                   {busy === "connect" ? "Открываем OLX…" : s.status === "error" ? "Подключить заново" : "Подключить OLX"}
                 </Button>
               </div>

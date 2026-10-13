@@ -297,7 +297,8 @@ describe("Telegram → «Сообщения»", () => {
   test("сообщения клиента и ответы бота попадают в чат, бот создаёт заявку, диалог связан с заявкой и клиентом", async () => {
     const s = await setup();
     await s.t.action(internal.telegram.handleUpdate, msg(777, "Течёт кран на кухне, Алматы"));
-    await s.t.action(internal.telegram.handleUpdate, msg(777, undefined, { contact: { phone_number: "+7 701 222 33 44", first_name: "Гульмира" } }));
+    // Кнопка «Отправить мой номер» присылает контакт с user_id отправителя — как настоящий Telegram.
+    await s.t.action(internal.telegram.handleUpdate, msg(777, undefined, { contact: { phone_number: "+7 701 222 33 44", first_name: "Гульмира", user_id: 777 } }));
     const [lead] = await leads(s);
     expect(lead).toMatchObject({ source: "telegram", clientPhone: "77012223344" });
     const [c] = await conversations(s);
@@ -341,7 +342,7 @@ describe("Telegram → «Сообщения»", () => {
 
   test("повторное «Отправить номер» не создаёт вторую заявку", async () => {
     const s = await setup();
-    const contact = { contact: { phone_number: "+77012223344", first_name: "Гульмира" } };
+    const contact = { contact: { phone_number: "+77012223344", first_name: "Гульмира", user_id: 780 } };
     await s.t.action(internal.telegram.handleUpdate, msg(780, "Нужна сборка шкафа"));
     await s.t.action(internal.telegram.handleUpdate, msg(780, undefined, contact));
     await s.t.action(internal.telegram.handleUpdate, msg(780, undefined, contact));
@@ -362,12 +363,15 @@ describe("Telegram → «Сообщения»", () => {
     expect(last.text).toContain("Опишите, что случилось");
   });
 
-  test("флуд из одного чата не разбирается", async () => {
+  test("флуд из одного чата не разбирается — почему, бот говорит один раз", async () => {
     const s = await setup();
     await s.t.run((ctx) => ctx.db.insert("rateLimits", { key: "tg:chat:781", windowStart: Date.now(), count: 20 }));
     await s.t.action(internal.telegram.handleUpdate, msg(781, "Течёт кран"));
+    await s.t.action(internal.telegram.handleUpdate, msg(781, "Течёт кран!!!"));
     expect(await conversations(s)).toHaveLength(0);
-    expect(sent.filter((x) => x.method === "sendMessage")).toHaveLength(0);
+    const replies = sent.filter((x) => x.method === "sendMessage");
+    expect(replies).toHaveLength(1);
+    expect(String(replies[0]!.body.text)).toContain("слишком часто");
   });
 });
 

@@ -8,6 +8,7 @@ import {
   ClipboardList,
   FileText,
   House,
+  KeyRound,
   LogOut,
   Menu as MenuIcon,
   MessagesSquare,
@@ -36,6 +37,7 @@ import type { User } from "../data/types";
 import { cn, whenShort } from "../lib/format";
 import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui";
 import { EmailToggle } from "./EmailToggle";
+import { ChangePasswordModal } from "./PasswordChange";
 import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
@@ -269,77 +271,85 @@ function UserMenu({ me }: { me: User }) {
   const { signOut } = useAuthActions();
   const nav = useNavigate();
   const tg = useQuery(api.telegram.status);
+  // Окно живёт вне меню: меню при клике закрывается и размонтирует своё содержимое.
+  const [password, setPassword] = useState(false);
   return (
-    <Menu
-      width={290}
-      trigger={(toggle) => (
-        <button onClick={toggle} aria-label="Меню пользователя" className="flex items-center gap-2.5 rounded-full py-1 pr-1 pl-1 hover:bg-[#f4f2ec] sm:pr-2">
-          <Avatar name={me.name} size={42} variant="person" />
-          <span className="hidden text-[15px] font-semibold text-ink sm:inline">{me.name.split(" ")[0]}</span>
-          <ChevronDown size={18} className="hidden text-ink-2 sm:inline" />
-        </button>
-      )}
-    >
-      {(close) => (
-        <div>
-          <div className="px-3 pt-2 pb-3">
-            <div className="text-[15px] font-semibold text-ink">{me.name}</div>
-            <div className="mt-0.5 truncate text-[12.5px] text-muted">{me.email}</div>
-            <div className="mt-1.5">
-              <Badge tone={me.role === "owner" ? "violet" : me.role === "operator" ? "blue" : me.role === "manager" ? "orange" : "green"} size="sm">
-                {ROLE_LABEL[me.role]}
-              </Badge>
+    <>
+      <ChangePasswordModal me={me} open={password} onClose={() => setPassword(false)} />
+      <Menu
+        width={290}
+        trigger={(toggle) => (
+          <button onClick={toggle} aria-label="Меню пользователя" className="flex items-center gap-2.5 rounded-full py-1 pr-1 pl-1 hover:bg-[#f4f2ec] sm:pr-2">
+            <Avatar name={me.name} size={42} variant="person" />
+            <span className="hidden text-[15px] font-semibold text-ink sm:inline">{me.name.split(" ")[0]}</span>
+            <ChevronDown size={18} className="hidden text-ink-2 sm:inline" />
+          </button>
+        )}
+      >
+        {(close) => (
+          <div>
+            <div className="px-3 pt-2 pb-3">
+              <div className="text-[15px] font-semibold text-ink">{me.name}</div>
+              <div className="mt-0.5 truncate text-[12.5px] text-muted">{me.email}</div>
+              <div className="mt-1.5">
+                <Badge tone={me.role === "owner" ? "violet" : me.role === "operator" ? "blue" : me.role === "manager" ? "orange" : "green"} size="sm">
+                  {ROLE_LABEL[me.role]}
+                </Badge>
+              </div>
+            </div>
+            <div className="border-t border-line pt-1.5">
+              {tg?.linked ? (
+                <MenuItem
+                  icon={Send}
+                  hint="Уведомления приходят в Telegram"
+                  onClick={async () => {
+                    close();
+                    report(await telegramUnlink(), "Telegram отключён");
+                  }}
+                >
+                  Отключить Telegram
+                </MenuItem>
+              ) : (
+                <MenuItem
+                  icon={Send}
+                  disabled={!tg?.enabled}
+                  hint={tg?.enabled ? "Новые заказы и сообщения — в Telegram" : "Бот ещё не настроен владельцем"}
+                  onClick={async () => {
+                    close();
+                    const r = await telegramLink();
+                    if (report(r)) {
+                      window.open(r.value, "_blank", "noopener");
+                      toast("Нажмите «Старт» в открывшемся Telegram", "info");
+                    }
+                  }}
+                >
+                  Подключить Telegram
+                </MenuItem>
+              )}
+              <EmailToggle />
+              <MenuItem icon={KeyRound} onClick={() => (close(), setPassword(true))}>
+                Сменить пароль
+              </MenuItem>
+              {me.role === "owner" && (
+                <MenuItem icon={SettingsIcon} onClick={() => (close(), nav("/settings"))}>
+                  Настройки и команда
+                </MenuItem>
+              )}
+              <MenuItem
+                icon={LogOut}
+                onClick={async () => {
+                  close();
+                  await signOut();
+                  nav("/login");
+                }}
+              >
+                Выйти
+              </MenuItem>
             </div>
           </div>
-          <div className="border-t border-line pt-1.5">
-            {tg?.linked ? (
-              <MenuItem
-                icon={Send}
-                hint="Уведомления приходят в Telegram"
-                onClick={async () => {
-                  close();
-                  report(await telegramUnlink(), "Telegram отключён");
-                }}
-              >
-                Отключить Telegram
-              </MenuItem>
-            ) : (
-              <MenuItem
-                icon={Send}
-                disabled={!tg?.enabled}
-                hint={tg?.enabled ? "Новые заказы и сообщения — в Telegram" : "Бот ещё не настроен владельцем"}
-                onClick={async () => {
-                  close();
-                  const r = await telegramLink();
-                  if (report(r)) {
-                    window.open(r.value, "_blank", "noopener");
-                    toast("Нажмите «Старт» в открывшемся Telegram", "info");
-                  }
-                }}
-              >
-                Подключить Telegram
-              </MenuItem>
-            )}
-            <EmailToggle />
-            {me.role === "owner" && (
-              <MenuItem icon={SettingsIcon} onClick={() => (close(), nav("/settings"))}>
-                Настройки и команда
-              </MenuItem>
-            )}
-            <MenuItem
-              icon={LogOut}
-              onClick={async () => {
-                close();
-                await signOut();
-                nav("/login");
-              }}
-            >
-              Выйти
-            </MenuItem>
-          </div>
-        </div>
-      )}
-    </Menu>
+        )}
+      </Menu>
+    </>
   );
 }
 

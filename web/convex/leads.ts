@@ -77,6 +77,8 @@ export const create = mutation({
   },
   handler: async (ctx, a) => {
     const me = await requireRole(ctx, TEAM);
+    // У руководителя направления клиентской базы нет: клиента он не выбирает по id, только вводит телефон (аудит M-7).
+    if (a.clientId && scopeOf(me)) throw new ConvexError("Руководитель направления не выбирает клиента из базы — укажите телефон");
     const clientName = cleanText(a.clientName, MAX.clientName, "Имя клиента");
     if (!clientName) throw new ConvexError("Укажите клиента");
     const description = cleanText(a.description, MAX.description, "Описание");

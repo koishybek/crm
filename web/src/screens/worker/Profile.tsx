@@ -2,12 +2,12 @@
 // Telegram, карты для маршрута, поддержка, установка приложения на телефон и выход.
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
-import { Check, ChevronRight, CircleCheck, Download, Headset, LogOut, MapPinned, Send, type LucideIcon } from "lucide-react";
+import { Check, ChevronRight, CircleCheck, Download, Headset, KeyRound, LogOut, MapPinned, Send, type LucideIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import type { Tone } from "../../data/catalog";
-import { useNow } from "../../data/hooks";
+import { useMe, useNow } from "../../data/hooks";
 import { report, telegramUnlink } from "../../data/store";
 import { connectTelegram } from "../../data/workerActions";
 import { MAP_APPS, SUPPORT_PHONE, SUPPORT_TEL, type MapApp } from "../../data/workerLinks";
@@ -16,6 +16,7 @@ import { dateAlmaty, monthYearGenitive } from "../../data/workerTime";
 import type { WorkerReview } from "../../data/workerTypes";
 import { cn, phone, plural } from "../../lib/format";
 import { Avatar } from "../../components/ui";
+import { ChangePasswordModal } from "../../components/PasswordChange";
 import { AvailabilitySwitch } from "../../components/worker/Availability";
 import { ConfirmSheet } from "../../components/worker/ConfirmSheet";
 import { useInstallOffer } from "../../components/worker/Install";
@@ -49,7 +50,9 @@ export function Profile() {
   const { signOut } = useAuthActions();
   const mapApp = useWorkerPrefs((s) => s.mapApp);
   const install = useInstallOffer();
+  const me = useMe();
   const [confirm, setConfirm] = useState<Confirm>(null);
+  const [password, setPassword] = useState(false);
   const [maps, setMaps] = useState(false);
   const [allReviews, setAllReviews] = useState(false);
   const allList = p?.reviews;
@@ -172,10 +175,12 @@ export function Profile() {
         <RowLink icon={Headset} title="Позвонить в поддержку" hint={SUPPORT_PHONE} href={SUPPORT_TEL} />
         {/* Нет, если кабинет открыт с иконки на экране (уже установлен) или браузер компьютера не умеет ставить приложения. */}
         {install.way && <RowButton icon={Download} title="Установить приложение" hint="Иконка на экране — открывать в один тап" onClick={install.open} />}
+        <RowButton icon={KeyRound} title="Сменить пароль" onClick={() => setPassword(true)} />
         <RowButton icon={LogOut} title="Выйти" danger onClick={() => setConfirm("logout")} />
       </section>
 
       {install.sheet}
+      {me && <ChangePasswordModal me={me} open={password} onClose={() => setPassword(false)} />}
       {maps && <MapsSheet value={mapApp} onClose={() => setMaps(false)} />}
       {confirm === "logout" && (
         <ConfirmSheet

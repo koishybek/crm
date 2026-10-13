@@ -14,10 +14,14 @@ import { aiSummary } from "./schema";
 
 const OPEN_LEAD_DAYS = 3;
 const MAX_DRAFT = 3000;
-/** Антиспам (ТЗ п.26): сообщений от одного чата в минуту и новых заявок от одного чата в сутки. */
+/** Антиспам (ТЗ п.26, аудит H-4): сообщений от одного чата в минуту и новых заявок от одного чата в сутки. */
 const CHAT_MESSAGES_PER_MIN = 20;
 const CHAT_LEADS_PER_DAY = 3;
 const LEAD_NOTIFY_EVERY_MS = 10 * 60_000;
+/** Предупреждение «пишете слишком часто» — не чаще раза в 10 минут: иначе бот сам флудил бы в ответ. */
+const FLOOD_WARN_EVERY_MS = 10 * 60_000;
+/** Голосовых на расшифровку от одного чата в час: каждое — платный запрос к AI. */
+const CHAT_VOICES_PER_HOUR = 10;
 
 /** Состояние диалога с клиентом + есть ли у него свежая открытая заявка. */
 export const _state = internalQuery({
@@ -34,20 +38,35 @@ export const _state = internalQuery({
   },
 });
 
-/** Флуд из одного чата не разбираем: false — лимит сообщений исчерпан. */
+/** Флуд из одного чата не разбираем: ok=false — лимит сообщений исчерпан; warn — пора один раз сказать об этом клиенту. */
 export const _allow = internalMutation({
   args: { chatId: v.string() },
-  handler: (ctx, { chatId }): Promise<boolean> => hitLimit(ctx, `tg:chat:${chatId}`, CHAT_MESSAGES_PER_MIN, 60_000),
+  handler: async (ctx, { chatId }): Promise<{ ok: boolean; warn: boolean }> => {
+    if (await hitLimit(ctx, `tg:chat:${chatId}`, CHAT_MESSAGES_PER_MIN, 60_000)) return { ok: true, warn: false };
+    return { ok: false, warn: await hitLimit(ctx, `tg:chat-warn:${chatId}`, 1, FLOOD_WARN_EVERY_MS) };
+  },
 });
 
-/** Копим описание, пока клиент не поделился номером. */
+/** Можно ли расшифровать ещё одно голосовое этого чата (лимит в час). */
+export const _voiceAllowed = internalMutation({
+  args: { chatId: v.string() },
+  handler: (ctx, { chatId }): Promise<boolean> => hitLimit(ctx, `tg:voice:${chatId}`, CHAT_VOICES_PER_HOUR, 3600_000),
+});
+
+/**
+ * Копим описание, пока клиент не поделился номером. Описание ограничено MAX_DRAFT: начало (суть обращения) сохраняем,
+ * лишнее не дописываем; full — уже было полным, бот попросит номер вместо того, чтобы молча терять текст.
+ */
 export const _addDraft = internalMutation({
   args: { chatId: v.string(), text: v.string(), name: v.optional(v.string()) },
-  handler: async (ctx, { chatId, text, name }) => {
+  handler: async (ctx, { chatId, text, name }): Promise<{ full: boolean }> => {
     const row = await ctx.db.query("botChats").withIndex("by_chat", (q) => q.eq("chatId", chatId)).first();
-    const draft = [row?.state === "awaiting_phone" ? row.draft : "", text.trim()].filter(Boolean).join("\n").slice(-MAX_DRAFT);
+    const prev = row?.state === "awaiting_phone" ? (row.draft ?? "") : "";
+    if (prev.length >= MAX_DRAFT) return { full: true };
+    const draft = [prev, text.trim()].filter(Boolean).join("\n").slice(0, MAX_DRAFT);
     if (row) await ctx.db.patch(row._id, { state: "awaiting_phone", draft, name: name ?? row.name, updatedAt: nowIso() });
     else await ctx.db.insert("botChats", { chatId, state: "awaiting_phone", draft, name, updatedAt: nowIso() });
+    return { full: false };
   },
 });
 

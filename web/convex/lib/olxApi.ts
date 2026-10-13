@@ -1,7 +1,8 @@
 // OLX.kz Partner API: настройки из окружения, HTTP-запросы с токеном, ответ клиенту и отметка «прочитано».
 // Токен обновляем за 5 минут до конца и после 401 — один раз и «одним потоком» (аренда в базе): OLX меняет
 // refresh-токен, и два параллельных обновления не должны сжечь друг другу доступ. Токены читают и пишут только
-// внутренние функции channels/olx.ts; в логи, ответы и адреса они не попадают.
+// внутренние функции channels/olx.ts; в логи, ответы и адреса они не попадают. В базе токены зашифрованы
+// (lib/secretBox.ts): расшифровываем здесь, внутри actions, перед самим запросом к OLX.
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
@@ -31,6 +32,7 @@ import {
   type OlxToken,
 } from "./olx";
 import { hitLimit } from "./rateLimit";
+import { integrationsKeyIssue, openSecret, sealSecret, SecretBoxError, type SecretPurpose } from "./secretBox";
 
 /** Адрес возврата после входа в OLX — он же зарегистрирован в приложении на developer.olx.kz. */
 export const OLX_CALLBACK_PATH = "/olx/callback";
@@ -161,12 +163,30 @@ interface Token {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Токен из базы → открытый текст. Ключа нет — OLX «не подключён» (токены целы и заработают, когда ключ зададут);
+ * токен не открывается ключом (ключ сменили) — доступ потерян: стираем и просим владельца подключить заново.
+ */
+async function openToken(ctx: ActionCtx, stored: string, purpose: SecretPurpose): Promise<string> {
+  try {
+    return (await openSecret(stored, purpose)).value;
+  } catch (e) {
+    const reason = e instanceof SecretBoxError ? e.reason : "open";
+    console.warn(`olx: токен не расшифрован (${reason})`);
+    if (reason === "key") throw new OlxError({ kind: "not_connected" });
+    await ctx.runMutation(internal.channels.olx._undecryptable, {});
+    throw new OlxError({ kind: "reauth" });
+  }
+}
+
 /** Действующий access-токен. stale — срок токена, который OLX только что не принял (401): обновить, даже если срок не вышел. */
 async function validToken(ctx: ActionCtx, cfg: OlxConfig, stale?: string): Promise<Token> {
+  // Без ключа шифрования обновлённый токен не сохранить — к OLX не обращаемся вовсе (даже со старым открытым токеном).
+  if (integrationsKeyIssue()) throw new OlxError({ kind: "not_connected" });
   for (let i = 0; i <= LEASE_WAITS; i++) {
     const lease: TokenLease = await ctx.runMutation(internal.channels.olx._tokenLease, { staleExpiresAt: stale });
-    if (lease.kind === "ready") return { value: lease.accessToken, expiresAt: lease.expiresAt };
-    if (lease.kind === "refresh") return refresh(ctx, cfg, lease.refreshToken, lease.expiresAt);
+    if (lease.kind === "ready") return { value: await openToken(ctx, lease.accessToken, "olx.accessToken"), expiresAt: lease.expiresAt };
+    if (lease.kind === "refresh") return refresh(ctx, cfg, await openToken(ctx, lease.refreshToken, "olx.refreshToken"), lease.expiresAt);
     if (lease.kind === "paused") throw new OlxError({ kind: "paused", until: lease.until });
     if (lease.kind === "none") throw new OlxError({ kind: "not_connected" });
     // Токен прямо сейчас обновляет другой процесс — ждём его результата.
@@ -186,9 +206,14 @@ async function refresh(ctx: ActionCtx, cfg: OlxConfig, refreshToken: string, lea
     await ctx.runMutation(internal.channels.olx._tokenRefreshFailed, { failure, leasedExpiresAt });
     throw new OlxError(failure.kind === "grant" ? { kind: "reauth" } : failure);
   }
-  // expires_in — секунды от момента запроса; refresh-токен OLX меняет раз в сутки — пришёл новый, храним новый.
+  // expires_in — секунды от момента запроса; refresh-токен OLX меняет раз в сутки — пришёл новый, храним новый,
+  // иначе прежний — тоже заново зашифрованным (сохранённый до шифрования открытый текст так и заменяется).
   const expiresAt = new Date(startedAt + t.expiresIn * 1000).toISOString();
-  await ctx.runMutation(internal.channels.olx._tokenRefreshed, { accessToken: t.accessToken, refreshToken: t.refreshToken, expiresAt });
+  await ctx.runMutation(internal.channels.olx._tokenRefreshed, {
+    accessToken: await sealSecret(t.accessToken, "olx.accessToken"),
+    refreshToken: await sealSecret(t.refreshToken ?? refreshToken, "olx.refreshToken"),
+    expiresAt,
+  });
   return { value: t.accessToken, expiresAt };
 }
 
@@ -287,7 +312,8 @@ export async function sendOlx(ctx: ActionCtx, threadKey: string, text: string): 
 
 /** Можно ли отвечать в OLX (без запросов к OLX: зовётся и из запросов интерфейса). */
 export async function olxReplyBlock(ctx: QueryCtx): Promise<string | null> {
-  if (!olxConfig()) return REPLY_BLOCK.notConnected;
+  // Без ключа шифрования токен не открыть — ответ не уйдёт; подробности владелец видит в карточке OLX.
+  if (!olxConfig() || integrationsKeyIssue()) return REPLY_BLOCK.notConnected;
   const row = await olxIntegration(ctx);
   if (row?.status === "connected") return null;
   return row?.status === "error" ? OLX_REAUTH_TEXT : REPLY_BLOCK.notConnected;

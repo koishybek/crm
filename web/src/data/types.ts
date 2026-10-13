@@ -46,6 +46,8 @@ export interface User {
   categories?: string[];
   /** Дублировать важные уведомления на email. */
   notifyEmail?: boolean;
+  /** Вошёл с временным паролем — до смены пароля доступен только экран «Смените пароль». */
+  mustChangePassword?: boolean;
 }
 
 export interface Client {
@@ -437,6 +439,8 @@ export interface OlxSettings {
   configured: boolean;
   /** Переменные окружения Convex, которые не заданы. */
   missing: string[];
+  /** Нет (или неверный) ключ шифрования токенов INTEGRATIONS_KEY — подключать нельзя, синхронизация стоит. */
+  keyIssue?: string;
   /** Адрес возврата, зарегистрированный в приложении OLX: …convex.site/olx/callback. */
   callbackUrl: string | null;
   /** error — доступ истёк или отозван, нужно подключить заново. */

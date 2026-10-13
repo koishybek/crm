@@ -18,4 +18,7 @@ crons.interval("auto assign", { minutes: 5 }, internal.autoAssign.run, {});
 // ТЗ п.20, п.26: резервная копия данных каждую ночь — 21:00 UTC = 02:00 по Алматы.
 crons.cron("daily backup", "0 21 * * *", internal.backup.run, {});
 
+// Уборка служебных таблиц: отжившие счётчики лимитов и принятые обновления Telegram.
+crons.interval("cleanup service tables", { hours: 1 }, internal.maintenance.cleanup, {});
+
 export default crons;

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { markError, markOk, type HealthKey } from "./lib/health";
+import { integrationsKeyIssue } from "./lib/secretBox";
 import { canExtract, canTranscribe } from "./ai";
 import { configured as whatsappConfigured, missingEnv as whatsappMissing } from "./channels/whatsapp";
 import { env } from "./env";
@@ -66,11 +67,14 @@ export const overview = query({
       ctx.db.query("apiKeys").collect(),
     ]);
     const sub = (key: SubsystemInfo["key"], configured: boolean, extra: Pick<SubsystemInfo, "hint" | "issue" | "warning"> = {}): SubsystemInfo => ({ key, configured, ...extra, mark: marks.get(key) });
-    /** OLX и email: подключение — строкой в integrations (отключили — серый); ошибка подключения — красный и без отметок. */
-    const linked = (key: "olx" | "email", row: typeof olx, hint: string) =>
+    /**
+     * OLX и email: подключение — строкой в integrations (отключили — серый); ошибка подключения — красный и без отметок.
+     * problem — то, что ломает канал независимо от подключения (нет ключа шифрования токенов): у подключённого — красный.
+     */
+    const linked = (key: "olx" | "email", row: typeof olx, hint: string, problem?: string | null) =>
       sub(key, row ? row.status !== "disconnected" : marks.has(key), {
-        hint,
-        issue: row?.status === "error" ? (row.lastError ?? "Ошибка подключения") : undefined,
+        hint: problem ?? hint,
+        issue: problem ?? (row?.status === "error" ? (row.lastError ?? "Ошибка подключения") : undefined),
       });
     const tgMissing = TELEGRAM_ENV.filter((k) => !env(k));
     const waMissing = whatsappMissing();
@@ -86,7 +90,7 @@ export const overview = query({
         sub("pbx", !!pbxSecret, { hint: "Ключ подключения АТС не создан — раздел «Телефония (АТС)»" }),
         sub("telegram", tgMissing.length === 0, { hint: `Не заданы: ${tgMissing.join(", ")}` }),
         sub("whatsapp", whatsappConfigured(), { hint: `Не заданы: ${waMissing.join(", ")}` }),
-        linked("olx", olx, "Аккаунт OLX не подключён"),
+        linked("olx", olx, "Аккаунт OLX не подключён", integrationsKeyIssue()),
         linked("email", email, "Почта не подключена"),
         sub("site", marks.has("site"), { hint: "Заявок с сайта ещё не было" }),
         sub("api", activeKeys > 0 || marks.has("api"), { hint: "Ключей API нет" }),

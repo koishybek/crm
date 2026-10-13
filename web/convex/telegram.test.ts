@@ -44,7 +44,8 @@ async function setup() {
   const ids = await t.run(async (ctx) => {
     const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: T, active: true, telegramChatId: "100" });
     const ex = await ctx.db.insert("executors", { tenantId: T, name: "Асет Мастеров", phone: "77000000001", city: "Алматы", categories: ["ac"], skills: [], available: true, rating: 5, reviews: 0, cooperation: "freelance", joinedAt: at });
-    const exUser = await ctx.db.insert("users", { name: "Асет Мастеров", email: "77000000001", role: "executor", executorId: ex, tenantId: T, active: true, telegramLinkCode: "a".repeat(24) });
+    // Ссылка привязки из кабинета: одноразовая, живёт 30 минут.
+    const exUser = await ctx.db.insert("users", { name: "Асет Мастеров", email: "77000000001", role: "executor", executorId: ex, tenantId: T, active: true, telegramLinkCode: "a".repeat(24), telegramLinkExpiresAt: Date.now() + 30 * 60_000 });
     const client = await ctx.db.insert("clients", { tenantId: T, name: "Клиент Тест", kind: "person", phone: "77071234567", city: "Алматы", source: "olx", tags: [], createdAt: at, ordersCount: 1, activeCount: 1, lastActivityAt: at });
     const order = await ctx.db.insert("orders", {
       tenantId: T,
@@ -133,7 +134,7 @@ describe("бот: заявки от клиентов", () => {
     const { t, ids } = await setup();
     await t.action(internal.telegram.handleUpdate, msg(777, "Течёт кран на кухне, Алматы"));
     expect(JSON.stringify(sent.at(-1)!.body.reply_markup)).toContain("request_contact");
-    await t.action(internal.telegram.handleUpdate, msg(777, "", { text: undefined, contact: { phone_number: "+7 701 222 33 44", first_name: "Гульмира" } }));
+    await t.action(internal.telegram.handleUpdate, msg(777, "", { text: undefined, contact: { phone_number: "+7 701 222 33 44", first_name: "Гульмира", user_id: 777 } }));
     const leads = await t.run((ctx) => ctx.db.query("leads").collect());
     expect(leads).toHaveLength(1);
     expect(leads[0]!.source).toBe("telegram");

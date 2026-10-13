@@ -6,8 +6,8 @@ import type { Role } from "../../src/data/types";
 
 export type Me = Doc<"users"> & { role: Role };
 
-/** Текущий пользователь или null (не вошёл / отключён). */
-export async function currentUser(ctx: QueryCtx): Promise<Me | null> {
+/** Вошедший и не отключённый пользователь — даже с временным паролем. Только для users.me (экран «Смените пароль»). */
+export async function signedInUser(ctx: QueryCtx): Promise<Me | null> {
   const id = await getAuthUserId(ctx);
   if (!id) return null;
   const user = await ctx.db.get(id);
@@ -15,10 +15,20 @@ export async function currentUser(ctx: QueryCtx): Promise<Me | null> {
   return user as Me;
 }
 
+/**
+ * Текущий пользователь или null (не вошёл / отключён / ещё не сменил временный пароль). Временный пароль знает тот,
+ * кто его выдал, поэтому до смены — ни данных, ни действий (аудит M-8): работает только users.changeMyPassword.
+ */
+export async function currentUser(ctx: QueryCtx): Promise<Me | null> {
+  const user = await signedInUser(ctx);
+  return user && !user.mustChangePassword ? user : null;
+}
+
 /** Грубая проверка доступа по роли (RBAC). Проверки «свой/чужой» — в самих функциях. */
 export async function requireRole(ctx: QueryCtx, roles: Role[]): Promise<Me> {
-  const me = await currentUser(ctx);
+  const me = await signedInUser(ctx);
   if (!me) throw new ConvexError("Нужно войти");
+  if (me.mustChangePassword) throw new ConvexError("Сначала смените временный пароль");
   if (!roles.includes(me.role)) throw new ConvexError("Нет доступа");
   return me;
 }

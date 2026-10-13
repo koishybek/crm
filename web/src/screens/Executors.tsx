@@ -325,7 +325,7 @@ export function ExecutorDetail() {
       <Modal open={!!creds} onClose={() => setCreds(null)} title="Новый пароль" width={440}>
         {creds && (
           <div className="space-y-3 text-[15px]">
-            <p className="text-[14px] text-muted">Передайте исполнителю — пароль показывается один раз.</p>
+            <p className="text-[14px] text-muted">Передайте исполнителю — пароль показывается один раз. При первом входе он придумает свой.</p>
             <div className="flex justify-between">
               <span className="text-muted">Логин</span>
               <b>{phone(creds.login)}</b>

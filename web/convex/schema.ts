@@ -102,8 +102,12 @@ export default defineSchema({
     active: v.optional(v.boolean()),
     telegramChatId: v.optional(v.string()),
     telegramLinkCode: v.optional(v.string()),
+    /** До какого момента (мс) действует ссылка привязки Telegram — одноразовая, 30 минут (аудит M-9). */
+    telegramLinkExpiresAt: v.optional(v.number()),
     /** Дублировать важные уведомления на email (ТЗ п.18). */
     notifyEmail: v.optional(v.boolean()),
+    /** Временный пароль (выдан владельцем или оператором): до смены пароля — только экран «Смените пароль» (аудит M-8). */
+    mustChangePassword: v.optional(v.boolean()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
@@ -498,8 +502,11 @@ export default defineSchema({
   /** Расходы на рекламу по источникам за месяц (YYYY-MM) — для стоимости заявки и заказа (ТЗ п.17). */
   adSpend: defineTable({ month: v.string(), source, amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "source"]),
 
-  /** Счётчики лимитов (антиспам публичных форм и API): ключ + окно. */
-  rateLimits: defineTable({ key: v.string(), windowStart: v.number(), count: v.number() }).index("by_key", ["key"]),
+  /** Счётчики лимитов (антиспам публичных форм и API): ключ + окно. by_window — для очистки отживших (maintenance.ts). */
+  rateLimits: defineTable({ key: v.string(), windowStart: v.number(), count: v.number() }).index("by_key", ["key"]).index("by_window", ["windowStart"]),
+
+  /** update_id принятых обновлений Telegram: повтор доставки вебхука не обрабатываем второй раз (аудит L-3). Живут 2 суток. */
+  telegramUpdates: defineTable({ updateId: v.number() }).index("by_update", ["updateId"]),
 
   /** Состояние подсистем для владельца (ТЗ п.20 «мониторинг»): когда работало, последняя ошибка. */
   systemStatus: defineTable({

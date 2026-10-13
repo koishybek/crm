@@ -6,7 +6,7 @@ import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor } from "./lib/domain";
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
 import { cleanMoney, cleanText } from "./lib/limits";
-import { suitableUsers } from "./lib/matching";
+import { activeExecutorIds, suitableUsers } from "./lib/matching";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
@@ -27,7 +27,9 @@ export const board = query({
   args: { days: v.optional(v.number()) },
   handler: async (ctx, { days }) => {
     const scope = scopeOf(await requireRole(ctx, TEAM));
-    const since = new Date(Date.now() - (days ?? 45) * 86400_000).toISOString();
+    // Глубина — от 1 до 120 дней: запрос «за всё время» упёрся бы в лимиты чтения (аудит M-2).
+    const d = Math.min(Math.max(Math.round(typeof days === "number" && Number.isFinite(days) ? days : 45), 1), 120);
+    const since = new Date(Date.now() - d * 86400_000).toISOString();
     const active = await activeOrders(ctx);
     const done = await ctx.db.query("orders").withIndex("by_done", (q) => q.gte("doneAt", since)).collect();
     const cancelled = (await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "cancelled")).order("desc").take(60)).filter((o) => o.createdAt >= since);
@@ -53,13 +55,16 @@ export const detail = query({
     const scope = scopeOf(await requireRole(ctx, TEAM));
     const o = await ctx.db.get(id);
     if (!o || !inScope(scope, o.category)) return null;
-    const [client, messages, history, executors, active] = await Promise.all([
+    const [client, messages, history, all, active, reachable] = await Promise.all([
       ctx.db.get(o.clientId),
       ctx.db.query("messages").withIndex("by_order", (q) => q.eq("orderId", id)).collect(),
       ctx.db.query("history").withIndex("by_order", (q) => q.eq("orderId", id)).collect(),
       ctx.db.query("executors").collect(),
       activeOrders(ctx),
+      activeExecutorIds(ctx),
     ]);
+    // Мастера с отключённым доступом в подбор не попадают; назначенный остаётся в списке — для подписи.
+    const executors = all.filter((e) => reachable.has(e._id) || e._id === o.executorId);
     return {
       order: await toOrderWithFiles(ctx, o),
       client: client ? { id: client._id, name: client.name, phone: client.phone } : null,
@@ -333,6 +338,9 @@ export const assign = mutation({
     const o = await staffOrder(ctx, id);
     const e = await ctx.db.get(executorId);
     if (!e) throw new ConvexError("Исполнитель не найден");
+    // Уволенному (доступ отключён) заказ не назначаем даже владельцем: он его не увидит, а клиент будет ждать (аудит M-5).
+    const eu = await executorUser(ctx, executorId);
+    if (!eu || eu.active === false) throw new ConvexError("У исполнителя отключён доступ — назначить его нельзя");
     const scope = scopeOf(me);
     if (scope && !e.categories.some((c) => scope.includes(c))) throw new ConvexError("Это исполнитель другого направления");
     if (!e.available && me.role !== "owner") throw new ConvexError("Исполнитель на выходном — назначить его может только владелец");
@@ -372,7 +380,8 @@ export const addMessage = mutation({
     if (!me) throw new ConvexError("Нужно войти");
     const o = await ctx.db.get(orderId);
     if (!o) throw new ConvexError("Заказ не найден");
-    if (me.role === "executor" && o.executorId !== me.executorId) throw new ConvexError("Это не ваш заказ");
+    // Без executorId сравнение undefined !== undefined пропустило бы в любой свободный заказ (аудит L-6).
+    if (me.role === "executor" && (!me.executorId || o.executorId !== me.executorId)) throw new ConvexError("Это не ваш заказ");
     if (me.role === "manager") assertScope(me, o.category);
     if (!text.trim() && !files.length) throw new ConvexError("Пустое сообщение");
     if (files.length > 10) throw new ConvexError("Не больше 10 файлов за раз");

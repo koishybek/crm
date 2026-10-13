@@ -65,10 +65,15 @@ export function sha256Hex(input: string): string {
   return Array.from(h, (x) => x.toString(16).padStart(8, "0")).join("");
 }
 
-/** Сравнение секретов за время, не зависящее от того, где строки расходятся. */
+/**
+ * Сравнение секретов за постоянное время: сравниваются SHA-256 обеих строк — 64 символа всегда, поэтому
+ * время не зависит ни от того, где строки расходятся, ни от длины настоящего секрета (аудит L-2, L-3).
+ */
 export function safeEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  const x = sha256Hex(a);
+  const y = sha256Hex(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
   return diff === 0;
 }
 

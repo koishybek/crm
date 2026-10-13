@@ -30,6 +30,7 @@ export const toUser = (u: Doc<"users">): User => ({
   active: u.active !== false,
   telegram: !!u.telegramChatId,
   categories: u.categories,
+  mustChangePassword: u.mustChangePassword === true ? true : undefined,
 });
 
 export const toExecutor = (e: Doc<"executors">): Executor => ({

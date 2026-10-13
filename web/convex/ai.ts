@@ -319,7 +319,9 @@ export function toSummary(x: Extraction, serviceLabel: (id: string) => string): 
 export const status = query({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentUser(ctx))) return null;
+    // Провайдеры и модели AI — служебное: исполнителю не нужно (аудит L-8).
+    const me = await currentUser(ctx);
+    if (!me || me.role === "executor") return null;
     const stt = sttCfg();
     const llm = llmCfg();
     const worker = workerCfg();

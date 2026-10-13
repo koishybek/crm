@@ -1,35 +1,55 @@
-// Заливка демо-данных в Convex: npm run seed (нужны SEED_SECRET и ALLOW_SEED=1 на деплойменте).
+// Заливка демо-данных в Convex: CONVEX_DEPLOY_KEY=… DEMO_PASSWORD=… npm run seed [-- --wipe] (на деплойменте — ALLOW_SEED=1).
+// Функции seed:* внутренние (аудит H-1): клиенты их не видят, скрипт зовёт их с правами администратора деплоймента —
+// ключом деплоя (панель Convex → Settings → Deploy key), так же, как это делает `npx convex run`.
 // Генерация — локально (время считается в часовом поясе этой машины), вставка — пачками через seed:ingest.
 import { ConvexHttpClient } from "convex/browser";
-import { readFileSync } from "node:fs";
-import { api } from "../convex/_generated/api";
+import type { FunctionArgs, FunctionReference, FunctionReturnType } from "convex/server";
+import { existsSync, readFileSync } from "node:fs";
+import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { buildSeed } from "../src/data/seed";
 import { ACTIVE_STATUSES, serviceById } from "../src/data/catalog";
 import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
 
-const envLocal = Object.fromEntries(
-  readFileSync(new URL("../.env.local", import.meta.url), "utf8")
-    .split(/\r?\n/)
-    .map((l) => /^([A-Z_]+)=(\S*)/.exec(l))
-    .filter((m): m is RegExpExecArray => !!m)
-    .map((m) => [m[1], m[2]]),
-);
-const url = process.env.CONVEX_URL ?? envLocal.VITE_CONVEX_URL;
-const secret = process.env.SEED_SECRET;
+const envFile = new URL("../.env.local", import.meta.url);
+const envLocal: Record<string, string | undefined> = existsSync(envFile)
+  ? Object.fromEntries(
+      readFileSync(envFile, "utf8")
+        .split(/\r?\n/)
+        .map((l) => /^([A-Z_]+)=(\S*)/.exec(l))
+        .filter((m): m is RegExpExecArray => !!m)
+        .map((m) => [m[1], m[2]]),
+    )
+  : {};
+const deployKey = process.env.CONVEX_DEPLOY_KEY ?? "";
+/** Ключ деплоя «dev:имя|…» / «prod:имя|…» — имя деплоймента, к которому он подходит. */
+const keyDeployment = /^(?:dev|prod):([a-z0-9-]+)\|/.exec(deployKey)?.[1];
+const url = process.env.CONVEX_URL ?? envLocal.VITE_CONVEX_URL ?? (keyDeployment ? `https://${keyDeployment}.convex.cloud` : undefined);
 // Пароль демо-аккаунтов — только из окружения: в публичном репозитории его быть не должно.
 const password: string = process.env.DEMO_PASSWORD ?? "";
-if (!url || !secret) throw new Error("Нужны CONVEX_URL (или .env.local) и SEED_SECRET");
+if (!deployKey) throw new Error("Нужен CONVEX_DEPLOY_KEY — ключ деплоя из панели Convex (Settings → Deploy key) для деплоймента, куда заливаем демо-данные");
+if (!url) throw new Error("Нужен CONVEX_URL (или VITE_CONVEX_URL в .env.local)");
+// Ключ от одного деплоймента и адрес другого — скорее всего, опечатка: лучше остановиться, чем залить (и стереть) не туда.
+if (keyDeployment && new URL(url).hostname.split(".")[0] !== keyDeployment) throw new Error(`CONVEX_DEPLOY_KEY выдан для «${keyDeployment}», а адрес — ${url}`);
 if (!password || password.length < 10) throw new Error("Нужен DEMO_PASSWORD (не короче 10 символов) — пароль демо-аккаунтов");
 
-const client = new ConvexHttpClient(url);
+/** setAdminAuth и function — служебные методы ConvexHttpClient, через них зовёт внутренние функции и `npx convex run`. */
+interface AdminClient {
+  setAdminAuth(token: string): void;
+  function(fn: FunctionReference<"query" | "mutation" | "action", "internal">, componentPath: string | undefined, args: Record<string, unknown>): Promise<unknown>;
+}
+const admin = new ConvexHttpClient(url) as unknown as AdminClient;
+admin.setAdminAuth(deployKey);
+const call = <F extends FunctionReference<"query" | "mutation" | "action", "internal">>(fn: F, args: FunctionArgs<F>): Promise<FunctionReturnType<F>> =>
+  admin.function(fn, undefined, args) as Promise<FunctionReturnType<F>>;
+
 type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend";
 
 async function insert(table: Table, rows: Record<string, unknown>[]): Promise<string[]> {
   const ids: string[] = [];
   for (let i = 0; i < rows.length; i += 150) {
-    ids.push(...(await client.mutation(api.seed.ingest, { secret: secret!, table, rows: rows.slice(i, i + 150) })));
+    ids.push(...(await call(internal.seed.ingest, { table, rows: rows.slice(i, i + 150) })));
   }
   process.stdout.write(`  ${table}: ${rows.length}\n`);
   return ids;
@@ -58,7 +78,7 @@ const TRANSCRIPTS: Record<string, string> = {
 const frac = (n: number) => ((n * 2654435761) >>> 0) / 2 ** 32;
 
 async function uploadDemo(file: string): Promise<string> {
-  const uploadUrl = await client.mutation(api.seed.uploadUrl, { secret: secret! });
+  const uploadUrl = await call(internal.seed.uploadUrl, {});
   const res = await fetch(uploadUrl, { method: "POST", headers: { "Content-Type": "audio/mpeg" }, body: readFileSync(new URL(`./demo-calls/${file}`, import.meta.url)) });
   if (!res.ok) throw new Error(`Не загрузилась запись ${file}: HTTP ${res.status}`);
   return ((await res.json()) as { storageId: string }).storageId;
@@ -66,14 +86,14 @@ async function uploadDemo(file: string): Promise<string> {
 
 async function main() {
   // Привязки Telegram переживают перезаливку: людям не нужно заново жать «Подключить».
-  const links = await client.query(api.seed.telegramLinks, { secret: secret! });
+  const links = await call(internal.seed.telegramLinks, {});
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
-      while ((await client.mutation(api.seed.wipe, { secret: secret!, table: t })) > 0);
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "telegramUpdates", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+      while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
-    while ((await client.mutation(api.seed.wipeFiles, { secret: secret! })) > 0);
+    while ((await call(internal.seed.wipeFiles, {})) > 0);
   }
   const db = buildSeed(new Date());
   console.log("Заливаю демо-данные…");
@@ -143,7 +163,7 @@ async function main() {
   const orderMap = new Map(db.orders.map((o, i) => [o.id, orderIds[i]!]));
 
   const patches = db.leads.filter((l) => l.orderId).map((l) => ({ id: leadMap.get(l.id)!, fields: { orderId: orderMap.get(l.orderId!) } }));
-  for (let i = 0; i < patches.length; i += 200) await client.mutation(api.seed.patchMany, { secret: secret!, table: "leads", patches: patches.slice(i, i + 200) });
+  for (let i = 0; i < patches.length; i += 200) await call(internal.seed.patchMany, { table: "leads", patches: patches.slice(i, i + 200) });
 
   const actor = (a: Actor): Actor => (a.type === "user" ? { type: "user", id: userMap.get(a.id)! } : a.type === "client" ? { type: "client", id: clientMap.get(a.id)! } : a);
   await insert("messages", db.messages.map((m) => ({ ...strip(m), orderId: orderMap.get(m.orderId), author: actor(m.author), files: m.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })) })));
@@ -214,14 +234,14 @@ async function main() {
     });
   }
   const callIds = await insert("calls", [...fromLeads, ...today, ...liveRows]);
-  await client.mutation(api.seed.patchMany, { secret: secret!, table: "leads", patches: fromLeads.map((c, i) => ({ id: c.leadId!, fields: { callId: callIds[i] } })) });
+  await call(internal.seed.patchMany, { table: "leads", patches: fromLeads.map((c, i) => ({ id: c.leadId!, fields: { callId: callIds[i] } })) });
 
   // ── Требуемые навыки у части открытых заказов — чтобы подбор по навыкам было видно на демо ──
   const SKILL_BY_SERVICE: Record<string, string[]> = { "ac-install": ["Монтаж сплит-систем"], "wm-repair": ["Стиральные машины"], boiler: ["Бойлеры"], "boiler-service": ["Газовые котлы"], cctv: ["Видеонаблюдение"] };
   const skillPatches = db.orders
     .filter((o) => (o.status === "awaiting_executor" || o.status === "new") && SKILL_BY_SERVICE[o.serviceId])
     .map((o) => ({ id: orderMap.get(o.id)!, fields: { requiredSkills: SKILL_BY_SERVICE[o.serviceId] } }));
-  if (skillPatches.length) await client.mutation(api.seed.patchMany, { secret: secret!, table: "orders", patches: skillPatches });
+  if (skillPatches.length) await call(internal.seed.patchMany, { table: "orders", patches: skillPatches });
 
   // ── Переписка в разделе «Сообщения»: заявки из Telegram, WhatsApp, OLX и с сайта за последние дни ──
   type Channel = "telegram" | "whatsapp" | "olx" | "site";
@@ -341,8 +361,7 @@ async function main() {
     ratingsByExecutor.set(o.executorId, [...(ratingsByExecutor.get(o.executorId) ?? []), rating]);
   }
   await insert("reviews", reviewRows);
-  await client.mutation(api.seed.patchMany, {
-    secret: secret!,
+  await call(internal.seed.patchMany, {
     table: "executors",
     patches: [...ratingsByExecutor.entries()].map(([id, list]) => ({ id: exMap.get(id)!, fields: { rating: bayesianRating(list), reviews: list.length } })),
   });
@@ -413,8 +432,8 @@ async function main() {
   await insert("audit", auditRows);
 
   const logins = db.users.map((u) => ({ login: loginOf(u), password }));
-  for (let i = 0; i < logins.length; i += 5) await client.action(api.seed.logins, { secret: secret!, logins: logins.slice(i, i + 5) });
-  await client.mutation(api.seed.processCalls, { secret: secret!, ids: callIds.slice(-liveRows.length) as Id<"calls">[] });
+  for (let i = 0; i < logins.length; i += 5) await call(internal.seed.logins, { logins: logins.slice(i, i + 5) });
+  await call(internal.seed.processCalls, { ids: callIds.slice(-liveRows.length) as Id<"calls">[] });
   console.log(`AI разбирает записи звонков: ${liveRows.length}. Через ~30–60 секунд появятся новые заявки.`);
   if (links.length) console.log(`Привязки Telegram сохранены: ${links.length}`);
   console.log(`Готово. Логины: ${logins.slice(0, 5).map((l) => l.login).join(", ")}… (пароль — из DEMO_PASSWORD)`);
