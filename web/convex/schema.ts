@@ -59,6 +59,8 @@ export const historyKind = v.union(
 export const tone = v.union(v.literal("info"), v.literal("ok"), v.literal("warn"), v.literal("bad"));
 /** Каналы переписки с клиентами (единый чат «Сообщения»). */
 export const channel = v.union(v.literal("telegram"), v.literal("whatsapp"), v.literal("olx"), v.literal("site"));
+/** Тип сообщения в диалоге; system — автоответы бота и служебные отметки. */
+export const messageKind = v.union(v.literal("text"), v.literal("image"), v.literal("audio"), v.literal("file"), v.literal("location"), v.literal("system"));
 /** Сущности журнала действий; действие пишется как «сущность.что» — «order.status», «user.access». */
 export const auditEntity = v.union(
   v.literal("lead"),
@@ -389,7 +391,7 @@ export default defineSchema({
   conversationMessages: defineTable({
     conversationId: v.id("conversations"),
     direction: v.union(v.literal("in"), v.literal("out")),
-    kind: v.union(v.literal("text"), v.literal("image"), v.literal("audio"), v.literal("file"), v.literal("location"), v.literal("system")),
+    kind: messageKind,
     text: v.string(),
     at: v.string(),
     /** Id сообщения во внешнем канале — защита от повторной доставки вебхука. */
@@ -433,6 +435,11 @@ export default defineSchema({
     lastUsedAt: v.optional(v.string()),
     revokedAt: v.optional(v.string()),
   }).index("by_hash", ["hash"]),
+
+  /** Заявки, созданные через публичный API: ключ идемпотентности (externalId) и «свои» заявки ключа — статус отдаём только по ним. */
+  apiLeads: defineTable({ keyId: v.id("apiKeys"), leadId: v.id("leads"), number: v.number(), externalId: v.optional(v.string()), at: v.string() })
+    .index("by_key_external", ["keyId", "externalId"])
+    .index("by_key_number", ["keyId", "number"]),
 
   /** Отзывы клиентов о выполненных заказах (ТЗ п.14, п.29): из них считается рейтинг мастера. */
   reviews: defineTable({

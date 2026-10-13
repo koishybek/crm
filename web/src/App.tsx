@@ -14,10 +14,12 @@ import Calls from "./screens/Calls";
 import Clients from "./screens/Clients";
 import Dashboard from "./screens/Dashboard";
 import Executors, { ExecutorDetail } from "./screens/Executors";
+import Inbox from "./screens/Inbox";
 import Leads from "./screens/Leads";
 import Login from "./screens/Login";
 import OrderDetail from "./screens/OrderDetail";
 import Orders from "./screens/Orders";
+import PublicRequest from "./screens/PublicRequest";
 import Settings from "./screens/Settings";
 import { Feed, Income, MyOrders, WorkerOrder } from "./screens/worker/Worker";
 
@@ -78,6 +80,8 @@ const lazyAnalytics = (
 
 const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
+  // Публичная форма заявки для клиентов (ссылка и iframe на сайте) — без входа.
+  { path: "/zayavka", element: <PublicRequest /> },
   {
     element: <Guard roles={["owner", "operator", "manager"]} />,
     children: [
@@ -90,10 +94,11 @@ const router = createBrowserRouter([
     ],
   },
   {
-    // Клиентская база и звонки — владельцу и операторам; руководитель направления их не видит.
+    // Клиентская база, звонки и переписка — владельцу и операторам; руководитель направления их не видит.
     element: <Guard roles={["owner", "operator"]} />,
     children: [
       { path: "/calls", element: <Calls /> },
+      { path: "/inbox", element: <Inbox /> },
       { path: "/clients", element: <Clients /> },
       { path: "/clients/:id", element: <ClientDetail /> },
     ],

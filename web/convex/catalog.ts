@@ -69,6 +69,20 @@ export const _categories = internalQuery({
   handler: async (ctx) => (await loadCatalog(ctx)).categories,
 });
 
+/** Для публичной формы заявки (/zayavka, без входа): только названия активных направлений и услуг — без цен и ставок. */
+export const publicList = query({
+  args: {},
+  handler: async (ctx): Promise<{ categories: { id: string; label: string }[]; services: { id: string; label: string; category: string }[] }> => {
+    const c = await loadCatalog(ctx);
+    const categories = c.categories.filter((x) => x.active !== false);
+    const open = new Set(categories.map((x) => x.id));
+    return {
+      categories: categories.map((x) => ({ id: x.id, label: x.label })),
+      services: c.services.filter((s) => s.active !== false && open.has(s.category) && s.id !== "other").map((s) => ({ id: s.id, label: s.label, category: s.category })),
+    };
+  },
+});
+
 /** Перенести значения по умолчанию в базу перед первой правкой. */
 async function materialize(ctx: MutationCtx) {
   if ((await ctx.db.query("categories").first()) || (await ctx.db.query("services").first())) return;

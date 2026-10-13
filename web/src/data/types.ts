@@ -371,3 +371,44 @@ export interface Review {
   via: ReviewVia;
   at: string;
 }
+
+// ── Единый чат: фильтры и карточка диалога, черновик заявки, ключи API ──────
+
+/** Фильтр списка диалогов: открытые (все, непрочитанные, мои, по каналу) или архив закрытых. */
+export type InboxFilter = "all" | "unread" | "mine" | "closed" | Channel;
+
+export interface ConversationDetail {
+  conversation: Conversation;
+  /** Последние сообщения, старые — сверху. */
+  messages: ConversationMessage[];
+  /** Есть сообщения раньше показанных. */
+  hasMore: boolean;
+  /** Почему нельзя ответить в канал (форма сайта, канал не подключён, окно WhatsApp). Нет — можно. */
+  replyBlock?: string;
+  lead?: { id: string; number: number; status: LeadStatus; orderId?: string };
+  client?: { id: string; name: string; phone: string; city: string };
+  /** @username клиента в Telegram — для ссылки t.me. */
+  telegramUsername?: string;
+}
+
+/** Черновик заявки из переписки: что подставить в форму (AI-разбор, если AI подключён). */
+export interface ConversationDraft {
+  channel: Channel;
+  phone?: string;
+  name?: string;
+  /** Последние сообщения клиента одним текстом. */
+  text: string;
+  ai?: AiSummary;
+  draft: AiDraft;
+}
+
+/** Ключ публичного API в списке владельца. Сам ключ показывается один раз при создании, здесь — только начало. */
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  createdBy?: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+}

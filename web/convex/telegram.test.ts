@@ -75,7 +75,9 @@ async function setup() {
   return { t, ids };
 }
 
-const msg = (chatId: number, text: string, extra: Record<string, unknown> = {}) => ({ update: { message: { message_id: 1, chat: { id: chatId, type: "private" }, from: { id: chatId, first_name: "Гульмира" }, text, ...extra } } });
+// В Telegram id сообщения уникален внутри чата; повтор того же id — повтор вебхука, его бот пропускает.
+let messageId = 0;
+const msg = (chatId: number, text: string, extra: Record<string, unknown> = {}) => ({ update: { message: { message_id: ++messageId, chat: { id: chatId, type: "private" }, from: { id: chatId, first_name: "Гульмира" }, text, ...extra } } });
 const cb = (chatId: number, data: string) => ({ update: { callback_query: { id: "cb1", data, from: { id: chatId }, message: { message_id: 7, chat: { id: chatId } } } } });
 
 describe("бот: сотрудники и мастера", () => {

@@ -8,12 +8,12 @@ import { APP_NAME } from "../data/catalog";
 import { run } from "../data/convex";
 import { regeneratePbxSecret, report, toast } from "../data/store";
 
-const copy = (text: string) => {
+export const copy = (text: string) => {
   void navigator.clipboard?.writeText(text);
   toast("Скопировано", "info");
 };
 
-function CopyRow({ label, value, shown, children }: { label: string; value: string; shown?: string; children?: ReactNode }) {
+export function CopyRow({ label, value, shown, children }: { label: string; value: string; shown?: string; children?: ReactNode }) {
   return (
     <div>
       <div className="mb-1 text-[12.5px] font-medium text-muted">{label}</div>
