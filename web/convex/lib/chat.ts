@@ -18,11 +18,11 @@ const PLACEHOLDERS = new Set<string>(Object.values(PLACEHOLDER));
 export const REPLY_BLOCK = {
   notConnected: "Канал не подключён",
   callClient: "Ответьте клиенту по телефону",
-  windowClosed: "Прошло 24 часа после последнего сообщения клиента — WhatsApp не даёт написать первым. Позвоните клиенту",
+  windowClosed: "Прошло 24 часа — WhatsApp разрешает писать только шаблоном. Позвоните клиенту или дождитесь его сообщения.",
 } as const;
 
-/** WhatsApp: свободный текст — только в течение 24 часов после последнего сообщения клиента. */
-export const whatsappWindowClosed = (replyUntil: string | undefined, now: number): boolean => !!replyUntil && Date.parse(replyUntil) <= now;
+/** WhatsApp: свободный текст — только в течение 24 часов после последнего сообщения клиента. Клиент ещё не писал — окна нет. */
+export const whatsappWindowClosed = (replyUntil: string | undefined, now: number): boolean => !replyUntil || Date.parse(replyUntil) <= now;
 
 /** Подпись вложения или стикер — не текст клиента. */
 export const isPlaceholder = (text: string): boolean => PLACEHOLDERS.has(text) || /^Стикер(\s\S{1,8})?$/u.test(text);

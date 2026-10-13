@@ -1,0 +1,44 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1234567890123456",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "77273000000",
+              "phone_number_id": "987654321098765"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Ерлан",
+                  "username": "erlan.almaty"
+                },
+                "user_id": "KZ.8812004571923311045"
+              }
+            ],
+            "messages": [
+              {
+                "from_user_id": "KZ.8812004571923311045",
+                "id": "wamid.HBgLS1ouODgxMjAwNDU3MRUCABIYFDNBQjc3QzlFNDQwRjM1QTI4RjZFAA==",
+                "timestamp": "1791796200",
+                "type": "audio",
+                "audio": {
+                  "mime_type": "audio/ogg; codecs=opus",
+                  "sha256": "q1wZr9mN0kTQnq3w8wqv3G3d2C0vE5lH0qjD3m4bW8E=",
+                  "id": "1784205519832661",
+                  "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1784205519832661&ext=1791796200&hash=ARd3x9",
+                  "voice": true
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { auth } from "./auth";
+import { whatsappVerify, whatsappWebhook, WEBHOOK_PATH as WHATSAPP_WEBHOOK } from "./channels/whatsapp";
 import { env } from "./env";
 import { safeEqual } from "./lib/crypto";
 import { createLeadHttp, getLeadHttp } from "./publicApi";
@@ -85,6 +86,11 @@ http.route({
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   }),
 });
+
+// ── WhatsApp Cloud API (Meta) ───────────────────────────────────────────────
+// Callback URL в Meta: https://<deployment>.convex.site/whatsapp/webhook. GET — проверка адреса, POST — события (подпись App Secret).
+http.route({ path: WHATSAPP_WEBHOOK, method: "GET", handler: whatsappVerify });
+http.route({ path: WHATSAPP_WEBHOOK, method: "POST", handler: whatsappWebhook });
 
 // ── Заявки с сайта и публичный API ───────────────────────────────────────────
 // CORS — только у формы сайта: её зовут браузеры с /zayavka и с сайтов компании. API — для серверов, по ключу.

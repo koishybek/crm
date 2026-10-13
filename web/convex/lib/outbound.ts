@@ -4,6 +4,7 @@
 import { ConvexError } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import type { Channel } from "../../src/data/types";
+import { canSend as whatsappCanSend, sendWhatsApp } from "../channels/whatsapp";
 import { env } from "../env";
 import { tg } from "../telegram";
 import { REPLY_BLOCK, whatsappWindowClosed } from "./chat";
@@ -11,11 +12,15 @@ import { esc } from "./tg";
 
 export type ReplyTarget = Pick<Doc<"conversations">, "channel" | "externalId" | "contactPhone" | "replyUntil">;
 
-/** Ошибка отправки. Текст — для оператора; systemic — сломан сам канал (токен, сеть), а не конкретный чат. */
+/**
+ * Ошибка отправки. Текст — для оператора; systemic — сломан сам канал (токен, сеть), а не конкретный чат;
+ * closeWindow — канал сообщил, что окно ответа закрыто (WhatsApp: прошло 24 часа), поле ответа выключаем.
+ */
 export class ChannelError extends ConvexError<string> {
   constructor(
     message: string,
     readonly systemic: boolean,
+    readonly closeWindow = false,
   ) {
     super(message);
   }
@@ -52,7 +57,17 @@ const telegram: ChannelAdapter = {
   },
 };
 
-/** Канал, отправку в который подключает следующий этап (WhatsApp Cloud API, OLX Partner API). */
+/** WhatsApp Cloud API: текст — только в 24-часовом окне (channels/whatsapp.ts проверяет его и сам, без запроса к Meta). */
+const whatsapp: ChannelAdapter = {
+  block: () => (whatsappCanSend() ? null : NOT_CONNECTED),
+  async send(c, text) {
+    const r = await sendWhatsApp(c, text);
+    if (!r.ok) throw new ChannelError(r.error, r.systemic, r.closeWindow);
+    return { externalId: r.wamid };
+  },
+};
+
+/** Канал, отправку в который подключает следующий этап (OLX Partner API). */
 const pending: ChannelAdapter = {
   block: () => NOT_CONNECTED,
   send: () => Promise.reject(new ChannelError(NOT_CONNECTED, false)),
@@ -64,7 +79,7 @@ const site: ChannelAdapter = {
   send: () => Promise.reject(new ChannelError(CALL_CLIENT, false)),
 };
 
-const ADAPTERS: Record<Channel, ChannelAdapter> = { telegram, whatsapp: pending, olx: pending, site };
+const ADAPTERS: Record<Channel, ChannelAdapter> = { telegram, whatsapp, olx: pending, site };
 
 /** Почему нельзя ответить в этот диалог сейчас; null — можно. */
 export function replyBlock(c: ReplyTarget, now: number): string | null {
