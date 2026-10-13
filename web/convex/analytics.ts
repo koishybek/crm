@@ -104,11 +104,13 @@ export const setAdSpend = mutation({
 export interface PayoutView {
   period: PayoutSummary["period"];
   owed: { total: number; orders: number; executors: { id: string; name: string; amount: number; orders: number }[] };
+  /** Выплачено мастерам с даты from — по датам выплат из реестра (а не по дате выполнения заказов). */
+  paidOut: { amount: number; count: number };
 }
 
 /**
  * Выплаты исполнителям для «Главной» и «Аналитики» владельца: начислено и выплачено за заказы, выполненные
- * с даты from, и долг исполнителям сейчас — за все выполненные и не выплаченные заказы, по мастерам.
+ * с даты from, выплачено мастерам с этой даты по реестру и долг исполнителям сейчас — по мастерам.
  */
 export const payouts = query({
   args: { from: v.string() },
@@ -116,6 +118,11 @@ export const payouts = query({
     await requireRole(ctx, OWNER);
     const start = Date.parse(from);
     if (Number.isNaN(start)) throw new ConvexError("Неверная дата");
+    const registry = await ctx.db
+      .query("payouts")
+      .withIndex("by_at", (q) => q.gte("at", new Date(start).toISOString()))
+      .collect();
+    const paidOut = { amount: registry.reduce((s, p) => s + p.amount, 0), count: registry.length };
     const byId = new Map<string, Doc<"orders">>();
     const done = await ctx.db
       .query("orders")
@@ -135,6 +142,6 @@ export const payouts = query({
         return { ...x, name: e?.name ?? "Исполнитель удалён" };
       }),
     );
-    return { ...summary, owed: { ...summary.owed, executors } };
+    return { ...summary, owed: { ...summary.owed, executors }, paidOut };
   },
 });

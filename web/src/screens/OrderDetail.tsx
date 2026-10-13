@@ -16,6 +16,7 @@ import {
   Phone,
   Plus,
   Rocket,
+  RotateCcw,
   Search,
   Star,
   UserPlus,
@@ -31,13 +32,15 @@ import {
 import { useQuery } from "convex/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, TRANSITION_LABEL, URGENCY, categoryById, serviceById } from "../data/catalog";
+import { ORDER_STATUS, STAFF_TRANSITIONS, TRANSITION_LABEL, URGENCY, categoryById, serviceById } from "../data/catalog";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useMe, useNow, useTeam } from "../data/hooks";
-import { EXEC_STATE, debt, executorState, isOverdue, margin, marginPct, paidAmount, payout, paymentState, rankExecutors, type Load } from "../data/logic";
-import { addPayment, assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
-import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, PaymentMethod, Urgency, User } from "../data/types";
+import { EXEC_STATE, debt, executorState, isOverdue, netMargin, paidAmount, payout, paymentState, rankExecutors, refundedAmount, revenueOf, type Load } from "../data/logic";
+import { closeProblems, isPayoutDue, netReceived, OWNER_MONEY_STATUSES, PAYMENT_BLOCKED, REFUNDABLE_STATUSES, settledStatus, TERMS_WATCH_STATUSES } from "../data/money";
+import { assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
+import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, Payment, Urgency, User } from "../data/types";
+import { CloseModal, MoneyLedger, OrderPayoutModal, PaymentModal, RefundModal, VoidModal } from "../components/OrderMoney";
 import { OrderChat } from "../components/OrderChat";
 import { OrderReview } from "../components/OrderReview";
 import { ExecutorRating } from "../components/Rating";
@@ -45,9 +48,9 @@ import { ratingValue } from "../data/reviews";
 import { Source, ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillPicker } from "../components/SkillChips";
 import { hasSkill } from "../data/skills";
-import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, FormRow, IconTile, Input, Loading, Menu, MenuItem, Modal, Segmented, Select, Textarea, Toggle } from "../components/ui";
+import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, FormRow, IconTile, Input, Loading, Menu, MenuItem, Modal, Segmented, Select, Textarea } from "../components/ui";
 import { CitySelect, ServiceSelect } from "./drawers";
-import { cn, dateTime, digits, money, num, phone, shortName, toLocalInput } from "../lib/format";
+import { cn, date, dateTime, digits, money, num, phone, shortName, toLocalInput } from "../lib/format";
 
 /** Данные карточки с сервера — для вложенных блоков (подбор, история, подсказка). */
 interface Detail {
@@ -73,7 +76,8 @@ export default function OrderDetail() {
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const o = d?.order;
-  const [modal, setModal] = useState<null | "assign" | "info" | "finance" | "payment" | "cancel">(null);
+  const [modal, setModal] = useState<null | "assign" | "info" | "finance" | "payment" | "cancel" | "refund" | "payout" | "close">(null);
+  const [voiding, setVoiding] = useState<Payment | null>(null);
 
   useEffect(() => {
     if (params.get("assign")) setModal("assign");
@@ -94,11 +98,23 @@ export default function OrderDetail() {
   const nameOf = (a: Actor) => (a.type === "client" ? client.name : a.type === "user" ? (team.users.find((u) => u.id === a.id)?.name ?? "Сотрудник") : "Система");
   const overdue = isOverdue(o, now);
   const st = ORDER_STATUS[o.status];
-  const transitions = STAFF_TRANSITIONS[o.status];
+  const isOwner = me.role === "owner";
+  // «Возврат» — не переход статуса, а запись с суммой: пункт «Оформить возврат» владельца.
+  const transitions = STAFF_TRANSITIONS[o.status].filter((t) => t !== "refund");
+  const canRefund = isOwner && REFUNDABLE_STATUSES.includes(o.status) && netReceived(o) > 0;
+  // Деньги оплаченного, закрытого и возвращённого заказа правит только владелец (аудит L-4) — так же проверяет сервер.
+  const moneyEditable = isOwner || !OWNER_MONEY_STATUSES.includes(o.status);
+  const canPay = !PAYMENT_BLOCKED[o.status] && moneyEditable && paidAmount(o) < o.clientPrice;
   const canAssign = ["new", "awaiting_executor", "assigned", "accepted"].includes(o.status);
 
   const go = async (to: OrderStatus) => {
     if (to === "cancelled") return setModal("cancel");
+    // Как на сервере: «Оплачен» — только когда оплачено всё; закрыть с долгом или без выплаты — владелец с причиной.
+    if (to === "paid" && paidAmount(o) < o.clientPrice) {
+      toast(`Сначала внесите оплату: не хватает ${money(o.clientPrice - paidAmount(o))}`, "bad");
+      return setModal("payment");
+    }
+    if (to === "closed" && isOwner && closeProblems(o).length) return setModal("close");
     const r = await changeStatus(o.id, to);
     if (!r.ok) {
       toast(r.error, "bad");
@@ -106,6 +122,8 @@ export default function OrderDetail() {
       return;
     }
     const notified = r.value?.notified;
+    // «Выполнен» сразу уходит дальше по деньгам — показываем, куда.
+    if (to === "done") return toast(`Работа сдана: ${paidAmount(o) >= o.clientPrice ? "заказ оплачен" : `ждём оплату ${money(o.clientPrice - paidAmount(o))}`}`);
     if (to !== "awaiting_executor") return toast(`Статус: ${ORDER_STATUS[to].label}`);
     if (notified) return toast(`Заказ №${o.number} в ленте — уведомили подходящих исполнителей: ${notified}`);
     toast(`Заказ №${o.number} в ленте, но подходящих исполнителей сейчас нет — назначьте вручную или ослабьте требования`, "info");
@@ -143,7 +161,7 @@ export default function OrderDetail() {
           <Menu
             width={300}
             trigger={(toggle) => (
-              <Button size="lg" icon={Pencil} iconRight={ChevronDown} className="h-[50px] text-[15px]" onClick={toggle} disabled={!transitions.length}>
+              <Button size="lg" icon={Pencil} iconRight={ChevronDown} className="h-[50px] text-[15px]" onClick={toggle} disabled={!transitions.length && !canRefund}>
                 Изменить статус
               </Button>
             )}
@@ -152,20 +170,25 @@ export default function OrderDetail() {
               <>
                 <div className="px-3 pt-1.5 pb-1 text-[12px] font-semibold tracking-wide text-faint uppercase">Следующий шаг</div>
                 {transitions.map((t) => (
-                  <MenuItem key={t} danger={t === "cancelled" || t === "refund"} onClick={() => (close(), void go(t))}>
+                  <MenuItem key={t} danger={t === "cancelled"} onClick={() => (close(), void go(t))}>
                     <span className="flex items-center gap-2">
-                      {t !== "cancelled" && t !== "refund" && <span className={cn("h-2 w-2 rounded-full", DOT[ORDER_STATUS[t].tone])} />}
+                      {t !== "cancelled" && <span className={cn("h-2 w-2 rounded-full", DOT[ORDER_STATUS[t].tone])} />}
                       {TRANSITION_LABEL[t] ?? ORDER_STATUS[t].label}
                     </span>
                   </MenuItem>
                 ))}
+                {canRefund && (
+                  <MenuItem danger icon={RotateCcw} hint="Сумма, способ и причина — запись в финансах" onClick={() => (close(), setModal("refund"))}>
+                    {TRANSITION_LABEL.refund}
+                  </MenuItem>
+                )}
               </>
             )}
           </Menu>
         </div>
       </div>
 
-      <NextStep o={o} onFinance={() => setModal("finance")} onAssign={() => setModal("assign")} onPay={() => setModal("payment")} go={go} />
+      <NextStep o={o} isOwner={isOwner} onFinance={() => setModal("finance")} onAssign={() => setModal("assign")} onPay={() => setModal("payment")} onPayout={() => setModal("payout")} go={go} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.18fr_1fr]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -214,15 +237,23 @@ export default function OrderDetail() {
           <Card
             title="Финансы"
             action={
-              <button onClick={() => setModal("finance")} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink hover:text-brand-deep">
-                <Pencil size={16} /> Редактировать
-              </button>
+              moneyEditable ? (
+                <button onClick={() => setModal("finance")} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink hover:text-brand-deep">
+                  <Pencil size={16} /> Редактировать
+                </button>
+              ) : undefined
             }
           >
             <FinanceTiles o={o} />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-[#f8f6f1] px-4 py-3 text-[13.5px]">
               <div className="text-ink-2">
                 Оплачено <b className="text-ink tabular-nums">{money(paidAmount(o))}</b> из {money(o.clientPrice)}
+                {refundedAmount(o) > 0 && (
+                  <>
+                    {" "}
+                    · возвращено <b className="text-bad-ink tabular-nums">{money(refundedAmount(o))}</b>
+                  </>
+                )}
                 {debt(o) > 0 && (
                   <>
                     {" "}
@@ -230,14 +261,22 @@ export default function OrderDetail() {
                   </>
                 )}
                 <span className="mx-2 text-line-strong">|</span>
-                Исполнителю: <b className={o.payoutPaid ? "text-ok-ink" : "text-ink"}>{o.payoutPaid ? "выплачено" : "не выплачено"}</b>
+                Исполнителю: <b className={o.payoutPaid ? "text-ok-ink" : "text-ink"}>{o.payoutPaid ? `выплачено${o.payoutPaidAt ? ` ${date(o.payoutPaidAt)}` : ""}` : "не выплачено"}</b>
               </div>
-              {o.clientPrice > 0 && paidAmount(o) < o.clientPrice && !["new", "awaiting_executor", "cancelled"].includes(o.status) && (
-                <Button size="sm" variant="secondary" icon={Plus} onClick={() => setModal("payment")}>
-                  Внести оплату
-                </Button>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {canPay && (
+                  <Button size="sm" variant="secondary" icon={Plus} onClick={() => setModal("payment")}>
+                    Внести оплату
+                  </Button>
+                )}
+                {isOwner && isPayoutDue(o) && (
+                  <Button size="sm" variant="secondary" icon={Wallet} onClick={() => setModal("payout")}>
+                    Выплатить исполнителю
+                  </Button>
+                )}
+              </div>
             </div>
+            <MoneyLedger o={o} onVoid={isOwner ? setVoiding : undefined} />
           </Card>
 
           <Card
@@ -303,6 +342,10 @@ export default function OrderDetail() {
       {modal === "finance" && <FinanceModal o={o} onClose={() => setModal(null)} />}
       {modal === "payment" && <PaymentModal o={o} onClose={() => setModal(null)} />}
       {modal === "cancel" && <CancelModal o={o} onClose={() => setModal(null)} />}
+      {modal === "refund" && <RefundModal o={o} onClose={() => setModal(null)} />}
+      {modal === "payout" && <OrderPayoutModal o={o} executorName={ex?.name ?? "Исполнитель"} onClose={() => setModal(null)} />}
+      {modal === "close" && <CloseModal o={o} problems={closeProblems(o)} onClose={() => setModal(null)} />}
+      {voiding && <VoidModal o={o} payment={voiding} onClose={() => setVoiding(null)} />}
     </DetailCtx.Provider>
   );
 }
@@ -330,15 +373,20 @@ export function PriorityBadge({ p }: { p: Urgency }) {
 
 function FinanceTiles({ o }: { o: Order }) {
   const ps = paymentState(o);
+  // Маржа — с учётом возвратов: частичный возврат уменьшает выручку заказа (E1).
+  const m = netMargin(o);
+  const revenue = revenueOf(o);
+  const mPct = revenue > 0 ? Math.round((m / revenue) * 1000) / 10 : 0;
+  const refunded = refundedAmount(o) > 0;
   const tiles: { icon: LucideIcon; tone: "green" | "blue" | "violet" | "amber"; label: string; value: ReactNode; sub?: ReactNode }[] = [
     { icon: Wallet, tone: "green", label: "Цена клиента", value: o.clientPrice ? money(o.clientPrice) : "—" },
     { icon: UserRound, tone: "blue", label: "Выплата исполнителю", value: o.clientPrice ? money(payout(o)) : "—", sub: o.payoutMode === "percent" ? <span className="text-muted">{o.payoutValue}% от цены</span> : undefined },
     {
       icon: ChartNoAxesColumn,
       tone: "violet",
-      label: "Маржа",
-      value: o.clientPrice ? money(margin(o)) : "—",
-      sub: o.clientPrice ? <span className={cn("font-semibold", marginPct(o) >= 20 ? "text-ok" : "text-warn-ink")}>↗ {marginPct(o)}%</span> : undefined,
+      label: refunded ? "Маржа после возврата" : "Маржа",
+      value: o.clientPrice ? money(m) : "—",
+      sub: o.clientPrice ? <span className={cn("font-semibold", mPct >= 20 ? "text-ok" : "text-warn-ink")}>↗ {mPct}%</span> : undefined,
     },
     { icon: CreditCard, tone: "amber", label: "Статус оплаты", value: <Badge tone={ps.tone} className="mt-1">{ps.label}</Badge> },
   ];
@@ -357,7 +405,23 @@ function FinanceTiles({ o }: { o: Order }) {
 }
 
 /** Подсказка «что делать дальше» — главный способ сделать CRM простой. */
-function NextStep({ o, onFinance, onAssign, onPay, go }: { o: Order; onFinance: () => void; onAssign: () => void; onPay: () => void; go: (s: OrderStatus) => void | Promise<void> }) {
+function NextStep({
+  o,
+  isOwner,
+  onFinance,
+  onAssign,
+  onPay,
+  onPayout,
+  go,
+}: {
+  o: Order;
+  isOwner: boolean;
+  onFinance: () => void;
+  onAssign: () => void;
+  onPay: () => void;
+  onPayout: () => void;
+  go: (s: OrderStatus) => void | Promise<void>;
+}) {
   const db = useDetail();
   // Тот же подбор, что у ленты и уведомлений: на смене, город, специализация, навыки.
   const fits = useMemo(() => rankExecutors(o, db.executors, db.orders).filter((x) => x.fits).length, [o, db.executors, db.orders]);
@@ -397,18 +461,32 @@ function NextStep({ o, onFinance, onAssign, onPay, go }: { o: Order; onFinance: 
   } else if (o.status === "done" || o.status === "awaiting_payment") {
     tone = "amber";
     icon = CreditCard;
-    text = <>Работа выполнена. Осталось получить оплату: {money(Math.max(0, o.clientPrice - paidAmount(o)))}.</>;
+    text = <>Работа выполнена. Осталось получить оплату: {money(Math.max(0, o.clientPrice - paidAmount(o)))}. Когда клиент оплатит всё, заказ сам станет «Оплачен».</>;
     action = <Button size="sm" icon={Plus} onClick={onPay}>Внести оплату</Button>;
   } else if (o.status === "paid") {
     tone = "green";
     icon = BadgeCheck;
-    text = <>Оплата получена.{!o.payoutPaid && " Отметьте выплату исполнителю и"} закройте заказ.</>;
-    action = (
-      <div className="flex gap-2">
-        {!o.payoutPaid && <Button size="sm" variant="secondary" onClick={onFinance}>Выплата исполнителю</Button>}
-        <Button size="sm" variant="success" icon={CircleCheck} onClick={() => go("closed")}>Закрыть заказ</Button>
-      </div>
+    const due = isPayoutDue(o);
+    text = due ? (
+      isOwner ? (
+        <>Оплата получена. Проведите выплату исполнителю ({money(payout(o))}) и закройте заказ.</>
+      ) : (
+        <>Оплата получена. Выплату исполнителю ({money(payout(o))}) проводит владелец — после неё заказ можно закрыть.</>
+      )
+    ) : (
+      <>Оплата получена, исполнителю выплачено — закройте заказ.</>
     );
+    action =
+      due && !isOwner ? null : (
+        <div className="flex gap-2">
+          {due && <Button size="sm" variant="secondary" icon={Wallet} onClick={onPayout}>Выплатить исполнителю</Button>}
+          <Button size="sm" variant="success" icon={CircleCheck} onClick={() => go("closed")}>Закрыть заказ</Button>
+        </div>
+      );
+  } else if (o.status === "refund") {
+    tone = "amber";
+    icon = CircleDollarSign;
+    text = <>По заказу оформлен возврат клиенту: {money(refundedAmount(o))}. Заказ не входит в выручку.</>;
   } else return null;
   const bg = { yellow: "bg-brand-soft/70 border-[#ffe3a0]", amber: "bg-warn-bg/70 border-[#ffe2b0]", green: "bg-ok-bg/70 border-[#bfeed5]", violet: "bg-violet-bg/70 border-[#dcd1ff]" }[tone];
   return (
@@ -531,7 +609,8 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
               disabled={busy || (state === "off" && !canOverrideOff) || noPrice || o.executorId === e.id}
               onClick={async () => {
                 setBusy(true);
-                const r = await assignExecutor(o.id, e.id);
+                // Передаём, каким заказ видели на экране: если его только что взял мастер — сервер не даст перебить.
+                const r = await assignExecutor(o.id, e.id, o);
                 setBusy(false);
                 if (!r.ok) return toast(r.error, "bad");
                 toast(`${shortName(e.name)} назначен — ждём подтверждения`);
@@ -630,12 +709,14 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const [price, setPrice] = useState(o.clientPrice ? String(o.clientPrice) : "");
   const [mode, setMode] = useState<Order["payoutMode"]>(o.payoutMode);
   const [value, setValue] = useState(String(o.payoutValue || ""));
-  const [paid, setPaid] = useState(o.payoutPaid);
   const p = Number(digits(price)) || 0;
   const v = Number(value.replace(",", ".")) || 0;
   const pay = payout({ clientPrice: p, payoutMode: mode, payoutValue: v });
   const m = p - pay;
-  const finished = ["done", "awaiting_payment", "paid", "closed"].includes(o.status);
+  // Заказ уже за исполнителем: новую выплату он увидит в уведомлении «было → стало» (E7).
+  const watched = !!o.executorId && TERMS_WATCH_STATUSES.includes(o.status);
+  // Работа сдана: новая цена может перевести «Оплачен» ↔ «Ожидает оплаты» — предупреждаем заранее (E4).
+  const nextStatus = settledStatus({ status: o.status, clientPrice: p, payments: o.payments });
   return (
     <Modal
       open
@@ -648,7 +729,7 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
           </Button>
           <Button
             onClick={async () => {
-              const r = await updateFinance(o.id, { clientPrice: p, payoutMode: mode, payoutValue: mode === "fixed" ? Number(digits(value)) || 0 : v, payoutPaid: paid });
+              const r = await updateFinance(o.id, { clientPrice: p, payoutMode: mode, payoutValue: mode === "fixed" ? Number(digits(value)) || 0 : v });
               if (!r.ok) return toast(r.error, "bad");
               toast("Финансы сохранены");
               onClose();
@@ -700,69 +781,20 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
             </div>
           </div>
         </div>
-        {finished && <Toggle checked={paid} onChange={setPaid} label="Исполнителю выплачено" />}
-        <p className="text-[12.5px] text-muted">Изменения финансов попадают в историю заказа. AI эти поля менять не может.</p>
-      </div>
-    </Modal>
-  );
-}
-
-function PaymentModal({ o, onClose }: { o: Order; onClose: () => void }) {
-  const rest = Math.max(0, o.clientPrice - paidAmount(o));
-  const [amount, setAmount] = useState(String(rest));
-  const [method, setMethod] = useState<PaymentMethod>("kaspi");
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={`Оплата по заказу №${o.number}`}
-      width={460}
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Отмена
-          </Button>
-          <Button
-            onClick={async () => {
-              const r = await addPayment(o.id, Number(digits(amount)) || 0, method);
-              if (!r.ok) return toast(r.error, "bad");
-              toast("Оплата внесена");
-              onClose();
-            }}
-          >
-            Внести {money(Number(digits(amount)) || 0)}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <FormRow label="Сумма, ₸" hint={`Осталось оплатить: ${money(rest)}`}>
-          {(id) => <Input id={id} inputMode="numeric" value={amount ? num(Number(digits(amount))) : ""} onChange={(e) => setAmount(digits(e.target.value))} />}
-        </FormRow>
-        <FormRow label="Способ оплаты">
-          {(id) => (
-            <Select id={id} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
-              {(Object.keys(PAYMENT_METHODS) as PaymentMethod[]).map((m) => (
-                <option key={m} value={m}>
-                  {PAYMENT_METHODS[m]}
-                </option>
-              ))}
-            </Select>
-          )}
-        </FormRow>
-        {o.payments.length > 0 && (
-          <div className="rounded-[12px] border border-line p-3 text-[13.5px]">
-            <div className="mb-1.5 font-semibold text-ink">Уже оплачено</div>
-            {o.payments.map((p) => (
-              <div key={p.id} className="flex justify-between py-0.5 text-ink-2">
-                <span>
-                  {dateTime(p.at)} · {PAYMENT_METHODS[p.method]}
-                </span>
-                <b className="tabular-nums">{money(p.amount)}</b>
-              </div>
-            ))}
-          </div>
+        {o.payoutPaid && <p className="rounded-[10px] bg-ok-bg px-3.5 py-2.5 text-[13px] text-ok-ink">Исполнителю уже выплачено {money(payout(o))} — эта сумма не меняется. Отменить выплату можно в «Выплатах мастерам» в течение суток.</p>}
+        {!o.payoutPaid && watched && (
+          <p className="rounded-[10px] bg-warn-bg px-3.5 py-2.5 text-[13px] text-warn-ink">
+            {o.acceptedPayout !== undefined ? `Исполнитель принял заказ за ${money(o.acceptedPayout)}. ` : ""}
+            {pay !== payout(o) ? `Он получит уведомление: выплата ${money(payout(o))} → ${money(pay)}.` : "Если выплата изменится, он сразу получит уведомление."}
+          </p>
         )}
+        {nextStatus && nextStatus !== o.status && (
+          <p className="rounded-[10px] bg-[#f8f6f1] px-3.5 py-2.5 text-[13px] text-ink-2">
+            После сохранения заказ станет «{ORDER_STATUS[nextStatus].label}»{nextStatus === "awaiting_payment" ? ` — клиенту нужно доплатить ${money(p - paidAmount(o))}` : " — оплачено всё"}.
+          </p>
+        )}
+        <MoneyLedger o={o} />
+        <p className="text-[12.5px] text-muted">Изменения финансов попадают в историю заказа. AI эти поля менять не может. Выплату исполнителю проводит владелец — кнопкой «Выплатить исполнителю» или в «Выплатах мастерам».</p>
       </div>
     </Modal>
   );

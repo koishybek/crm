@@ -119,7 +119,11 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   payoutMode: o.payoutMode,
   payoutValue: o.payoutValue,
   payments: o.payments,
+  refunds: o.refunds,
   payoutPaid: o.payoutPaid,
+  payoutPaidAt: o.payoutPaidAt,
+  payoutId: o.payoutId,
+  acceptedPayout: o.acceptedPayout,
   executorId: o.executorId,
   assignedAt: o.assignedAt,
   createdAt: o.createdAt,
@@ -167,7 +171,7 @@ export async function toMessage(ctx: QueryCtx, m: Doc<"messages">): Promise<Mess
   return { id: m._id, orderId: m.orderId, author: m.author, channel: m.channel, text: m.text, files: await withUrls(ctx, m.files), at: m.at };
 }
 
-export const toHistory = (h: Doc<"history">): HistoryEvent => ({ id: h._id, orderId: h.orderId, kind: h.kind, text: h.text, actor: h.actor, at: h.at });
+export const toHistory = (h: Doc<"history">): HistoryEvent => ({ id: h._id, orderId: h.orderId, kind: h.kind, text: h.text, actor: h.actor, at: h.at, from: h.from, to: h.to });
 
 export const toInteraction = (i: Doc<"interactions">): Interaction => ({
   id: i._id,

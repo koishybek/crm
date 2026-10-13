@@ -9,8 +9,10 @@ import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { buildSeed } from "../src/data/seed";
 import { ACTIVE_STATUSES, serviceById } from "../src/data/catalog";
+import { paidAmount, payout } from "../src/data/logic";
 import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
+import { money } from "../src/lib/format";
 
 const envFile = new URL("../.env.local", import.meta.url);
 const envLocal: Record<string, string | undefined> = existsSync(envFile)
@@ -44,7 +46,7 @@ admin.setAdminAuth(deployKey);
 const call = <F extends FunctionReference<"query" | "mutation" | "action", "internal">>(fn: F, args: FunctionArgs<F>): Promise<FunctionReturnType<F>> =>
   admin.function(fn, undefined, args) as Promise<FunctionReturnType<F>>;
 
-type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend";
+type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend" | "payouts";
 
 async function insert(table: Table, rows: Record<string, unknown>[]): Promise<string[]> {
   const ids: string[] = [];
@@ -90,7 +92,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "telegramUpdates", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
     while ((await call(internal.seed.wipeFiles, {})) > 0);
@@ -149,6 +151,28 @@ async function main() {
   );
   const leadMap = new Map(db.leads.map((l, i) => [l.id, leadIds[i]!]));
 
+  // ── Деньги по правилам системы (ТЗ п.10, п.13): статус по оплате, возврат — записью, снимок выплаты мастеру ──
+  const ownerId = userMap.get("u-owner")!;
+  const ACCEPTED = new Set<string>(["accepted", "in_progress", "awaiting_client", "done", "awaiting_payment", "paid", "closed", "refund"]);
+  for (const o of db.orders) {
+    const paid = paidAmount(o);
+    // Сданная работа сразу уходит в статус по деньгам: «Выполнен» дольше мгновения не держится.
+    if (o.status === "done" && o.doneAt) {
+      const to = paid >= o.clientPrice ? "paid" : "awaiting_payment";
+      db.history.push({ id: `h-settle-${o.id}`, orderId: o.id, kind: "status", text: to === "paid" ? "Оплачен: клиент оплатил заказ полностью" : `Ожидает оплаты: долг клиента ${money(o.clientPrice - paid)}`, actor: { type: "system" }, at: iso(Date.parse(o.doneAt) + 1000), from: "done", to });
+      o.status = to;
+    }
+    // Возврат — не просто статус, а запись: сумма, способ, дата и причина (как оформляет владелец).
+    if (o.status === "refund" && paid > 0) {
+      const step = db.history.find((h) => h.orderId === o.id && h.text.startsWith("Оформлен возврат"));
+      const method = o.payments[o.payments.length - 1]?.method ?? "kaspi";
+      o.refunds = [{ id: `r-${o.id}`, amount: paid, method, at: step?.at ?? o.closedAt ?? o.createdAt, reason: "Клиент недоволен качеством", by: ownerId }];
+    }
+    // Мастер принял заказ — за выплату на тот момент (её правки после этого приходят ему уведомлением).
+    if (o.executorId && ACCEPTED.has(o.status)) o.acceptedPayout = payout(o);
+  }
+  const moneyAt = (o: (typeof db.orders)[number]) => [...o.payments.map((p) => p.at), ...(o.refunds ?? []).map((r) => r.at)].sort().pop();
+
   const orderIds = await insert(
     "orders",
     db.orders.map((o) => ({
@@ -158,9 +182,38 @@ async function main() {
       executorId: o.executorId ? exMap.get(o.executorId) : undefined,
       createdBy: userMap.get(o.createdBy),
       files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })),
+      moneyAt: moneyAt(o),
     })),
   );
   const orderMap = new Map(db.orders.map((o, i) => [o.id, orderIds[i]!]));
+
+  // ── Реестр выплат: за закрытые заказы мастерам уже заплатили — одна выплата мастеру за день закрытия ──
+  const almatyDay = (at: string) => new Date(Date.parse(at) + 5 * 3600_000).toISOString().slice(0, 10);
+  const paidAtOf = (o: (typeof db.orders)[number]) => o.closedAt ?? o.paidAt ?? o.doneAt ?? o.createdAt;
+  const payoutGroups = new Map<string, (typeof db.orders)[number][]>();
+  for (const o of db.orders) {
+    if (!o.payoutPaid || !o.executorId) continue;
+    const key = `${o.executorId}|${almatyDay(paidAtOf(o))}`;
+    payoutGroups.set(key, [...(payoutGroups.get(key) ?? []), o]);
+  }
+  const groups = [...payoutGroups.values()];
+  const payoutRows = groups.map((list) => {
+    const at = list.map(paidAtOf).sort().pop()!;
+    return {
+      tenantId: db.users[0]!.tenantId,
+      executorId: exMap.get(list[0]!.executorId!),
+      orderIds: list.map((o) => orderMap.get(o.id)),
+      orderNumbers: list.map((o) => o.number),
+      amount: list.reduce((s, o) => s + payout(o), 0),
+      method: list[0]!.number % 4 === 0 ? "cash" : "kaspi",
+      at,
+      by: ownerId,
+      createdAt: at,
+    };
+  });
+  const payoutIds = await insert("payouts", payoutRows);
+  const payoutPatches = groups.flatMap((list, i) => list.map((o) => ({ id: orderMap.get(o.id)!, fields: { payoutId: payoutIds[i], payoutPaidAt: payoutRows[i]!.at } })));
+  for (let i = 0; i < payoutPatches.length; i += 200) await call(internal.seed.patchMany, { table: "orders", patches: payoutPatches.slice(i, i + 200) });
 
   const patches = db.leads.filter((l) => l.orderId).map((l) => ({ id: leadMap.get(l.id)!, fields: { orderId: orderMap.get(l.orderId!) } }));
   for (let i = 0; i < patches.length; i += 200) await call(internal.seed.patchMany, { table: "leads", patches: patches.slice(i, i + 200) });

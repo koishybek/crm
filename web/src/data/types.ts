@@ -140,7 +140,25 @@ export interface Payment {
   id: string;
   amount: number;
   method: PaymentMethod;
+  /** Дата оплаты (может быть задним числом). */
   at: string;
+  /** Кто внёс. */
+  by?: string;
+  note?: string;
+  /** Сторно: платёж ошибочный — в оплаченную сумму не входит. */
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
+}
+
+/** Возврат денег клиенту. */
+export interface Refund {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  at: string;
+  reason: string;
+  by: string;
 }
 
 export interface Attachment {
@@ -173,7 +191,13 @@ export interface Order {
   payoutMode: "fixed" | "percent";
   payoutValue: number;
   payments: Payment[];
+  refunds?: Refund[];
   payoutPaid: boolean;
+  /** Выплата проведена по реестру выплат: когда. */
+  payoutPaidAt?: string;
+  payoutId?: string;
+  /** Выплата, на которую исполнитель согласился, когда взял или подтвердил заказ. */
+  acceptedPayout?: number;
   executorId?: string;
   assignedAt?: string;
   createdAt: string;
@@ -244,6 +268,9 @@ export interface HistoryEvent {
   text: string;
   actor: Actor;
   at: string;
+  /** Смена статуса: откуда и куда. */
+  from?: OrderStatus;
+  to?: OrderStatus;
 }
 
 export interface Executor {
@@ -454,4 +481,53 @@ export interface OlxSettings {
   lastError?: string;
   /** OLX ограничил запросы — синхронизация на паузе до этого времени. */
   pausedUntil?: string;
+}
+
+// ── Выплаты исполнителям (реестр) ────────────────────────────────────────────
+
+/** Строка реестра выплат для владельца. */
+export interface PayoutEntry {
+  id: string;
+  executorId: string;
+  executorName: string;
+  orders: { id: string; number: number }[];
+  amount: number;
+  method: PaymentMethod;
+  /** Дата выплаты. */
+  at: string;
+  byName: string;
+  note?: string;
+  /** Когда провели. */
+  createdAt: string;
+  /** Отменить ещё можно: с проведения прошло меньше суток. */
+  canUndo: boolean;
+}
+
+/** Выполненный заказ, выплата за который мастеру ещё не проведена. */
+export interface OwedOrder {
+  id: string;
+  number: number;
+  serviceId: string;
+  status: OrderStatus;
+  doneAt?: string;
+  payout: number;
+  /** Клиент оплатил заказ полностью. */
+  clientPaid: boolean;
+}
+
+/** Сколько компания должна мастеру и за какие заказы. */
+export interface OwedExecutor {
+  executorId: string;
+  name: string;
+  amount: number;
+  orders: OwedOrder[];
+}
+
+/** Выплата глазами исполнителя: дата, сумма, способ и заказы — без комментариев офиса. */
+export interface WorkerPayout {
+  id: string;
+  at: string;
+  amount: number;
+  method: PaymentMethod;
+  orders: { id: string; number: number }[];
 }

@@ -1,4 +1,5 @@
 import {
+  Banknote,
   Bell,
   Box,
   Briefcase,
@@ -53,12 +54,13 @@ const STAFF_NAV: NavItem[] = [
   { to: "/orders", label: "Заказы", icon: Briefcase },
   { to: "/clients", label: "Клиенты", icon: Users },
   { to: "/executors", label: "Исполнители", icon: UserRound },
+  { to: "/payouts", label: "Выплаты мастерам", icon: Banknote },
   { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn },
   { to: "/audit", label: "Журнал действий", icon: ScrollText },
   { to: "/settings", label: "Настройки", icon: SettingsIcon },
 ];
 /** Разделы только для владельца. */
-const OWNER_ONLY = ["/analytics", "/audit", "/settings"];
+const OWNER_ONLY = ["/payouts", "/analytics", "/audit", "/settings"];
 const EXEC_NAV: NavItem[] = [
   { to: "/w", label: "Доступные заказы", icon: Box, end: true },
   { to: "/w/my", label: "Мои заказы", icon: ClipboardList },

@@ -33,6 +33,23 @@ export const orderStatus = v.union(
   v.literal("refund"),
 );
 export const paymentMethod = v.union(v.literal("kaspi"), v.literal("cash"), v.literal("card"), v.literal("transfer"));
+/**
+ * Оплата клиента. at — дата оплаты (можно задним числом), by — кто внёс. Ошибочный платёж не удаляется,
+ * а сторнируется владельцем (voidedAt/voidedBy/voidReason) и больше не входит в оплаченную сумму.
+ */
+export const payment = v.object({
+  id: v.string(),
+  amount: v.number(),
+  method: paymentMethod,
+  at: v.string(),
+  by: v.optional(v.id("users")),
+  note: v.optional(v.string()),
+  voidedAt: v.optional(v.string()),
+  voidedBy: v.optional(v.id("users")),
+  voidReason: v.optional(v.string()),
+});
+/** Возврат клиенту — запись с суммой, способом, датой и причиной (оформляет владелец). */
+export const refund = v.object({ id: v.string(), amount: v.number(), method: paymentMethod, at: v.string(), reason: v.string(), by: v.id("users") });
 export const actor = v.union(
   v.object({ type: v.literal("user"), id: v.string() }),
   v.object({ type: v.literal("client"), id: v.string() }),
@@ -200,8 +217,16 @@ export default defineSchema({
     clientPrice: v.number(),
     payoutMode: v.union(v.literal("fixed"), v.literal("percent")),
     payoutValue: v.number(),
-    payments: v.array(v.object({ id: v.string(), amount: v.number(), method: paymentMethod, at: v.string() })),
+    payments: v.array(payment),
+    refunds: v.optional(v.array(refund)),
     payoutPaid: v.boolean(),
+    /** Выплата проведена по реестру выплат (таблица payouts): когда и какой записью. */
+    payoutPaidAt: v.optional(v.string()),
+    payoutId: v.optional(v.id("payouts")),
+    /** Сколько исполнитель получит — снимок в момент, когда он взял или подтвердил заказ (ТЗ п.13: условия не меняются молча). */
+    acceptedPayout: v.optional(v.number()),
+    /** Дата последнего движения денег (оплата, возврат) — чтобы «Получено» за период находилось по индексу. */
+    moneyAt: v.optional(v.string()),
     executorId: v.optional(v.id("executors")),
     assignedAt: v.optional(v.string()),
     createdAt: v.string(),
@@ -229,7 +254,8 @@ export default defineSchema({
     .index("by_done", ["doneAt"])
     .index("by_number", ["number"])
     // Долг исполнителям: невыплаченные выполненные заказы без перебора всей истории.
-    .index("by_payout", ["payoutPaid", "doneAt"]),
+    .index("by_payout", ["payoutPaid", "doneAt"])
+    .index("by_money", ["moneyAt"]),
 
   messages: defineTable({
     orderId: v.id("orders"),
@@ -246,6 +272,9 @@ export default defineSchema({
     text: v.string(),
     actor,
     at: v.string(),
+    /** Смена статуса — откуда и куда (структурно, для отчётов и разбора споров). */
+    from: v.optional(orderStatus),
+    to: v.optional(orderStatus),
   }).index("by_order", ["orderId", "at"]),
 
   interactions: defineTable({
@@ -516,6 +545,26 @@ export default defineSchema({
     errorAt: v.optional(v.string()),
     error: v.optional(v.string()),
   }).index("by_key", ["key"]),
+
+  /**
+   * Реестр выплат исполнителям (ТЗ п.13, п.14, п.17): одна выплата — один или несколько выполненных заказов мастера.
+   * at — дата выплаты, createdAt — когда провели (отменить можно в течение суток).
+   */
+  payouts: defineTable({
+    tenantId: v.string(),
+    executorId: v.id("executors"),
+    orderIds: v.array(v.id("orders")),
+    /** Номера тех же заказов — для реестра и экрана мастера без чтения каждого заказа. */
+    orderNumbers: v.array(v.number()),
+    amount: v.number(),
+    method: paymentMethod,
+    at: v.string(),
+    by: v.id("users"),
+    note: v.optional(v.string()),
+    createdAt: v.string(),
+  })
+    .index("by_at", ["at"])
+    .index("by_executor", ["executorId", "at"]),
 
   /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
   backups: defineTable({ at: v.string(), fileId: v.id("_storage"), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) }).index("by_at", ["at"]),

@@ -17,7 +17,8 @@ import { AdSpendModal, OperatorsCard, SourceCostsCard } from "./AnalyticsCards";
 import { PeriodSelect } from "./Dashboard";
 import { dayLabel, money, moneyShort, num, pct } from "../lib/format";
 import { exportCsv } from "../lib/csv";
-import { margin, payout } from "../data/logic";
+import { netMargin, payout, refundedAmount, revenueOf } from "../data/logic";
+import { CashFlowRow } from "../components/CashFlowRow";
 
 const SOURCE_COLOR: Record<SourceId, string> = {
   olx: "#3d8bfd",
@@ -65,6 +66,8 @@ export default function Analytics() {
       .sort((a, b) => b.margin - a.margin);
     return {
       cur,
+      prev,
+      caption,
       s,
       trends: {
         revenue: trend(s.revenue, p.revenue, caption),
@@ -84,7 +87,7 @@ export default function Analytics() {
   const fTop = Math.max(1, d.funnel[0]!.value);
 
   const download = () => {
-    const rows: (string | number)[][] = [["Заказ", "Дата выполнения", "Клиент", "Услуга", "Город", "Источник", "Исполнитель", "Цена клиента", "Выплата", "Маржа"]];
+    const rows: (string | number)[][] = [["Заказ", "Дата выполнения", "Клиент", "Услуга", "Город", "Источник", "Исполнитель", "Цена клиента", "Возвращено", "Выручка", "Выплата", "Маржа"]];
     for (const o of doneIn(db, d.cur)) {
       rows.push([
         o.number,
@@ -95,8 +98,10 @@ export default function Analytics() {
         SOURCES[o.source].label,
         db.executors.find((e) => e.id === o.executorId)?.name ?? "",
         o.clientPrice,
+        refundedAmount(o),
+        revenueOf(o),
         payout(o),
-        margin(o),
+        netMargin(o),
       ]);
     }
     exportCsv(rows, `homemax-zakazy-${period}.csv`);
@@ -121,10 +126,11 @@ export default function Analytics() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard icon={Briefcase} tone="green" label="Выручка" value={money(d.s.revenue)} trend={d.trends.revenue} />
-        <KpiCard icon={Wallet} tone="red" label="Выплаты" value={money(d.s.payouts)} trend={{ ...d.trends.payouts, good: true }} />
+        <KpiCard icon={Wallet} tone="red" label="Начислено мастерам" value={money(d.s.payouts)} trend={{ ...d.trends.payouts, good: true }} />
         <KpiCard icon={ChartNoAxesColumn} tone="violet" label="Маржа" value={money(d.s.margin)} trend={d.trends.margin} />
         <KpiCard icon={Banknote} tone="yellow" label="Выполнено заказов" value={num(d.s.count)} trend={d.trends.count} />
       </div>
+      <CashFlowRow orders={db.orders} payouts={slice.payouts} cur={d.cur} prev={d.prev} caption={d.caption} />
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_0.85fr]">
         <Card title="Выручка по источникам">

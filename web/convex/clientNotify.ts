@@ -143,10 +143,11 @@ function noticeEvent(o: Doc<"orders">): ClientNoticeEvent | null {
  * Событие заказа → сообщение клиенту. Зовётся одной строкой в конце мутаций, меняющих статус (orders.ts, worker.ts);
  * что писать, решает статус: «Принят исполнителем» — мастер и время, «Выполнен» — спасибо и оценка, «Отменён».
  * Ключ события «мастер» — с мастером: если заказ перешёл к другому, клиент узнает, кто приедет на самом деле.
+ * event — событие задано явно: сдача работы (lib/money.ts finishWork), после которой статус сразу уходит дальше по деньгам.
  */
-export async function orderNotice(ctx: MutationCtx, orderId: Id<"orders">): Promise<ToClientResult | null> {
+export async function orderNotice(ctx: MutationCtx, orderId: Id<"orders">, forced?: ClientNoticeEvent): Promise<ToClientResult | null> {
   const o = await ctx.db.get(orderId);
-  const event = o ? noticeEvent(o) : null;
+  const event = o ? (forced ?? noticeEvent(o)) : null;
   if (!o || !event) return null;
   const once = event === "master" ? `order:${o._id}:master:${o.executorId}` : `order:${o._id}:${event}`;
   const r = await toClient(ctx, o.clientId, (ch) => noticeMessage(ctx, o, event, ch), { once });

@@ -1,17 +1,19 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { assertScope, currentUser, inScope, requireRole, scopeOf, TEAM } from "./lib/access";
+import { assertScope, currentUser, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
 import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";
-import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor } from "./lib/domain";
+import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor, type StatusMove } from "./lib/domain";
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
 import { cleanMoney, cleanText } from "./lib/limits";
 import { activeExecutorIds, suitableUsers } from "./lib/matching";
+import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
 import { orderNotice } from "./clientNotify";
-import { fitsOrder, isOpenForFeed, margin, payout } from "../src/data/logic";
+import { fitsOrder, isOpenForFeed, margin, paidAmount, payout } from "../src/data/logic";
+import { closeProblems, INFO_WATCH_STATUSES, OWNER_MONEY_STATUSES, PAYMENT_BLOCKED } from "../src/data/money";
 import { catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money, shortName } from "../src/lib/format";
 import { attachment, orderStatus, paymentMethod, urgency } from "./schema";
@@ -177,7 +179,14 @@ export const updateInfo = mutation({
 
     const actor = userActor(me._id);
     const details = changed.map((k) => infoChange(k, o, info, catalog.label));
-    if (changed.length) await log(ctx, id, "edited", `Изменены данные заказа: ${details.join("; ")}`, actor);
+    // Исполнитель уже принял заказ — о новом сроке, адресе или описании он узнаёт сразу и с разницей (E7).
+    const exUser = changed.length && o.executorId && INFO_WATCH_STATUSES.includes(o.status) ? await executorUser(ctx, o.executorId) : null;
+    const executorNotified = !!exUser && exUser.active !== false;
+    if (executorNotified) {
+      const what = changed.map((k) => (k === "description" ? "описание изменено — откройте заказ" : infoChange(k, o, info, catalog.label)));
+      await notify(ctx, [exUser._id], `Заказ №${o.number} изменён: ${what.join("; ")}`, { link: `/w/orders/${id}`, tone: "warn" });
+    }
+    if (changed.length) await log(ctx, id, "edited", `Изменены данные заказа: ${details.join("; ")}${executorNotified ? " — исполнитель уведомлён" : ""}`, actor);
     let notified = 0;
     if (before) {
       const fresh = (await ctx.db.get(id))!;
@@ -192,21 +201,41 @@ export const updateInfo = mutation({
       const parts = [...details, ...(skillsChanged ? [lowerFirst(skillsText)] : [])];
       // Адрес и описание — персональные данные клиента: в деталях только отметка, сами значения — в карточке заказа.
       const changes = Object.fromEntries(changed.map((k) => [k, k === "description" || k === "address" ? "изменено" : { from: o[k], to: info[k] }]));
-      await audit(ctx, me, changed.length ? "order.info" : "order.skills", `Заказ №${o.number}: ${parts.join("; ")}`, {
+      await audit(ctx, me, changed.length ? "order.info" : "order.skills", `Заказ №${o.number}: ${parts.join("; ")}${executorNotified ? "; исполнитель уведомлён" : ""}`, {
         entityId: id,
-        meta: { changes, ...(skillsChanged ? { skills, added: diff.added, removed: diff.removed } : {}), notified },
+        meta: { changes, ...(skillsChanged ? { skills, added: diff.added, removed: diff.removed } : {}), notified, ...(executorNotified ? { executorNotified: true } : {}) },
       });
     }
     return { notified };
   },
 });
 
-/** Финансы меняет только сотрудник (ТЗ: AI и исполнитель не трогают деньги). */
+/** Деньги оплаченного, закрытого и возвращённого заказа — только владельцу (аудит L-4). */
+function assertMoneyEditable(me: Me, o: Doc<"orders">, what: string) {
+  if (OWNER_MONEY_STATUSES.includes(o.status) && me.role !== "owner") throw new ConvexError(`${what} оплаченного, закрытого или возвращённого заказа меняет только владелец`);
+}
+
+/** «Переход «Выполнен» → «Ожидает оплаты»» — для текста журнала. */
+const moveText = (m: StatusMove) => `«${ORDER_STATUS[m.from].label}» → «${ORDER_STATUS[m.to].label}»`;
+
+/**
+ * Финансы меняет только сотрудник (ТЗ: AI и исполнитель не трогают деньги). Исполнитель, за которым заказ, сразу узнаёт
+ * о новой выплате (E7); после сдачи работы новая цена пересчитывает «Оплачен» ↔ «Ожидает оплаты» (E4).
+ */
 export const updateFinance = mutation({
-  args: { id: v.id("orders"), clientPrice: v.number(), payoutMode: v.union(v.literal("fixed"), v.literal("percent")), payoutValue: v.number(), payoutPaid: v.boolean() },
-  handler: async (ctx, { id, ...f }) => {
+  args: {
+    id: v.id("orders"),
+    clientPrice: v.number(),
+    payoutMode: v.union(v.literal("fixed"), v.literal("percent")),
+    payoutValue: v.number(),
+    /** Выплату исполнителю проводят реестром (payouts.create). Поле оставлено для старых клиентов: менять им нельзя. */
+    payoutPaid: v.optional(v.boolean()),
+  },
+  handler: async (ctx, { id, payoutPaid, ...f }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
+    assertMoneyEditable(me, o, "Финансы");
+    if (payoutPaid !== undefined && payoutPaid !== o.payoutPaid) throw new ConvexError("Выплату исполнителю проводят в разделе «Выплаты мастерам» — так она попадает в реестр выплат");
     if (f.clientPrice < 0 || f.payoutValue < 0 || !Number.isFinite(f.clientPrice) || !Number.isFinite(f.payoutValue)) throw new ConvexError("Суммы не могут быть отрицательными");
     if (f.payoutMode === "percent" && f.payoutValue > 100) throw new ConvexError("Процент не больше 100");
     // Деньги храним в целых тенге — проверяем ровно то, что сохраним.
@@ -216,59 +245,82 @@ export const updateFinance = mutation({
       payoutValue: f.payoutMode === "fixed" ? cleanMoney(f.payoutValue, "Выплата исполнителю") : f.payoutValue,
     };
     if (payout(next) > next.clientPrice) throw new ConvexError("Выплата исполнителю больше цены клиента — маржа уйдёт в минус");
-    const moneyChanged = next.clientPrice !== o.clientPrice || next.payoutMode !== o.payoutMode || next.payoutValue !== o.payoutValue;
-    const paidChanged = f.payoutPaid !== o.payoutPaid;
-    if (!moneyChanged && !paidChanged) return;
-    await ctx.db.patch(id, { ...next, payoutPaid: f.payoutPaid });
+    // Выплату по реестру уже провели — её сумма зафиксирована; отменить выплату можно в «Выплатах мастерам» в течение суток.
+    if (o.payoutPaid && payout(next) !== payout(o)) throw new ConvexError(`Исполнителю уже выплачено ${money(payout(o))} — эта сумма зафиксирована. Меняя цену, оставьте выплату прежней (фиксированной суммой)`);
+    if (next.clientPrice === o.clientPrice && next.payoutMode === o.payoutMode && next.payoutValue === o.payoutValue) return;
+    await ctx.db.patch(id, next);
 
     const actor = userActor(me._id);
+    const fresh = (await ctx.db.get(id))!;
+    const executorNotified = await notifyPayoutChange(ctx, fresh, payout(o), payout(next));
     const before = `${money(o.clientPrice)} / ${money(payout(o))}`;
     const after = `${money(next.clientPrice)} / ${money(payout(next))}`;
-    if (after !== before) await log(ctx, id, "finance", `Финансы: ${before} → ${after}`, actor);
-    if (paidChanged) await log(ctx, id, "finance", f.payoutPaid ? `Исполнителю выплачено ${money(payout(next))}` : "Отметка о выплате снята", actor);
+    if (after !== before) await log(ctx, id, "finance", `Финансы: ${before} → ${after}${executorNotified ? " — исполнитель уведомлён" : ""}`, actor);
+    const settled = await settle(ctx, fresh);
     // ТЗ п.13: в журнале — цена клиента, выплата и маржа «было → стало», чтобы любую правку денег можно было восстановить.
-    const parts = moneyChanged
-      ? [`цена клиента ${moneyMove(money(o.clientPrice), money(next.clientPrice))}`, `выплата ${moneyMove(payoutText(o), payoutText(next))}`, `маржа ${moneyMove(money(margin(o)), money(margin(next)))}`]
-      : [];
-    if (paidChanged) parts.push(f.payoutPaid ? `выплата исполнителю отмечена (${money(payout(next))})` : "отметка о выплате исполнителю снята");
-    const snapshot = (x: typeof next & { payoutPaid: boolean }) => ({ ...x, payout: payout(x), margin: margin(x) });
+    const parts = [`цена клиента ${moneyMove(money(o.clientPrice), money(next.clientPrice))}`, `выплата ${moneyMove(payoutText(o), payoutText(next))}`, `маржа ${moneyMove(money(margin(o)), money(margin(next)))}`];
+    if (executorNotified) parts.push("исполнитель уведомлён");
+    if (settled) parts.push(`статус ${moveText(settled)}`);
+    const snapshot = (x: typeof next) => ({ ...x, payout: payout(x), margin: margin(x) });
     await audit(ctx, me, "order.finance", `Заказ №${o.number}: ${parts.join(", ")}`, {
       entityId: id,
-      meta: { before: snapshot({ clientPrice: o.clientPrice, payoutMode: o.payoutMode, payoutValue: o.payoutValue, payoutPaid: o.payoutPaid }), after: snapshot({ ...next, payoutPaid: f.payoutPaid }) },
+      meta: {
+        before: snapshot({ clientPrice: o.clientPrice, payoutMode: o.payoutMode, payoutValue: o.payoutValue }),
+        after: snapshot(next),
+        ...(o.acceptedPayout !== undefined ? { acceptedPayout: o.acceptedPayout } : {}),
+        ...(executorNotified ? { executorNotified: true } : {}),
+        ...(settled ? { status: settled } : {}),
+      },
     });
   },
 });
 
+/**
+ * Оплата клиента (ТЗ п.13): сумма, способ, дата (по умолчанию — сейчас; задним числом — можно), комментарий, кто внёс.
+ * Не принимаем в новом заказе, в ленте, в отменённом и в возврате (E3); переплата — только с явным подтверждением;
+ * оплаченный и закрытый заказ — только владелец (L-4). Оплатили всё после сдачи работы — заказ сам «Оплачен».
+ */
 export const addPayment = mutation({
-  args: { id: v.id("orders"), amount: v.number(), method: paymentMethod },
-  handler: async (ctx, { id, amount, method }) => {
+  args: { id: v.id("orders"), amount: v.number(), method: paymentMethod, paidAt: v.optional(v.string()), note: v.optional(v.string()), confirmOverpay: v.optional(v.boolean()) },
+  handler: async (ctx, { id, amount, method, paidAt, note, confirmOverpay }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
-    if (!(amount > 0)) throw new ConvexError("Сумма должна быть больше нуля");
-    const value = cleanMoney(amount, "Оплата");
-    if (value < 1) throw new ConvexError("Сумма должна быть больше нуля");
-    const payment = { id: uid("p"), amount: value, method, at: nowIso() };
-    const payments = [...o.payments, payment];
-    await ctx.db.patch(id, { payments });
-    await log(ctx, id, "payment", `Внесена оплата ${money(value)} (${PAYMENT_METHODS[method]})`, userActor(me._id));
-    const paid = payments.reduce((s, p) => s + p.amount, 0);
-    const toPaid = paid >= o.clientPrice && (o.status === "done" || o.status === "awaiting_payment");
-    if (toPaid) await setStatus(ctx, o, "paid", userActor(me._id));
-    await audit(ctx, me, "order.payment", `Заказ №${o.number}: оплата ${money(value)} (${PAYMENT_METHODS[method]}), оплачено ${money(paid)} из ${money(o.clientPrice)}${toPaid ? "; статус «Оплачен»" : ""}`, {
+    const blocked = PAYMENT_BLOCKED[o.status];
+    if (blocked) throw new ConvexError(blocked);
+    assertMoneyEditable(me, o, "Оплаты");
+    const value = positiveMoney(amount, "Оплата");
+    const at = moneyDate(paidAt, "Дата оплаты", o.createdAt);
+    const comment = noteText(note, "Комментарий к оплате");
+    const paid = paidAmount(o) + value;
+    const over = paid - o.clientPrice;
+    if (over > 0 && !confirmOverpay) throw new ConvexError(`Оплата больше цены заказа на ${money(over)} — подтвердите переплату`);
+    const payment = { id: uid("p"), amount: value, method, at, by: me._id, ...(comment ? { note: comment } : {}) };
+    await ctx.db.patch(id, { payments: [...o.payments, payment], moneyAt: laterMoment(o.moneyAt, at) });
+    const backdated = Math.abs(Date.now() - Date.parse(at)) > 10 * 60_000;
+    const details = [PAYMENT_METHODS[method], ...(backdated ? [`дата оплаты ${almatyStamp(at)}`] : []), ...(over > 0 ? [`переплата ${money(over)}`] : [])];
+    await log(ctx, id, "payment", `Внесена оплата ${money(value)} (${details.join(", ")})`, userActor(me._id));
+    const settled = await settle(ctx, (await ctx.db.get(id))!);
+    await audit(ctx, me, "order.payment", `Заказ №${o.number}: оплата ${money(value)} (${details.join(", ")}), оплачено ${money(paid)} из ${money(o.clientPrice)}${settled ? `; статус ${moveText(settled)}` : ""}`, {
       entityId: id,
-      meta: { paymentId: payment.id, amount: value, method, paid, clientPrice: o.clientPrice, ...(toPaid ? { status: { from: o.status, to: "paid" } } : {}) },
+      meta: { paymentId: payment.id, amount: value, method, at, paid, clientPrice: o.clientPrice, ...(over > 0 ? { overpay: over } : {}), ...(settled ? { status: settled } : {}) },
     });
     const owners = (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).collect()).map((u) => u._id);
     await notify(ctx, owners, `Оплата по заказу №${o.number}: ${money(value)}`, { link: `/orders/${id}`, tone: "ok", except: me._id, email: { kind: "payment" } });
   },
 });
 
-/** Публикация возвращает, скольким мастерам ушло уведомление: ноль — повод назначить вручную. */
+/**
+ * Смена статуса сотрудником. Публикация возвращает, скольким мастерам ушло уведомление: ноль — повод назначить вручную.
+ * Правила денег (ТЗ п.10, E2): «Выполнен» сам уходит в «Ожидает оплаты» или «Оплачен»; «Оплачен» — только когда оплачено
+ * всё (фиктивной оплаты нет); «Закрыт» с долгом или без выплаты исполнителю — только владелец и с причиной;
+ * «Возврат» — записью с суммой (finance.addRefund).
+ */
 export const changeStatus = mutation({
   args: { id: v.id("orders"), to: orderStatus, reason: v.optional(v.string()) },
   handler: async (ctx, { id, to, reason }): Promise<{ notified: number } | null> => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
+    if (to === "refund") throw new ConvexError("Возврат оформляется с суммой и причиной — «Оформить возврат» в финансах заказа");
     if (!STAFF_TRANSITIONS[o.status].includes(to)) throw new ConvexError(`Из статуса «${ORDER_STATUS[o.status].label}» нельзя перейти в «${ORDER_STATUS[to].label}»`);
     const why = reason?.trim().slice(0, 300) || undefined;
     const actor = userActor(me._id);
@@ -280,38 +332,49 @@ export const changeStatus = mutation({
       const previous = o.executorId ? (await executorUser(ctx, o.executorId))?._id : undefined;
       if (o.executorId) {
         await notify(ctx, [previous], `Заказ №${o.number} снят с вас и возвращён в ленту`, { link: "/w", tone: "warn" });
-        extra.executorId = undefined;
-        extra.assignedAt = undefined;
+        Object.assign(extra, { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined });
       }
       // Снятому мастеру уже сообщили — «Новый заказ» ему не шлём.
       recipients = (await suitableUsers(ctx, o)).filter((u) => u !== previous);
     }
-    // Остаток, который «Оплачен» отмечает сам, — виден в истории и в журнале отдельной суммой.
-    let autoPaid = 0;
-    if (to === "paid") {
-      const paid = o.payments.reduce((s, p) => s + p.amount, 0);
-      if (paid < o.clientPrice) {
-        autoPaid = o.clientPrice - paid;
-        extra.payments = [...o.payments, { id: uid("p"), amount: autoPaid, method: "kaspi", at: nowIso() }];
-        await log(ctx, id, "payment", `Внесена оплата ${money(autoPaid)}`, actor);
-      }
-    }
+    if (to === "paid" && paidAmount(o) < o.clientPrice) throw new ConvexError(`Сначала внесите оплату: не хватает ${money(o.clientPrice - paidAmount(o))}`);
+    if (to === "awaiting_payment" && paidAmount(o) >= o.clientPrice) throw new ConvexError("Заказ оплачен полностью — переведите его в «Оплачен»");
+    // Закрыть с долгом клиента или без выплаты исполнителю — решение владельца, и причина остаётся в истории.
+    const problems = to === "closed" ? closeProblems(o) : [];
+    if (problems.length && me.role !== "owner") throw new ConvexError(`Закрыть нельзя: ${problems.join(", ")}. С долгом или без выплаты исполнителю заказ закрывает только владелец`);
+    if (problems.length && !why) throw new ConvexError(`Укажите причину закрытия: ${problems.join(", ")}`);
+    // Сотрудник отмечает «Принят исполнителем» за мастера — выплата фиксируется так же, как при его подтверждении.
+    if (to === "accepted") extra.acceptedPayout = payout(o);
     if (to === "cancelled") extra.cancelReason = why ?? "Без причины";
-    if (to === "new" && o.status === "cancelled") extra.cancelReason = undefined;
-    const reasonOf = to === "cancelled" ? extra.cancelReason : to === "refund" ? why : undefined;
+    // Отменённый заказ открыли заново — он снова ничей: у прежнего мастера он не висит в «Завершённых» (E5).
+    if (to === "new" && o.status === "cancelled") {
+      Object.assign(extra, { cancelReason: undefined, executorId: undefined, assignedAt: undefined, acceptedPayout: undefined, autoOffered: undefined, autoAssignedAt: undefined, autoExhaustedAt: undefined });
+    }
+    const reasonOf = to === "cancelled" ? extra.cancelReason : problems.length ? why : undefined;
     const published = recipients.length ? `Опубликован в ленту исполнителей — уведомлено: ${recipients.length}` : "Опубликован в ленту исполнителей — подходящих сейчас нет";
-    const text = to === "cancelled" ? `Заказ отменён: ${extra.cancelReason}` : to === "awaiting_executor" ? published : to === "refund" && why ? `Оформлен возврат: ${why}` : undefined;
-    await setStatus(ctx, o, to, actor, text, extra);
+    const text =
+      to === "cancelled" ? `Заказ отменён: ${extra.cancelReason}` : to === "awaiting_executor" ? published : problems.length ? `Заказ закрыт: ${why} (${problems.join(", ")})` : undefined;
+    // Сдача работы: «Выполнен», сообщение клиенту и сразу статус по деньгам.
+    let settled: StatusMove | null = null;
+    if (to === "done") settled = (await finishWork(ctx, o, actor)).settled;
+    else await setStatus(ctx, o, to, actor, text, extra);
     await audit(
       ctx,
       me,
       to === "awaiting_executor" ? "order.published" : "order.status",
       to === "awaiting_executor"
         ? `Заказ №${o.number}: ${lowerFirst(published)}`
-        : `Заказ №${o.number}: «${ORDER_STATUS[o.status].label}» → «${ORDER_STATUS[to].label}»${reasonOf ? ` (${reasonOf})` : ""}${autoPaid ? `; остаток ${money(autoPaid)} отмечен оплаченным` : ""}`,
+        : `Заказ №${o.number}: «${ORDER_STATUS[o.status].label}» → «${ORDER_STATUS[to].label}»${settled ? ` → «${ORDER_STATUS[settled.to].label}»` : ""}${reasonOf ? ` (${reasonOf})` : ""}${problems.length ? `; закрыт владельцем: ${problems.join(", ")}` : ""}`,
       {
         entityId: id,
-        meta: { from: o.status, to, ...(to === "awaiting_executor" ? { notified: recipients.length } : {}), ...(reasonOf ? { reason: reasonOf } : {}), ...(autoPaid ? { autoPayment: autoPaid } : {}) },
+        meta: {
+          from: o.status,
+          to,
+          ...(settled ? { then: settled.to } : {}),
+          ...(to === "awaiting_executor" ? { notified: recipients.length } : {}),
+          ...(reasonOf ? { reason: reasonOf } : {}),
+          ...(problems.length ? { forced: problems } : {}),
+        },
       },
     );
     await orderNotice(ctx, id);
@@ -320,8 +383,10 @@ export const changeStatus = mutation({
       await announceOrder(ctx, (await ctx.db.get(o._id))!, recipients);
       return { notified: recipients.length };
     }
-    if (o.executorId) {
-      await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Заказ №${o.number}: ${ORDER_STATUS[to].label.toLowerCase()}`, { link: `/w/orders/${o._id}`, tone: to === "cancelled" ? "bad" : "info" });
+    // Исполнитель, которого с заказа сняли (заказ открыли заново), про новый статус уже не узнаёт.
+    const executorId = "executorId" in extra ? extra.executorId : o.executorId;
+    if (executorId) {
+      await notify(ctx, [(await executorUser(ctx, executorId))?._id], `Заказ №${o.number}: ${ORDER_STATUS[to].label.toLowerCase()}`, { link: `/w/orders/${o._id}`, tone: to === "cancelled" ? "bad" : "info" });
     }
     return null;
   },
@@ -330,12 +395,24 @@ export const changeStatus = mutation({
 /**
  * Ручное назначение (ТЗ п.12). Можно и мимо подбора — человек решает, — но причина попадает в историю.
  * Мастера на выходном назначает только владелец: остальным система этого не даёт.
+ * expectedStatus / expectedExecutorId — каким заказ был на экране сотрудника (null — без исполнителя). Если за это время
+ * его взял мастер или сменился статус — отказ: устаревший экран не перебивает того, кто только что взял заказ (E6).
  */
 export const assign = mutation({
-  args: { id: v.id("orders"), executorId: v.id("executors") },
-  handler: async (ctx, { id, executorId }) => {
+  args: {
+    id: v.id("orders"),
+    executorId: v.id("executors"),
+    expectedStatus: v.optional(orderStatus),
+    expectedExecutorId: v.optional(v.union(v.id("executors"), v.null())),
+  },
+  handler: async (ctx, { id, executorId, expectedStatus, expectedExecutorId }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
+    if (expectedExecutorId !== undefined && (o.executorId ?? null) !== expectedExecutorId) {
+      const holder = o.executorId ? await ctx.db.get(o.executorId) : null;
+      throw new ConvexError(holder ? `Заказ уже у исполнителя ${shortName(holder.name)} — обновите карточку, прежде чем менять` : "Исполнителя с заказа уже сняли — обновите карточку");
+    }
+    if (expectedStatus !== undefined && o.status !== expectedStatus) throw new ConvexError(`Заказ уже в статусе «${ORDER_STATUS[o.status].label}» — обновите карточку`);
     const e = await ctx.db.get(executorId);
     if (!e) throw new ConvexError("Исполнитель не найден");
     // Уволенному (доступ отключён) заказ не назначаем даже владельцем: он его не увидит, а клиент будет ждать (аудит M-5).
@@ -353,8 +430,9 @@ export const assign = mutation({
     }
     const fit = fitsOrder(e, o);
     const outside = fit.fits ? "" : ` (вне подбора: ${fit.reasons.join("; ")})`;
-    await ctx.db.patch(id, { executorId, assignedAt: nowIso(), status: "assigned" });
-    await log(ctx, id, "assigned", `Назначен исполнитель: ${shortName(e.name)}${outside}`, userActor(me._id));
+    // Новый исполнитель ещё не подтвердил — прежний снимок выплаты к нему не относится.
+    await ctx.db.patch(id, { executorId, assignedAt: nowIso(), status: "assigned", acceptedPayout: undefined });
+    await log(ctx, id, "assigned", `Назначен исполнитель: ${shortName(e.name)}${outside}`, userActor(me._id), { from: o.status, to: "assigned" });
     await audit(ctx, me, "order.assigned", `Заказ №${o.number}: назначен ${shortName(e.name)}${previous ? ` вместо ${shortName(previous.name)}` : ""}${outside}`, {
       entityId: id,
       meta: { executorId, previousExecutorId: o.executorId, fits: fit.fits, reasons: fit.reasons },

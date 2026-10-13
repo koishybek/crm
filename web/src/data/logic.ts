@@ -14,8 +14,27 @@ export const payout = (o: Pick<Order, "payoutMode" | "payoutValue" | "clientPric
   o.payoutMode === "fixed" ? o.payoutValue : Math.round((o.clientPrice * o.payoutValue) / 100);
 export const margin = (o: Pick<Order, "clientPrice" | "payoutMode" | "payoutValue">) => o.clientPrice - payout(o);
 export const marginPct = (o: Order) => (o.clientPrice > 0 ? Math.round((margin(o) / o.clientPrice) * 1000) / 10 : 0);
-export const paidAmount = (o: Order) => o.payments.reduce((s, p) => s + p.amount, 0);
-export const debt = (o: Order) => (isFinished(o) ? Math.max(0, o.clientPrice - paidAmount(o)) : 0);
+/** Оплачено клиентом: сторнированные платежи не считаются. Возвраты долг не меняют — см. ./money. */
+export const paidAmount = (o: Pick<Order, "payments">) => o.payments.reduce((s, p) => (p.voidedAt ? s : s + p.amount), 0);
+export const debt = (o: Pick<Order, "status" | "clientPrice" | "payments">) => (isFinished(o) ? Math.max(0, o.clientPrice - paidAmount(o)) : 0);
+/** Возвращено клиенту. */
+export const refundedAmount = (o: { refunds?: readonly { amount: number }[] }) => (o.refunds ?? []).reduce((s, r) => s + r.amount, 0);
+
+/** Что нужно знать о заказе, чтобы посчитать выручку с учётом возвратов. */
+export type RevenueLike = Pick<Order, "clientPrice"> & { payments?: Pick<Order, "payments">["payments"]; refunds?: readonly { amount: number }[] };
+
+/**
+ * Выручка заказа за вычетом возвратов (E1). Возврат сначала покрывает переплату — деньги сверх цены клиенту
+ * и так причитались, — и только остаток уменьшает цену сделки.
+ */
+export function revenueOf(o: RevenueLike): number {
+  const refunded = refundedAmount(o);
+  if (!refunded) return o.clientPrice;
+  const overpaid = Math.max(0, (o.payments ? paidAmount({ payments: o.payments }) : 0) - o.clientPrice);
+  return o.clientPrice - Math.max(0, refunded - overpaid);
+}
+/** Маржа заказа с учётом возвратов: выручка минус выплата исполнителю. */
+export const netMargin = (o: RevenueLike & Pick<Order, "payoutMode" | "payoutValue">) => revenueOf(o) - payout(o);
 
 export const isActive = (o: Pick<Order, "status">) => ACTIVE_STATUSES.includes(o.status);
 export const isInWork = (o: Pick<Order, "status">) => WORK_STATUSES.includes(o.status);
@@ -91,8 +110,8 @@ export const executorStats = (e: Executor, orders: Order[], now = Date.now()) =>
     income: done.reduce((s, o) => s + payout(o), 0),
     incomeMonth: done.filter((o) => o.doneAt && new Date(o.doneAt).getTime() > monthAgo).reduce((s, o) => s + payout(o), 0),
     toPay: done.filter((o) => !o.payoutPaid).reduce((s, o) => s + payout(o), 0),
-    revenue: done.reduce((s, o) => s + o.clientPrice, 0),
-    margin: done.reduce((s, o) => s + margin(o), 0),
+    revenue: done.reduce((s, o) => s + revenueOf(o), 0),
+    margin: done.reduce((s, o) => s + netMargin(o), 0),
   };
 };
 

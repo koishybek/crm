@@ -105,7 +105,9 @@ describe("бот: сотрудники и мастера", () => {
     await t.action(internal.telegram.handleUpdate, cb(555, `act:start:${ids.order}`));
     await t.action(internal.telegram.handleUpdate, cb(555, `act:done:${ids.order}`));
     o = await t.run((ctx) => ctx.db.get(ids.order));
-    expect(o?.status).toBe("done");
+    // Работа сдана, клиент ещё не платил — заказ сам уходит в «Ожидает оплаты» (ТЗ п.10).
+    expect(o?.doneAt).toBeDefined();
+    expect(o?.status).toBe("awaiting_payment");
   });
 
   test("чужой Telegram не может взять заказ", async () => {

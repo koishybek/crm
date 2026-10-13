@@ -52,6 +52,7 @@ export const BACKUP_TABLES = [
   "reviews",
   "reviewRequests",
   "adSpend",
+  "payouts",
 ] as const satisfies readonly TableNames[];
 export type BackupTable = (typeof BACKUP_TABLES)[number];
 
