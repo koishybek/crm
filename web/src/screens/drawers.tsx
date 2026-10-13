@@ -32,6 +32,7 @@ import {
 } from "../data/catalog";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { useFileQuery } from "../data/files";
 import { useMe, useTeam, useUi } from "../data/hooks";
 import { leadBadge } from "../data/logic";
 import {
@@ -52,6 +53,7 @@ import {
 import type { AiDraft, AiSummary, CategoryId, Client, Lead, SourceId, Urgency } from "../data/types";
 import { linkConversationLead, useConversationDraft } from "../data/inbox";
 import { AiCard } from "../components/AiCard";
+import { SignedAudio } from "../components/SignedMedia";
 import { ConversationLink } from "../components/ConversationLink";
 import { EntityHistory } from "../components/AuditHistory";
 import { Source } from "../components/icons";
@@ -187,7 +189,7 @@ function NewLeadForm({
   const openLead = useUi((s) => s.openLead);
   // Звонок, из которого создаём заявку: передан снаружи или появился после загрузки записи здесь.
   const [callId, setCallId] = useState(callFromProps);
-  const callData = useQuery(api.calls.get, callId ? { id: callId as Id<"calls"> } : "skip");
+  const callData = useFileQuery(api.calls.get, callId ? { id: callId as Id<"calls"> } : "skip");
   const call = callData?.call;
   const presetId = clientId ?? call?.clientId;
   const preset = useQuery(api.clients.get, presetId ? { id: presetId as Id<"clients"> } : "skip");
@@ -399,9 +401,9 @@ function NewLeadForm({
         )}
         {aiPanel}
         {call?.recordingSrc && (
-          <audio controls preload="none" src={call.recordingSrc} className="h-10 w-full" aria-label="Запись звонка">
+          <SignedAudio controls preload="none" src={call.recordingSrc} className="h-10 w-full" aria-label="Запись звонка">
             <a href={call.recordingSrc}>Скачать запись</a>
-          </audio>
+          </SignedAudio>
         )}
         <FormRow label="Клиент" required>
           {(id) => (

@@ -266,9 +266,9 @@ describe("отказы сервера понятны экрану мастера
     // Шаг не по порядку: «Продолжить» у принятого заказа.
     expect(await refusal(as(ids.a.user).mutation(api.worker.act, { id: ids.open, action: "resume" }))).toBe("changed");
     expect(await refusal(as(ids.b.user).mutation(api.worker.act, { id: ids.open, action: "start" }))).toBe("not_yours");
-    // Мастер может написать оператору в свой заказ и не может — в чужой.
-    await as(ids.a.user).mutation(api.orders.addMessage, { orderId: ids.open, text: "Буду через 15 минут", channel: "internal", files: [] });
-    expect(await refusal(as(ids.a.user).mutation(api.orders.addMessage, { orderId: ids.other, text: "Привет", channel: "internal", files: [] }))).toBe("not_yours");
+    // Мастер может написать оператору в свой заказ (в переписку «С мастером») и не может — в чужой.
+    await as(ids.a.user).mutation(api.orders.addMessage, { orderId: ids.open, text: "Буду через 15 минут", channel: "executor", files: [] });
+    expect(await refusal(as(ids.a.user).mutation(api.orders.addMessage, { orderId: ids.other, text: "Привет", channel: "executor", files: [] }))).toBe("not_yours");
   });
 
   test("прочие тексты", () => {

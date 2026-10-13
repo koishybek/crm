@@ -1,5 +1,6 @@
 // Экран заказа мастера — один адрес /w/orders/:id и для свободного заказа из ленты, и для своего.
-// Данные — executorApp.order: только то, что мастеру можно видеть (без цены клиента и переписки команды).
+// Данные — executorApp.order: только то, что мастеру можно видеть (без цены клиента и переписки команды):
+// фото и документы, отмеченные для мастера, и переписка «С мастером». Ссылки на файлы обновляются раз в 5 минут.
 // Внизу панель действий: ровно одна главная кнопка по статусу, рядом звонок, маршрут, сообщение оператору.
 import { useQuery } from "convex/react";
 import {
@@ -12,6 +13,7 @@ import {
   Clock,
   Copy,
   EllipsisVertical,
+  FileText,
   Flame,
   Headset,
   Inbox,
@@ -34,6 +36,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { categoryById, serviceById } from "../../data/catalog";
+import { useFileQuery } from "../../data/files";
 import { useNow } from "../../data/hooks";
 import { toast } from "../../data/store";
 import type { WorkerOrder } from "../../data/types";
@@ -45,7 +48,7 @@ import type { OrderChange } from "../../data/workerSeen";
 import { isActiveWork, isEarning } from "../../data/workerStats";
 import { contactsLocked, isOverdueWork, statusView, stepsOf } from "../../data/workerStatus";
 import { dueLabel, durationLabel, whenLabel } from "../../data/workerTime";
-import type { WorkerNote, WorkerPhoto } from "../../data/workerTypes";
+import type { WorkerFile, WorkerNote, WorkerPhoto } from "../../data/workerTypes";
 import { cn, money, phone } from "../../lib/format";
 import { ServiceGlyph, ServiceTile } from "../../components/icons";
 import { Gallery } from "../../components/worker/Gallery";
@@ -69,7 +72,7 @@ export function OrderPage() {
 }
 
 function OrderScreen({ id }: { id: string }) {
-  const view = useQuery(api.executorApp.order, { id });
+  const view = useFileQuery(api.executorApp.order, { id });
   const mine = useQuery(api.worker.mine);
   const nav = useNavigate();
   const [sheet, setSheet] = useState<SheetKind | null>(null);
@@ -137,6 +140,7 @@ function OrderScreen({ id }: { id: string }) {
       mode={mode}
       order={view.order}
       photos={view.photos}
+      documents={view.documents}
       notes={view.state === "mine" ? view.notes : []}
       publishedAt={view.state === "available" ? view.publishedAt : undefined}
       skills={ex?.skills ?? []}
@@ -155,6 +159,7 @@ interface OrderViewProps {
   mode: Mode;
   order: WorkerOrder;
   photos: WorkerPhoto[];
+  documents: WorkerFile[];
   notes: WorkerNote[];
   publishedAt?: string;
   skills: string[];
@@ -177,7 +182,7 @@ interface Act {
   danger?: boolean;
 }
 
-function OrderView({ mode, order: o, photos, notes, publishedAt, skills, available, sheet, setSheet, onBack, onDeclined }: OrderViewProps) {
+function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skills, available, sheet, setSheet, onBack, onDeclined }: OrderViewProps) {
   const now = useNow();
   const nav = useNavigate();
   const offline = useNet((s) => s.offline);
@@ -327,6 +332,8 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
           )}
 
           <InfoRows order={o} mode={mode} now={now} skills={skills} contacts={contacts} />
+
+          {documents.length > 0 && <Documents files={documents} />}
 
           {contacts && active && (
             <section className="mx-4 mt-3 grid grid-cols-3 gap-2 lg:hidden">
@@ -616,19 +623,46 @@ function Row({ icon: Icon, label, children }: { icon: LucideIcon; label: string;
   );
 }
 
-/** Сообщения мастера оператору по заказу. Переписку команды мастер не видит. */
+/** Документы к заказу, которые офис отметил для мастера (схема, ТЗ, гарантийный талон). */
+function Documents({ files }: { files: WorkerFile[] }) {
+  return (
+    <section className="card mx-4 mt-3 p-4 lg:mx-0">
+      <h2 className="text-[17px] font-semibold text-ink">Документы</h2>
+      <ul className="mt-2 flex flex-col gap-2">
+        {files.map((f) => (
+          <li key={f.id}>
+            {f.url ? (
+              <a href={f.url} target="_blank" rel="noopener noreferrer" className="flex min-h-12 items-center gap-2.5 rounded-[12px] border border-[#cfc9bc] px-3 text-[15px] font-medium text-ink active:bg-[#f4f2ec]">
+                <FileText size={20} className="shrink-0 text-[#855600]" aria-hidden />
+                <span className="min-w-0 truncate">{f.name}</span>
+              </a>
+            ) : (
+              <span className={cn("flex min-h-12 items-center gap-2.5 px-3 text-[15px]", MUTED)}>
+                <FileText size={20} className="shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{f.name}</span>
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Переписка с офисом по заказу: сообщения мастера и ответы команды. Внутреннюю переписку команды мастер не видит. */
 function Notes({ notes, now, onWrite }: { notes: WorkerNote[]; now: number; onWrite: () => void }) {
   return (
     <section className="card mx-4 mt-3 p-4 lg:mx-0">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-[17px] font-semibold text-ink">Сообщения оператору</h2>
+        <h2 className="text-[17px] font-semibold text-ink">Переписка с офисом</h2>
       </div>
       {notes.length === 0 ? (
         <p className={cn("mt-1 text-[15px]", MUTED)}>Напишите, если что-то пошло не так. Оператор свяжется с вами.</p>
       ) : (
         <ol className="mt-2 flex flex-col gap-2.5">
           {notes.map((n) => (
-            <li key={n.id} className="rounded-[12px] bg-brand-soft px-3.5 py-2.5">
+            <li key={n.id} className={cn("max-w-[92%] rounded-[12px] px-3.5 py-2.5", n.mine ? "self-end bg-brand-soft" : "self-start bg-slate-bg")}>
+              <div className="text-[12.5px] font-semibold text-ink-2">{n.mine ? "Вы" : n.author ? `Офис · ${n.author}` : "Офис"}</div>
               {n.text && <p className="text-[15px] whitespace-pre-line text-ink-2 wrap-anywhere">{n.text}</p>}
               {n.files.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-2">

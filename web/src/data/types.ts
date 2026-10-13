@@ -147,8 +147,10 @@ export interface Attachment {
   id: string;
   name: string;
   kind: "image" | "file";
-  /** Уменьшенное превью (dataURL) для загруженных в прототипе картинок. */
+  /** Ссылка на файл: подписанная, живёт 15 минут — экраны получают свежую вместе с данными (src/data/files.ts). */
   src?: string;
+  /** Файл заказа виден мастеру: из переписки с ним, его фотоотчёт или отмечен «Показать мастеру». */
+  forExecutor?: boolean;
 }
 
 export interface Order {
@@ -214,12 +216,14 @@ export interface WorkerOrder {
 
 export type Actor = { type: "user"; id: string } | { type: "client"; id: string } | { type: "system" };
 
+/** internal — видит только команда, client — переписка по клиенту (мастеру не видна), executor — команда ↔ мастер. */
+export type MessageChannel = "internal" | "client" | "executor";
+
 export interface Message {
   id: string;
   orderId: string;
   author: Actor;
-  /** internal — видит только команда, client — переписка с клиентом. */
-  channel: "internal" | "client";
+  channel: MessageChannel;
   text: string;
   files: Attachment[];
   at: string;

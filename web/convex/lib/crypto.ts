@@ -12,9 +12,32 @@ const K = new Uint32Array([
 
 const rotr = (x: number, n: number) => (x >>> n) | (x << (32 - n));
 
+const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
 /** SHA-256 строки (UTF-8) в hex. */
 export function sha256Hex(input: string): string {
-  const data = new TextEncoder().encode(input);
+  return toHex(sha256(new TextEncoder().encode(input)));
+}
+
+/** HMAC-SHA256 (RFC 2104) в hex: ключ и сообщение — строки UTF-8. Подпись ссылок на файлы (lib/files.ts). */
+export function hmacSha256Hex(key: string, message: string): string {
+  const utf8 = new TextEncoder();
+  const rawKey = utf8.encode(key);
+  const block = new Uint8Array(64);
+  block.set(rawKey.length > 64 ? sha256(rawKey) : rawKey);
+  const data = utf8.encode(message);
+  const inner = new Uint8Array(64 + data.length);
+  const outer = new Uint8Array(64 + 32);
+  for (let i = 0; i < 64; i++) {
+    inner[i] = block[i]! ^ 0x36;
+    outer[i] = block[i]! ^ 0x5c;
+  }
+  inner.set(data, 64);
+  outer.set(sha256(inner), 64);
+  return toHex(sha256(outer));
+}
+
+function sha256(data: Uint8Array): Uint8Array {
   // Дополнение: 0x80, нули и длина сообщения в битах (64 бита, big-endian) — до кратного 64 байтам.
   const padded = new Uint8Array(Math.ceil((data.length + 9) / 64) * 64);
   padded.set(data);
@@ -62,7 +85,10 @@ export function sha256Hex(input: string): string {
     h[6] = (h[6]! + g) >>> 0;
     h[7] = (h[7]! + k) >>> 0;
   }
-  return Array.from(h, (x) => x.toString(16).padStart(8, "0")).join("");
+  const out = new Uint8Array(32);
+  const outView = new DataView(out.buffer);
+  h.forEach((x, i) => outView.setUint32(i * 4, x));
+  return out;
 }
 
 /**

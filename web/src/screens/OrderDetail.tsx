@@ -28,7 +28,6 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { useQuery } from "convex/react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, TRANSITION_LABEL, URGENCY, categoryById, serviceById } from "../data/catalog";
@@ -36,6 +35,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useMe, useNow, useTeam } from "../data/hooks";
 import { EXEC_STATE, debt, executorState, isOverdue, margin, marginPct, paidAmount, payout, paymentState, rankExecutors, type Load } from "../data/logic";
+import { useFileQuery } from "../data/files";
 import { addPayment, assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, PaymentMethod, Urgency, User } from "../data/types";
 import { OrderChat } from "../components/OrderChat";
@@ -64,7 +64,7 @@ export default function OrderDetail() {
   const { id } = useParams();
   const me = useMe()!;
   const team = useTeam();
-  const d = useQuery(api.orders.detail, { id: id as Id<"orders"> });
+  const d = useFileQuery(api.orders.detail, { id: id as Id<"orders"> });
   const db = useMemo<Detail | null>(
     () => (d ? { orders: d.load, executors: d.executors, history: d.history, users: team.users, clientName: d.client?.name ?? "Клиент" } : null),
     [d, team.users],
@@ -206,7 +206,7 @@ export default function OrderDetail() {
           </Card>
 
           <Card title="Комментарии и файлы" titleExtra={o.files.length > 0 && <span className="inline-flex items-center gap-1 text-[13px] font-normal text-muted"><Paperclip size={14} />{o.files.length}</span>}>
-            <OrderChat orderId={o.id} messages={d!.messages} me={me} nameOf={nameOf} />
+            <OrderChat orderId={o.id} messages={d!.messages} me={me} nameOf={nameOf} executorName={ex ? shortName(ex.name) : undefined} />
           </Card>
         </div>
 

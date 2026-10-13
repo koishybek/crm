@@ -2,9 +2,11 @@
 import { create } from "zustand";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { ConvexError } from "convex/values";
 import { convex, run, type Result } from "./convex";
+import { confirmUpload, mimeOf, uploadLimitError } from "./files";
 import { digits } from "../lib/format";
-import type { AiSummary, Attachment, CategoryId, Client, Executor, LeadStatus, Order, OrderStatus, PaymentMethod, SourceId, Urgency } from "./types";
+import type { AiSummary, Attachment, CategoryId, Client, Executor, LeadStatus, MessageChannel, Order, OrderStatus, PaymentMethod, SourceId, Urgency } from "./types";
 
 export type { Result };
 
@@ -87,22 +89,36 @@ export const addPayment = (id: string, amount: number, method: PaymentMethod) =>
 export const changeStatus = (id: string, to: OrderStatus, reason?: string) => run(convex.mutation(api.orders.changeStatus, { id: oid(id), to, reason }));
 export const assignExecutor = (id: string, executorId: string) => run(convex.mutation(api.orders.assign, { id: oid(id), executorId: eid(executorId) }));
 
-/** Файл → хранилище Convex. Картинки до 15 МБ, документы до 25 МБ. */
+/**
+ * Файл → хранилище Convex → подтверждение на сервере (тип, размер и владелец проверяет сервер, convex/files.ts).
+ * Фото до 15 МБ, видео до 100 МБ, аудио и документы до 25 МБ.
+ */
 export async function uploadFile(file: File): Promise<Result<Attachment & { storageId: Id<"_storage"> }>> {
-  const image = file.type.startsWith("image/");
-  if (file.size > (image ? 15 : 25) * 1024 * 1024) return { ok: false, error: `«${file.name}» слишком большой` };
+  const type = mimeOf(file);
+  const tooBig = uploadLimitError(file, type);
+  if (tooBig) return { ok: false, error: tooBig };
   return run(
     (async () => {
       const url = await convex.mutation(api.orders.uploadUrl, {});
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file });
+      const res = await fetch(url, { method: "POST", headers: { "Content-Type": type }, body: file });
       if (!res.ok) throw new Error("upload failed");
       const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-      return { id: `f-${storageId}`, name: file.name, kind: image ? ("image" as const) : ("file" as const), storageId };
+      const confirmed = await confirmUpload(storageId);
+      if (!confirmed.ok) throw new ConvexError(confirmed.error);
+      return { id: `f-${storageId}`, name: file.name, kind: confirmed.value === "image" ? ("image" as const) : ("file" as const), storageId };
     })(),
   );
 }
-export const addMessage = (orderId: string, text: string, channel: "internal" | "client", files: (Attachment & { storageId?: Id<"_storage"> })[] = []) =>
-  run(convex.mutation(api.orders.addMessage, { orderId: oid(orderId), text, channel, files: files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, storageId: f.storageId })) }));
+/** Сообщение в заказе. Файлы — уже загруженные и подтверждённые (uploadFile); сервер прикрепляет только свои загрузки. */
+export const addMessage = (orderId: string, text: string, channel: MessageChannel, files: { name: string; storageId?: Id<"_storage"> }[] = []) =>
+  run(
+    convex.mutation(api.orders.addMessage, {
+      orderId: oid(orderId),
+      text,
+      channel,
+      files: files.flatMap((f) => (f.storageId ? [{ storageId: f.storageId, name: f.name }] : [])),
+    }),
+  );
 
 // ── Исполнитель ──────────────────────────────────────────────────────────────
 export const takeOrder = (id: string) => run(convex.mutation(api.worker.take, { id: oid(id) }));

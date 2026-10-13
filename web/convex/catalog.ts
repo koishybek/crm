@@ -1,12 +1,13 @@
-// Справочник направлений и услуг. Пустая база → значения по умолчанию из src/data/catalog.ts;
-// первая правка владельца переносит их в базу, дальше источник истины — таблицы.
+// Справочник направлений и услуг. Пустая база → значения по умолчанию из src/data/catalog.ts (цены и доли — только
+// на сервере, lib/defaultPrices.ts); первая правка владельца переносит их в базу, дальше источник истины — таблицы.
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { currentUser, OWNER, requireRole } from "./lib/access";
 import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
+import { withDefaultPrices } from "./lib/defaultPrices";
 import { cleanMoney, cleanText } from "./lib/limits";
-import { CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type Tone } from "../src/data/catalog";
+import { CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type ServiceInfo, type Tone } from "../src/data/catalog";
 import { normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY } from "../src/data/skills";
 import { money } from "../src/lib/format";
 
@@ -31,7 +32,7 @@ export async function loadCatalog(ctx: QueryCtx) {
   const cats = (await ctx.db.query("categories").collect()).sort((a, b) => a.order - b.order);
   const svcs = (await ctx.db.query("services").collect()).sort((a, b) => a.order - b.order);
   const categories = cats.length ? cats.map(toCategory) : DEFAULT_CATEGORIES;
-  const services = svcs.length ? svcs.map(toService) : DEFAULT_SERVICES;
+  const services = svcs.length ? svcs.map(toService) : withDefaultPrices(DEFAULT_SERVICES);
   return {
     categories,
     services,
@@ -48,12 +49,20 @@ export async function loadCatalog(ctx: QueryCtx) {
   };
 }
 
+/** Услуга без денег: подпись, значок, направление, примеры. */
+const toInfo = ({ price: _p, payoutPct: _q, ...info }: Service): ServiceInfo => (void _p, void _q, info);
+
+/**
+ * Справочник для интерфейса. Мастеру — без цен и доли исполнителя (аудит H-2, E14): по доле и своей выплате
+ * он вычислил бы цену клиента и маржу. Ему хватает подписей, значков, направлений и навыков.
+ */
 export const list = query({
   args: {},
-  handler: async (ctx) => {
-    if (!(await currentUser(ctx))) return null;
+  handler: async (ctx): Promise<{ categories: Category[]; services: (Service | ServiceInfo)[] } | null> => {
+    const me = await currentUser(ctx);
+    if (!me) return null;
     const c = await loadCatalog(ctx);
-    return { categories: c.categories, services: c.services };
+    return { categories: c.categories, services: me.role === "executor" ? c.services.map(toInfo) : c.services };
   },
 });
 
@@ -89,7 +98,7 @@ export const publicList = query({
 async function materialize(ctx: MutationCtx) {
   if ((await ctx.db.query("categories").first()) || (await ctx.db.query("services").first())) return;
   for (const [i, c] of DEFAULT_CATEGORIES.entries()) await ctx.db.insert("categories", { key: c.id, label: c.label, tone: c.tone, order: i, active: true, skills: c.skills ?? [] });
-  for (const [i, s] of DEFAULT_SERVICES.entries()) {
+  for (const [i, s] of withDefaultPrices(DEFAULT_SERVICES).entries()) {
     await ctx.db.insert("services", { key: s.id, category: s.category, label: s.label, icon: s.icon, priceMin: s.price[0], priceMax: s.price[1], payoutPct: s.payoutPct, examples: s.examples, order: i, active: true });
   }
 }

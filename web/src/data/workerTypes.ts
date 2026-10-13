@@ -1,17 +1,17 @@
 // Ответы запросов кабинета мастера (convex/executorApp.ts). Только то, что мастеру можно видеть:
-// ни цены клиента, ни маржи, ни платежей, ни внутренней переписки команды.
+// ни цены клиента, ни маржи, ни платежей, ни внутренней переписки команды. Ссылки на файлы — подписанные, на 15 минут.
 import type { Tone } from "./catalog";
 import type { CategoryId, Executor, WorkerOrder } from "./types";
 import type { ExecutorStats } from "./workerStats";
 
-/** Фото к заказу, которое можно показать мастеру. */
+/** Фото к заказу, которое можно показать мастеру (отмечено «Показать мастеру»). */
 export interface WorkerPhoto {
   id: string;
   name: string;
   url: string;
 }
 
-/** Вложение в сообщении мастера. У документа превью нет, только ссылка. */
+/** Вложение в переписке или документ заказа. У документа превью нет, только ссылка. */
 export interface WorkerFile {
   id: string;
   name: string;
@@ -19,12 +19,16 @@ export interface WorkerFile {
   url?: string;
 }
 
-/** Сообщение мастера оператору по заказу. */
+/** Сообщение в переписке мастера с офисом по заказу (канал «С мастером»). */
 export interface WorkerNote {
   id: string;
   text: string;
   at: string;
   files: WorkerFile[];
+  /** Написал сам мастер; иначе — офис. */
+  mine: boolean;
+  /** Кто из офиса написал: «Мадина». */
+  author?: string;
 }
 
 /** То, чего ленте не хватает в worker.feed: когда заказ опубликован и превью первого фото. */
@@ -43,8 +47,8 @@ export interface FeedExtra {
  * unavailable — нет, не подходит или снят с ленты (без подробностей).
  */
 export type WorkerOrderView =
-  | { state: "available"; order: WorkerOrder; photos: WorkerPhoto[]; publishedAt: string }
-  | { state: "mine"; order: WorkerOrder; photos: WorkerPhoto[]; notes: WorkerNote[] }
+  | { state: "available"; order: WorkerOrder; photos: WorkerPhoto[]; documents: WorkerFile[]; publishedAt: string }
+  | { state: "mine"; order: WorkerOrder; photos: WorkerPhoto[]; documents: WorkerFile[]; notes: WorkerNote[] }
   | { state: "taken" }
   | { state: "unavailable" };
 

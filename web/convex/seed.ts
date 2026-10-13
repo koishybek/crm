@@ -29,6 +29,7 @@ const WIPE_TABLES = [
   "systemStatus",
   "backups",
   "oauthStates",
+  "uploads",
   "categories",
   "services",
   "authAccounts",

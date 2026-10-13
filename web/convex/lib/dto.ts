@@ -1,7 +1,9 @@
 // Наружу — только явные DTO в форме типов фронта (src/data/types.ts), никогда сырые документы.
-import type { Doc } from "../_generated/dataModel";
+// Ссылки на файлы — подписанные и короткоживущие (lib/files.ts → fileSigner).
+import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { payout } from "../../src/data/logic";
+import type { FileSigner } from "./files";
 import { checkPublicUrl } from "./safeFetch";
 import type {
   Attachment,
@@ -91,10 +93,52 @@ export const toLead = (l: Doc<"leads">): Lead => ({
   callId: l.callId,
 });
 
-async function withUrls(ctx: QueryCtx, files: Doc<"orders">["files"]): Promise<Attachment[]> {
-  return Promise.all(
-    files.map(async (f) => ({ id: f.id, name: f.name, kind: f.kind, src: f.storageId ? ((await ctx.storage.getUrl(f.storageId)) ?? undefined) : undefined })),
-  );
+type StoredFile = Doc<"orders">["files"][number];
+
+/** Вложение со ссылкой. Документам — имя для скачивания; shown — видно ли его мастеру. */
+const toAttachment = (f: StoredFile, signer: FileSigner, shown: boolean = f.forExecutor === true): Attachment => ({
+  id: f.id,
+  name: f.name,
+  kind: f.kind,
+  src: signer.url(f.storageId, f.kind === "file" ? f.name : undefined),
+  forExecutor: shown,
+});
+
+/** Файлы заказа, которые видит мастер (аудит M-6): отмеченные «Показать мастеру» — в том числе всё из переписки с ним. */
+export const executorFiles = (files: readonly StoredFile[]): StoredFile[] => files.filter((f) => f.forExecutor === true && f.storageId !== undefined);
+
+/**
+ * Переписка мастера по заказу — только канал «С мастером» (аудит M-6, E15): внутренние заметки и переписка по клиенту
+ * ему не видны. Сообщения другого мастера (заказ мог перейти от него) тоже не показываем — это его разговор с командой.
+ */
+export async function executorThread(ctx: QueryCtx, orderId: Id<"orders">, me: Id<"users">): Promise<Doc<"messages">[]> {
+  const rows = (
+    await ctx.db
+      .query("messages")
+      .withIndex("by_order", (q) => q.eq("orderId", orderId))
+      .collect()
+  ).filter((m) => m.channel === "executor");
+  const roles = new Map<string, string | undefined>();
+  for (const m of rows) {
+    if (m.author.type !== "user" || m.author.id === me || roles.has(m.author.id)) continue;
+    const id = ctx.db.normalizeId("users", m.author.id);
+    roles.set(m.author.id, id ? (await ctx.db.get(id))?.role : undefined);
+  }
+  return rows.filter((m) => m.author.type !== "user" || m.author.id === me || roles.get(m.author.id) !== "executor");
+}
+
+const PHONE = /(?:\+?7|8)[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}/g;
+/** Хвосты AI-описания до исправления разбора: «Бюджет клиента: … .» и «Адрес: … .» (перед «Когда:», бюджетом или в конце). */
+const AI_BUDGET = /\s*Бюджет клиента:[^.\n]*\.?/g;
+const AI_ADDRESS = /\s*Адрес: .*?\.(?=\s+(?:Когда|Бюджет клиента):|\s*$)/g;
+
+/**
+ * Описание заказа глазами мастера (аудит H-3): бюджета клиента и адреса из AI-разбора нет никогда, телефоны в тексте —
+ * только когда мастеру открыты контакты клиента. Сотрудники видят описание как есть.
+ */
+export function describeForExecutor(text: string, contacts: boolean): string {
+  const clean = text.replace(AI_BUDGET, "").replace(AI_ADDRESS, "").trim();
+  return contacts ? clean : clean.replace(PHONE, "[номер скрыт]");
 }
 
 /** Заказ для сотрудника. Файлы без ссылок — ссылки отдаёт только карточка заказа. */
@@ -129,22 +173,22 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   closedAt: o.closedAt,
   cancelReason: o.cancelReason,
   requiredSkills: o.requiredSkills,
-  files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })),
+  files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, forExecutor: f.forExecutor === true })),
 });
 
-export const toOrderWithFiles = async (ctx: QueryCtx, o: Doc<"orders">): Promise<Order> => ({ ...toOrder(o), files: await withUrls(ctx, o.files) });
+export const toOrderWithFiles = (o: Doc<"orders">, signer: FileSigner): Order => ({ ...toOrder(o), files: o.files.map((f) => toAttachment(f, signer)) });
 
 /**
- * Заказ глазами исполнителя: без цены клиента, маржи и платежей. Адрес и контакты —
- * только после подтверждения (до этого исполнитель видит город).
+ * Заказ глазами исполнителя: без цены клиента, маржи и платежей. Адрес и контакты — только пока заказ у него в работе
+ * (contactsOpen в src/data/logic.ts). Файлы — только видимые мастеру и только если передан signer.
  */
-export async function toWorkerOrder(ctx: QueryCtx, o: Doc<"orders">, opts: { contacts: boolean; files: boolean }): Promise<WorkerOrder> {
+export function toWorkerOrder(o: Doc<"orders">, opts: { contacts: boolean; signer?: FileSigner }): WorkerOrder {
   return {
     id: o._id,
     number: o.number,
     serviceId: o.serviceId,
     category: o.category,
-    description: o.description,
+    description: describeForExecutor(o.description, opts.contacts),
     city: o.city,
     deadline: o.deadline,
     priority: o.priority,
@@ -159,12 +203,17 @@ export async function toWorkerOrder(ctx: QueryCtx, o: Doc<"orders">, opts: { con
     clientName: opts.contacts ? o.clientName : undefined,
     clientPhone: opts.contacts ? o.clientPhone : undefined,
     requiredSkills: o.requiredSkills,
-    files: opts.files ? await withUrls(ctx, o.files) : [],
+    files: opts.signer ? executorFiles(o.files).map((f) => toAttachment(f, opts.signer!, true)) : [],
   };
 }
 
-export async function toMessage(ctx: QueryCtx, m: Doc<"messages">): Promise<Message> {
-  return { id: m._id, orderId: m.orderId, author: m.author, channel: m.channel, text: m.text, files: await withUrls(ctx, m.files), at: m.at };
+/**
+ * Сообщение заказа со ссылками на файлы. shown — id файлов заказа, видимых мастеру: отметка у вложения в карточке
+ * сотрудника (вложения переписки с мастером видны ему всегда).
+ */
+export function toMessage(m: Doc<"messages">, signer: FileSigner, shown?: ReadonlySet<string>): Message {
+  const files = m.files.map((f) => toAttachment(f, signer, m.channel === "executor" || (shown ? shown.has(f.id) : f.forExecutor === true)));
+  return { id: m._id, orderId: m.orderId, author: m.author, channel: m.channel, text: m.text, files, at: m.at };
 }
 
 export const toHistory = (h: Doc<"history">): HistoryEvent => ({ id: h._id, orderId: h.orderId, kind: h.kind, text: h.text, actor: h.actor, at: h.at });
@@ -182,8 +231,8 @@ export const toInteraction = (i: Doc<"interactions">): Interaction => ({
 
 export const toNote = (n: Doc<"clientNotes">): ClientNote => ({ id: n._id, clientId: n.clientId, authorId: n.authorId, text: n.text, at: n.at });
 
-/** Звонок. Ссылку на запись отдаём только в карточке (withMedia) — список лёгкий. */
-export async function toCall(ctx: QueryCtx, c: Doc<"calls">, withMedia: boolean): Promise<Call> {
+/** Звонок. Ссылку на запись и расшифровку отдаём только в карточке (media — подписывает ссылку) — список лёгкий. */
+export function toCall(c: Doc<"calls">, media: FileSigner | null): Call {
   return {
     id: c._id,
     direction: c.direction,
@@ -199,8 +248,8 @@ export async function toCall(ctx: QueryCtx, c: Doc<"calls">, withMedia: boolean)
     duration: c.duration,
     hasRecording: !!(c.recordingId || c.recordingUrl),
     // Внешнюю ссылку АТС отдаём в браузер, только если это публичный https-адрес (аудит M-3).
-    recordingSrc: withMedia ? (c.recordingId ? ((await ctx.storage.getUrl(c.recordingId)) ?? undefined) : c.recordingUrl && checkPublicUrl(c.recordingUrl).ok ? c.recordingUrl : undefined) : undefined,
-    transcript: withMedia ? c.transcript : undefined,
+    recordingSrc: media ? (c.recordingId ? media.url(c.recordingId) : c.recordingUrl && checkPublicUrl(c.recordingUrl).ok ? c.recordingUrl : undefined) : undefined,
+    transcript: media ? c.transcript : undefined,
     ai: c.ai,
     draft: c.draft,
     aiStatus: c.aiStatus,

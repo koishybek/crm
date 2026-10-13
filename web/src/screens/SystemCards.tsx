@@ -5,6 +5,7 @@ import { Activity, DatabaseBackup, Download, Shuffle, TriangleAlert } from "luci
 import { useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import { AUTO_ASSIGN, AUTO_ASSIGN_RULES } from "../data/autoAssign";
+import { useFileQuery } from "../data/files";
 import { useMe, useNow } from "../data/hooks";
 import { report } from "../data/store";
 import { backupNow, saveAutoAssign } from "../data/systemActions";
@@ -88,7 +89,7 @@ function SubsystemRow({ v }: { v: SubsystemView }) {
 // ── Резервные копии ──────────────────────────────────────────────────────────
 
 function BackupsCard() {
-  const b = useQuery(api.backup.list);
+  const b = useFileQuery(api.backup.list, {});
   const [busy, setBusy] = useState(false);
   const start = async () => {
     setBusy(true);

@@ -8,7 +8,7 @@ import type { Id, TableNames } from "./_generated/dataModel";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
-import { dropFile } from "./lib/files";
+import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
 import { fileSize, type BackupList } from "../src/data/systemHealth";
@@ -57,9 +57,10 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
 
 /**
  * Что не копируем: вход и сессии (auth*), счётчики лимитов, одноразовые OAuth-state, сами копии,
- * колокольчик, отметки мониторинга и принятые обновления Telegram — их не восстанавливают.
+ * колокольчик, отметки мониторинга, принятые обновления Telegram и служебный учёт загрузок (самих файлов в копии нет) —
+ * их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates"] as const satisfies readonly TableNames[];
+const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;
@@ -142,6 +143,8 @@ export const _saved = internalMutation({
   args: { fileId: v.id("_storage"), at: v.string(), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) },
   handler: async (ctx, a): Promise<Id<"backups">> => {
     const id = await ctx.db.insert("backups", { at: a.at, fileId: a.fileId, size: a.size, docs: a.docs, by: a.by });
+    // Скачивание копии — по подписанной ссылке: ключ подписи должен быть.
+    await ensureSigningKey(ctx);
     const old = (await ctx.db.query("backups").withIndex("by_at").order("desc").collect()).slice(KEEP_BACKUPS);
     for (const b of old) {
       await dropFile(ctx, b.fileId);
@@ -164,11 +167,18 @@ export const _failed = internalMutation({
   },
 });
 
-/** Копии для владельца: свежие сверху, со ссылкой на скачивание и состоянием последней попытки. */
+/** Имя файла копии при скачивании: «homemax-backup-2026-10-13-0200.json» (время — по Алматы). */
+const backupName = (at: string) => `homemax-backup-${new Date(Date.parse(at) + 5 * 3600_000).toISOString().slice(0, 16).replace("T", "-").replace(":", "")}.json`;
+
+/**
+ * Копии для владельца: свежие сверху, с подписанной ссылкой на скачивание (15 минут) и состоянием последней попытки.
+ * t — метка обновления ссылок (src/data/files.ts).
+ */
 export const list = query({
-  args: {},
+  args: { t: v.optional(v.number()) },
   handler: async (ctx): Promise<BackupList> => {
     await requireRole(ctx, OWNER);
+    const signer = await fileSigner(ctx);
     const [rows, status] = await Promise.all([
       ctx.db.query("backups").withIndex("by_at").order("desc").take(KEEP_BACKUPS),
       ctx.db
@@ -178,7 +188,7 @@ export const list = query({
     ]);
     return {
       keep: KEEP_BACKUPS,
-      items: await Promise.all(rows.map(async (b) => ({ id: b._id, at: b.at, size: b.size, docs: b.docs, manual: !!b.by, url: (await ctx.storage.getUrl(b.fileId)) ?? undefined }))),
+      items: rows.map((b) => ({ id: b._id, at: b.at, size: b.size, docs: b.docs, manual: !!b.by, url: signer.url(b.fileId, backupName(b.at)) })),
       lastError: status?.errorAt && (!status.okAt || status.errorAt > status.okAt) ? { at: status.errorAt, text: status.error ?? "Ошибка" } : undefined,
     };
   },

@@ -21,4 +21,7 @@ crons.cron("daily backup", "0 21 * * *", internal.backup.run, {});
 // Уборка служебных таблиц: отжившие счётчики лимитов и принятые обновления Telegram.
 crons.interval("cleanup service tables", { hours: 1 }, internal.maintenance.cleanup, {});
 
+// Файлы: ключ подписи ссылок на месте и неприкреплённые загрузки старше суток удалены (convex/files.ts).
+crons.interval("files maintenance", { minutes: 10 }, internal.files.maintain, {});
+
 export default crons;

@@ -8,7 +8,7 @@ import {
   type Tone,
 } from "./catalog";
 import { textKey } from "./skills";
-import type { Client, DB, Executor, Lead, Order, User } from "./types";
+import type { Client, DB, Executor, Lead, Order, OrderStatus, User } from "./types";
 
 export const payout = (o: Pick<Order, "payoutMode" | "payoutValue" | "clientPrice">) =>
   o.payoutMode === "fixed" ? o.payoutValue : Math.round((o.clientPrice * o.payoutValue) / 100);
@@ -132,6 +132,14 @@ export function fitsOrder(e: FitExecutor, o: FitOrder): Fit {
 
 /** Заказ лежит в ленте и его ещё никто не взял. */
 export const isOpenForFeed = (o: Pick<Order, "status" | "executorId">) => o.status === "awaiting_executor" && !o.executorId;
+
+/**
+ * Адрес и телефон клиента мастер видит, пока заказ у него в работе (аудит L-5): после подтверждения и до оплаты.
+ * Назначенный, но не подтверждённый, оплаченный, закрытый, отменённый и возврат — без контактов. Одно правило
+ * для кабинета, карточек Telegram и утренней сводки.
+ */
+export const CONTACT_STATUSES: readonly OrderStatus[] = ["accepted", "in_progress", "awaiting_client", "done", "awaiting_payment"];
+export const contactsOpen = (o: Pick<Order, "status">) => CONTACT_STATUSES.includes(o.status);
 
 /**
  * Лента исполнителя: свободные заказы, которые ему подходят (ТЗ п.11) по городу, направлению и навыкам.

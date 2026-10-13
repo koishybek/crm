@@ -1,8 +1,8 @@
 // Общие кусочки экранов мастера: срок, бейджи статуса и выплаты, превью, звёзды рейтинга, строка завершённого заказа.
 import { CircleCheck, Clock, ImageOff, Pause, Star, StarHalf } from "lucide-react";
-import { useState } from "react";
 import { Link } from "react-router";
 import { serviceById } from "../../data/catalog";
+import { useLatchedSrc } from "../../data/files";
 import type { WorkerOrder } from "../../data/types";
 import { payoutChip, statusView, type Step } from "../../data/workerStatus";
 import { dateAlmaty, dueLabel, isDueSoon, isPast, relLabel } from "../../data/workerTime";
@@ -35,19 +35,22 @@ export function PayoutChipBadge({ order }: { order: Pick<WorkerOrder, "status" |
   return chip ? <WBadge tone={chip.tone}>{chip.label}</WBadge> : null;
 }
 
-/** Фото заказа или плитка с иконкой услуги; не загрузилось — тоже плитка. */
+/**
+ * Фото заказа или плитка с иконкой услуги; не загрузилось — тоже плитка. Ссылка подписанная (15 минут): держим свою,
+ * пока работает, истекла — берём свежую (useLatchedSrc), без лишней перезагрузки фото по мобильному интернету.
+ */
 export function OrderThumb({ serviceId, url, size = 72 }: { serviceId: string; url?: string; size?: number }) {
-  const [broken, setBroken] = useState(false);
-  if (!url || broken) return <ServiceTile serviceId={serviceId} size={size} />;
+  const img = useLatchedSrc(url);
+  if (!img.src || img.broken) return <ServiceTile serviceId={serviceId} size={size} />;
   return (
     <img
-      src={url}
+      src={img.src}
       alt=""
       width={size}
       height={size}
       loading="lazy"
       decoding="async"
-      onError={() => setBroken(true)}
+      onError={img.onError}
       className="shrink-0 rounded-[12px] bg-[#efece5] object-cover"
       style={{ width: size, height: size }}
     />
@@ -56,15 +59,15 @@ export function OrderThumb({ serviceId, url, size = 72 }: { serviceId: string; u
 
 /** Картинка во весь блок, с запасным видом «Фото не загрузилось». */
 export function Photo({ url, alt, className }: { url: string; alt: string; className?: string }) {
-  const [broken, setBroken] = useState(false);
-  if (broken)
+  const img = useLatchedSrc(url);
+  if (!img.src || img.broken)
     return (
       <span className={cn("flex flex-col items-center justify-center gap-1.5 bg-[#efece5] text-[14px]", MUTED, className)}>
         <ImageOff size={24} aria-hidden />
         Фото не загрузилось
       </span>
     );
-  return <img src={url} alt={alt} loading="lazy" decoding="async" onError={() => setBroken(true)} className={cn("bg-[#efece5] object-cover", className)} />;
+  return <img src={img.src} alt={alt} loading="lazy" decoding="async" onError={img.onError} className={cn("bg-[#efece5] object-cover", className)} />;
 }
 
 /** Звёзды рейтинга (дублируют число рядом, поэтому скрыты от экранного диктора). */

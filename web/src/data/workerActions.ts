@@ -1,6 +1,7 @@
 // Действия мастера, собранные из существующих функций сервера (worker.take / worker.act / worker.setAvailable,
 // orders.addMessage, uploadFile). Причину отказа и фотоотчёт сервер пока не принимает в одной мутации,
 // поэтому порядок шагов выбран так, чтобы при сбое посередине не было вреда (см. комментарии у функций).
+// Мастер пишет только в переписку «С мастером» (канал executor): внутренние заметки команды ему недоступны.
 import type { Id } from "../../convex/_generated/dataModel";
 import type { Result } from "./convex";
 import { addMessage, executorAction, setMyAvailability, takeOrder, telegramLink, uploadFile } from "./store";
@@ -22,7 +23,7 @@ export async function takeWithShift(id: string, enableShift: boolean): Promise<R
  * потом сам отказ. Не дошла причина — отказа не делаем.
  */
 export async function declineOrder(id: string, reason: string): Promise<Result<null>> {
-  const note = await addMessage(id, `Отказываюсь от заказа. Причина: ${reason}`, "internal");
+  const note = await addMessage(id, `Отказываюсь от заказа. Причина: ${reason}`, "executor");
   if (!note.ok) return note;
   return executorAction(id, "decline");
 }
@@ -30,7 +31,7 @@ export async function declineOrder(id: string, reason: string): Promise<Result<n
 /** Пауза: причина и комментарий уходят оператору сообщением, затем статус «на паузе». */
 export async function pauseOrder(id: string, reason: string): Promise<Result<null>> {
   if (reason) {
-    const note = await addMessage(id, `Пауза: ${reason}`, "internal");
+    const note = await addMessage(id, `Пауза: ${reason}`, "executor");
     if (!note.ok) return note;
   }
   return executorAction(id, "wait");
@@ -53,11 +54,11 @@ export async function completeOrder(id: string, comment: string, photos: Uploade
 export async function sendReport(id: string, comment: string, photos: Uploaded[]): Promise<Result<null>> {
   const text = comment.trim();
   if (!text && !photos.length) return { ok: true, value: null };
-  return addMessage(id, text || "Фотоотчёт о выполненной работе", "internal", photos);
+  return addMessage(id, text || "Фотоотчёт о выполненной работе", "executor", photos);
 }
 
-/** Сообщение оператору по заказу (видит команда, клиент — нет). */
-export const messageOperator = (id: string, text: string, photos: Uploaded[]) => addMessage(id, text.trim(), "internal", photos);
+/** Сообщение оператору по заказу — в переписку «С мастером» (видят команда и этот мастер, клиент — нет). */
+export const messageOperator = (id: string, text: string, photos: Uploaded[]) => addMessage(id, text.trim(), "executor", photos);
 
 /**
  * Подключить Telegram: одноразовая ссылка t.me/<бот>?start=<код>. Переходим по ней в этой же вкладке:
