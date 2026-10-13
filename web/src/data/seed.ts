@@ -476,7 +476,9 @@ export function buildSeed(nowDate = new Date()): DB {
     const dow = new Date(dayStart).getDay();
     const growth = 0.55 + 0.8 * (1 - ago / 90);
     const base = dow === 0 || dow === 6 ? 5 : 8;
-    const count = Math.max(1, Math.round(base * growth + r.int(-1, 2)));
+    const full = Math.max(1, Math.round(base * growth + r.int(-1, 2)));
+    // Последние двое суток наполовину заняты ручными «свежими» заказами ниже — иначе на графике пик в конце.
+    const count = ago <= 2 ? Math.ceil(full / 2) : full;
     for (let k = 0; k < count; k++) {
       const at = dayStart + r.int(8 * 60, 21 * 60) * MIN;
       drafts.push({
@@ -756,13 +758,13 @@ export function buildSeed(nowDate = new Date()): DB {
     { name: "Динара Ахметова", city: "Алматы", svc: "ac-install", price: 35000, payout: 25000, desc: "Монтаж сплит-системы в квартире", min: 150, deadline: soon(3), stage: "awaiting_executor", src: "olx", prio: "high" },
     { name: "Ерлан Оспанов", city: "Алматы", svc: "wm-repair", price: 25000, payout: 18000, desc: "Не сливает воду, нужна диагностика и ремонт", min: 260, deadline: at(1, 10), stage: "awaiting_executor", src: "whatsapp" },
     { name: "Жанна Омарова", city: "Алматы", svc: "fridge-repair", price: 30000, payout: 22000, desc: "Не охлаждает, проверить компрессор", min: 330, deadline: at(2, 11), stage: "awaiting_executor", src: "site" },
-    { name: "ЖК Esentai City", kind: "company", city: "Алматы", svc: "ac-clean", price: 15000, payout: 10000, desc: "Сезонная чистка двух сплит-систем в офисе УК", min: 980, deadline: at(2, 15), stage: "awaiting_executor", src: "referral" },
-    { name: "Камила Ким", city: "Алматы", svc: "oven-repair", price: 20000, payout: 14000, desc: "Не греет нижний ТЭН", min: 1300, deadline: at(3, 12), stage: "awaiting_executor", src: "instagram" },
-    { name: "ТОО Global KG", kind: "company", city: "Астана", svc: "el-diag", price: 18000, desc: "Выбивает автомат в серверной, найти причину", min: 1150, deadline: at(1, 18), stage: "awaiting_executor", src: "site", prio: "high" },
-    { name: "Руслан Жаксылыков", city: "Алматы", svc: "furniture", price: 20000, payout: 15000, desc: "Собрать шкаф (ИКЕА), 3 секции", min: 1500, deadline: at(3, 12), stage: "awaiting_executor", src: "olx" },
+    { name: "ЖК Esentai City", kind: "company", city: "Алматы", svc: "ac-clean", price: 15000, payout: 10000, desc: "Сезонная чистка двух сплит-систем в офисе УК", min: 2450, deadline: at(2, 15), stage: "awaiting_executor", src: "referral" },
+    { name: "Камила Ким", city: "Алматы", svc: "oven-repair", price: 20000, payout: 14000, desc: "Не греет нижний ТЭН", min: 3300, deadline: at(3, 12), stage: "awaiting_executor", src: "instagram" },
+    { name: "ТОО Global KG", kind: "company", city: "Астана", svc: "el-diag", price: 18000, desc: "Выбивает автомат в серверной, найти причину", min: 2900, deadline: at(1, 18), stage: "awaiting_executor", src: "site", prio: "high" },
+    { name: "Руслан Жаксылыков", city: "Алматы", svc: "furniture", price: 20000, payout: 15000, desc: "Собрать шкаф (ИКЕА), 3 секции", min: 3900, deadline: at(3, 12), stage: "awaiting_executor", src: "olx" },
     { name: "Салтанат Кенжебаева", city: "Алматы", svc: "leak-fix", price: 14000, desc: "Течёт под раковиной на кухне", min: 1700, deadline: at(1, 9), stage: "awaiting_executor", src: "whatsapp", prio: "urgent" },
     // Мои заказы Нурлана: один в работе, один назначен оператором и ждёт подтверждения.
-    { name: "Асем Тулегенова", city: "Алматы", svc: "wm-repair", price: 25000, payout: 18000, desc: "Диагностика и замена насоса", min: 1250, deadline: soon(2), stage: "in_progress", ex: "ex-nurlan", via: "feed", src: "olx" },
+    { name: "Асем Тулегенова", city: "Алматы", svc: "wm-repair", price: 25000, payout: 18000, desc: "Диагностика и замена насоса", min: 3000, deadline: soon(2), stage: "in_progress", ex: "ex-nurlan", via: "feed", src: "olx" },
     { name: "Олжас Нургалиев", city: "Алматы", svc: "ac-install", price: 36000, payout: 25000, desc: "Квартира, сплит-система 12 BTU", min: 90, deadline: at(1, 14), stage: "assigned", ex: "ex-nurlan", via: "manual", src: "phone" },
   ];
   fresh.forEach((f) => {

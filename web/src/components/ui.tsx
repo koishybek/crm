@@ -243,9 +243,10 @@ export function KpiCard({ icon: Icon, tone, label, value, trend, caption, onClic
       <span className={cn("inline-flex h-[58px] w-[58px] shrink-0 items-center justify-center rounded-[16px]", TONE_SOFT[tone])}>
         <Icon size={27} strokeWidth={1.7} aria-hidden />
       </span>
-      <div className="min-w-0 flex-1">
+      <div className="@container min-w-0 flex-1">
         <div className="text-[14.5px] text-ink-2">{label}</div>
-        <div className="mt-0.5 text-[28px] leading-tight font-bold tracking-[-0.02em] text-ink tabular-nums sm:text-[30px]">{value}</div>
+        {/* Размер — от ширины колонки: в узкой карточке сумма «3 351 000 ₸» остаётся в одну строку. */}
+        <div className="mt-0.5 text-[clamp(20px,14cqw,30px)] leading-tight font-bold tracking-[-0.02em] whitespace-nowrap text-ink tabular-nums">{value}</div>
         {trend ? <TrendLine trend={trend} /> : caption ? <div className="mt-1.5 text-[13.5px] text-muted">{caption}</div> : null}
       </div>
     </Tag>
