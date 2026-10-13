@@ -4,9 +4,11 @@ import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { currentUser, OWNER, requireRole } from "./lib/access";
-import { audit } from "./lib/audit";
+import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
+import { cleanMoney, cleanText } from "./lib/limits";
 import { CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type Tone } from "../src/data/catalog";
-import { normalizeSkills, skillsDiff, skillsDiffNote, SKILLS_PER_CATEGORY } from "../src/data/skills";
+import { normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY } from "../src/data/skills";
+import { money } from "../src/lib/format";
 
 /**
  * Навыки направления. Строки, сохранённые до появления навыков (поля нет), получают навыки по умолчанию;
@@ -98,13 +100,19 @@ export const saveCategory = mutation({
     const existing = a.id ? await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", a.id!)).unique() : null;
     if (existing) {
       const before = skillsOf(existing);
+      const diff = skillsDiff(before, skills ?? before);
+      const log = new ChangeLog();
+      if (label !== existing.label) log.add(`название ${quote(existing.label)} → ${quote(label)}`, "label", { from: existing.label, to: label });
+      if (a.tone !== existing.tone) log.add("цвет", "tone", { from: existing.tone, to: a.tone });
+      if (a.active !== existing.active) log.add(a.active ? "снова показывается в формах" : "скрыто из форм", "active", { from: existing.active, to: a.active });
+      if (diff.added.length || diff.removed.length) log.add(`навыки: ${listDiffText(diff)}`, "skills", diff);
+      // Тот же набор, но другое написание или порядок («чистка» → «Чистка») — тоже правка.
+      else if (skills && skills.join("\n") !== before.join("\n")) log.add("навыки: написание и порядок", "skills", { from: before, to: skills });
+      // Сохранили без изменений — ни записи, ни шума в журнале.
+      if (log.empty) return existing.key;
       // Поле skills кладём только когда его прислали: patch с undefined стёр бы навыки.
       await ctx.db.patch(existing._id, { label, tone: a.tone, active: a.active, ...(skills ? { skills } : {}) });
-      const diff = skillsDiff(before, skills ?? before);
-      await audit(ctx, me, "catalog.category", `Направление «${label}» изменено${a.active ? "" : " (скрыто)"}${skillsDiffNote(diff)}`, {
-        entityId: existing.key,
-        meta: { active: a.active, ...diff },
-      });
+      await audit(ctx, me, "catalog.category", `Направление «${label}»: ${log.text()}`, { entityId: existing.key, meta: { changes: log.changes } });
       return existing.key;
     }
     const k = key("c");
@@ -128,30 +136,55 @@ export const saveService = mutation({
     active: v.boolean(),
   },
   handler: async (ctx, a) => {
-    await requireRole(ctx, OWNER);
-    if (!a.label.trim()) throw new ConvexError("Укажите название услуги");
-    if (a.priceMin < 0 || a.priceMax < a.priceMin) throw new ConvexError("Проверьте диапазон цены: «от» не больше «до»");
-    if (a.payoutPct <= 0 || a.payoutPct > 100) throw new ConvexError("Доля исполнителя — от 1 до 100%");
+    const me = await requireRole(ctx, OWNER);
+    const label = cleanText(a.label, 80, "Название услуги");
+    if (!label) throw new ConvexError("Укажите название услуги");
+    const priceMin = cleanMoney(a.priceMin, "Цена «от»");
+    const priceMax = cleanMoney(a.priceMax, "Цена «до»");
+    if (priceMax < priceMin) throw new ConvexError("Проверьте диапазон цены: «от» не больше «до»");
+    if (!Number.isFinite(a.payoutPct) || a.payoutPct <= 0 || a.payoutPct > 100) throw new ConvexError("Доля исполнителя — от 1 до 100%");
     await materialize(ctx);
-    if (!(await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", a.category)).unique())) throw new ConvexError("Направление не найдено");
+    const category = await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", a.category)).unique();
+    if (!category) throw new ConvexError("Направление не найдено");
     const fields = {
       category: a.category,
-      label: a.label.trim(),
+      label,
       icon: a.icon,
-      priceMin: Math.round(a.priceMin),
-      priceMax: Math.round(a.priceMax),
+      priceMin,
+      priceMax,
       payoutPct: a.payoutPct,
-      examples: a.examples.map((x) => x.trim()).filter(Boolean).slice(0, 6),
+      examples: a.examples.map((x) => cleanText(x, 120, "Пример услуги")).filter(Boolean).slice(0, 6),
       active: a.active,
     };
+    const price = (min: number, max: number) => `${money(min)}–${money(max)}`;
     const existing = a.id ? await ctx.db.query("services").withIndex("by_key", (q) => q.eq("key", a.id!)).unique() : null;
     if (existing) {
+      // ТЗ п.12: цены и доля исполнителя — деньги компании, в журнале «было → стало».
+      const log = new ChangeLog();
+      if (fields.label !== existing.label) log.add(`название ${quote(existing.label)} → ${quote(fields.label)}`, "label", { from: existing.label, to: fields.label });
+      if (fields.category !== existing.category) {
+        const was = (await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", existing.category)).unique())?.label ?? existing.category;
+        log.add(`направление ${quote(was)} → ${quote(category.label)}`, "category", { from: existing.category, to: fields.category });
+      }
+      if (fields.priceMin !== existing.priceMin || fields.priceMax !== existing.priceMax) {
+        log.add(`цена ${price(existing.priceMin, existing.priceMax)} → ${price(fields.priceMin, fields.priceMax)}`, "price", { from: [existing.priceMin, existing.priceMax], to: [fields.priceMin, fields.priceMax] });
+      }
+      if (fields.payoutPct !== existing.payoutPct) log.add(`доля исполнителя ${existing.payoutPct}% → ${fields.payoutPct}%`, "payoutPct", { from: existing.payoutPct, to: fields.payoutPct });
+      if (fields.icon !== existing.icon) log.add("значок", "icon", { from: existing.icon, to: fields.icon });
+      if (fields.examples.join("\n") !== existing.examples.join("\n")) log.add("примеры", "examples", "изменено");
+      if (fields.active !== existing.active) log.add(fields.active ? "снова показывается в формах" : "скрыта из форм", "active", { from: existing.active, to: fields.active });
+      if (log.empty) return existing.key;
       await ctx.db.patch(existing._id, fields);
+      await audit(ctx, me, "catalog.service", `Услуга «${fields.label}»: ${log.text()}`, { entityId: existing.key, meta: { changes: log.changes } });
       return existing.key;
     }
     const k = key("s");
     const count = (await ctx.db.query("services").collect()).length;
     await ctx.db.insert("services", { key: k, order: count, ...fields });
+    await audit(ctx, me, "catalog.service", `Добавлена услуга «${fields.label}» (${category.label}): ${price(priceMin, priceMax)}, исполнителю ${fields.payoutPct}%${fields.active ? "" : ", скрыта"}`, {
+      entityId: k,
+      meta: { category: fields.category, priceMin, priceMax, payoutPct: fields.payoutPct, active: fields.active },
+    });
     return k;
   },
 });

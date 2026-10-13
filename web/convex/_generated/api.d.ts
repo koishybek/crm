@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as aiCheck from "../aiCheck.js";
+import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as bot from "../bot.js";
 import type * as calls from "../calls.js";
@@ -28,6 +29,7 @@ import type * as lib_audit from "../lib/audit.js";
 import type * as lib_domain from "../lib/domain.js";
 import type * as lib_dto from "../lib/dto.js";
 import type * as lib_health from "../lib/health.js";
+import type * as lib_limits from "../lib/limits.js";
 import type * as lib_login from "../lib/login.js";
 import type * as lib_matching from "../lib/matching.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
@@ -51,6 +53,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   aiCheck: typeof aiCheck;
+  audit: typeof audit;
   auth: typeof auth;
   bot: typeof bot;
   calls: typeof calls;
@@ -69,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   "lib/domain": typeof lib_domain;
   "lib/dto": typeof lib_dto;
   "lib/health": typeof lib_health;
+  "lib/limits": typeof lib_limits;
   "lib/login": typeof lib_login;
   "lib/matching": typeof lib_matching;
   "lib/rateLimit": typeof lib_rateLimit;

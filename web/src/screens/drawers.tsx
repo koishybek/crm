@@ -51,6 +51,7 @@ import {
 } from "../data/store";
 import type { AiDraft, AiSummary, CategoryId, Client, Lead, SourceId, Urgency } from "../data/types";
 import { AiCard } from "../components/AiCard";
+import { EntityHistory } from "../components/AuditHistory";
 import { Source } from "../components/icons";
 import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
 import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
@@ -645,6 +646,8 @@ function LeadView({ id }: { id: string }) {
           </div>
         </div>
       )}
+
+      <EntityHistory entity="lead" entityId={lead.id} />
 
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-auto flex flex-wrap justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
         {order ? (

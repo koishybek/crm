@@ -1,8 +1,9 @@
 // Импорт из Excel: таблицу разбирает браузер, сюда приходят готовые строки.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, mutation } from "./_generated/server";
-import { requireRole, STAFF } from "./lib/access";
+import { action, internalMutation, mutation } from "./_generated/server";
+import { currentUser, requireRole, STAFF } from "./lib/access";
+import { audit } from "./lib/audit";
 import { insertClient } from "./clients";
 import { normalizeLogin } from "./lib/login";
 import { createLogin } from "./users";
@@ -19,9 +20,10 @@ const sourceOf = (s: string | undefined): SourceId => {
 export const clients = mutation({
   args: { rows: v.array(v.object({ name: v.string(), phone: v.string(), city: v.optional(v.string()), address: v.optional(v.string()), source: v.optional(v.string()), email: v.optional(v.string()) })) },
   handler: async (ctx, { rows }) => {
-    await requireRole(ctx, STAFF);
+    const me = await requireRole(ctx, STAFF);
     if (rows.length > 1000) throw new ConvexError("Не больше 1000 строк за раз");
     let added = 0;
+    let duplicates = 0;
     const skipped: string[] = [];
     for (const r of rows) {
       const phone = normalizeLogin(r.phone);
@@ -31,13 +33,28 @@ export const clients = mutation({
       }
       if (await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", phone)).first()) {
         skipped.push(`${r.name}: уже есть`);
+        duplicates++;
         continue;
       }
       const city = CITIES.find((c) => c.toLowerCase() === (r.city ?? "").trim().toLowerCase()) ?? (r.city?.trim() || "Алматы");
       await insertClient(ctx, { name: r.name, phone, city, address: r.address, source: sourceOf(r.source), email: r.email });
       added++;
     }
+    // Одна запись на импорт — только числа: сами клиенты и их телефоны остаются в базе, не в журнале.
+    await audit(ctx, me, "system.import", `Импорт клиентов из Excel: добавлено ${added}, пропущено ${skipped.length}${duplicates ? ` (уже были — ${duplicates})` : ""}`, {
+      meta: { kind: "clients", rows: rows.length, added, skipped: skipped.length, duplicates },
+    });
     return { added, skipped };
+  },
+});
+
+/** Итог импорта исполнителей — из action, у которого нет ctx.db. Автор — владелец, запустивший импорт (его сессия передаётся сюда). */
+export const _executorsImported = internalMutation({
+  args: { rows: v.number(), created: v.number(), skipped: v.number() },
+  handler: async (ctx, a) => {
+    await audit(ctx, (await currentUser(ctx)) ?? "Система", "system.import", `Импорт исполнителей из Excel: создано ${a.created}, пропущено ${a.skipped}`, {
+      meta: { kind: "executors", ...a },
+    });
   },
 });
 
@@ -82,6 +99,8 @@ export const executors = action({
       await createLogin(ctx, phone, password);
       created.push({ name: r.name.trim(), login: phone, password });
     }
+    // Каждый новый мастер уже записан в журнал (executor.created); здесь — итог импорта, без паролей.
+    await ctx.runMutation(internal.imports._executorsImported, { rows: rows.length, created: created.length, skipped: skipped.length });
     return { created, skipped };
   },
 });

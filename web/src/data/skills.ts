@@ -75,13 +75,7 @@ export interface SkillsDiff {
   removed: string[];
 }
 
-/** Что изменилось в списке навыков — для журнала действий. */
+/** Что изменилось в списке навыков — для журнала действий (текст — listDiffText в convex/lib/audit.ts). */
 export function skillsDiff(before: readonly string[], after: readonly string[]): SkillsDiff {
   return { added: after.filter((s) => !hasSkill(before, s)), removed: before.filter((s) => !hasSkill(after, s)) };
-}
-
-/** «; навыки: +«А», −«Б»» — изменения навыков одной строкой для журнала; пусто, если ничего не поменялось. */
-export function skillsDiffNote(diff: SkillsDiff): string {
-  const parts = [...diff.added.map((s) => `+«${s}»`), ...diff.removed.map((s) => `−«${s}»`)];
-  return parts.length ? `; навыки: ${parts.join(", ")}` : "";
 }

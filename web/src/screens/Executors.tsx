@@ -10,6 +10,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { report, resetPassword, setExecutorAvailable, setUserActive, toast } from "../data/store";
 import { useMe } from "../data/hooks";
 import type { CategoryId, Executor } from "../data/types";
+import { EntityHistory } from "../components/AuditHistory";
 import { ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { textKey } from "../data/skills";
@@ -354,6 +355,7 @@ export function ExecutorDetail() {
       <Card className="mt-4" title="Последние заказы" bodyClass="px-3 pb-3 sm:px-4">
         <OrdersTable orders={done} empty="Пока нет выполненных заказов" />
       </Card>
+      <EntityHistory entity="executor" entityId={e.id} variant="card" className="mt-4" />
     </>
   );
 }

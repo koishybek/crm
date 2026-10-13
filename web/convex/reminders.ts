@@ -1,4 +1,5 @@
 import { internalMutation } from "./_generated/server";
+import { almatyStamp, audit } from "./lib/audit";
 import { executorUser, notify, staffIds } from "./lib/domain";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
@@ -19,9 +20,15 @@ export const run = internalMutation({
         const label = `№${o.number} (${cat.label(o.serviceId)})`;
         const staff = await staffIds(ctx, o.category);
         if (t < now && !o.overdueNotified) {
+          const escalated = [...new Set([...owners, ...staff])];
           await ctx.db.patch(o._id, { overdueNotified: true, soonNotified: true });
-          await notify(ctx, [...owners, ...staff], `Просрочка: заказ ${label}`, { link: `/orders/${o._id}`, tone: "bad" });
+          await notify(ctx, escalated, `Просрочка: заказ ${label}`, { link: `/orders/${o._id}`, tone: "bad" });
           if (ex) await notify(ctx, [ex], `Просрочен срок по заказу ${label} — сообщите оператору, когда закончите`, { link: `/w/orders/${o._id}`, tone: "bad" });
+          // ТЗ п.15: эскалация — ключевое событие заказа; её делает система, а не сотрудник.
+          await audit(ctx, "Система", "order.overdue", `Заказ №${o.number}: просрочен срок ${almatyStamp(o.deadline)} — уведомлены владелец и ответственные (${escalated.length})${ex ? " и исполнитель" : ""}`, {
+            entityId: o._id,
+            meta: { deadline: o.deadline, status: o.status, notified: escalated.length, executorNotified: !!ex },
+          });
         } else if (t >= now && t - now <= SOON_MS && !o.soonNotified) {
           await ctx.db.patch(o._id, { soonNotified: true });
           await notify(ctx, staff, `Скоро срок: заказ ${label}`, { link: `/orders/${o._id}`, tone: "warn" });

@@ -12,6 +12,7 @@ import {
   Menu as MenuIcon,
   PhoneCall,
   Plus,
+  ScrollText,
   Search,
   Send,
   Settings as SettingsIcon,
@@ -46,8 +47,11 @@ const STAFF_NAV: NavItem[] = [
   { to: "/clients", label: "Клиенты", icon: Users },
   { to: "/executors", label: "Исполнители", icon: UserRound },
   { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn },
+  { to: "/audit", label: "Журнал действий", icon: ScrollText },
   { to: "/settings", label: "Настройки", icon: SettingsIcon },
 ];
+/** Разделы только для владельца. */
+const OWNER_ONLY = ["/analytics", "/audit", "/settings"];
 const EXEC_NAV: NavItem[] = [
   { to: "/w", label: "Доступные заказы", icon: Box, end: true },
   { to: "/w/my", label: "Мои заказы", icon: ClipboardList },
@@ -59,7 +63,7 @@ const navFor = (u: User) =>
     ? EXEC_NAV
     : u.role === "owner"
       ? STAFF_NAV
-      : STAFF_NAV.filter((n) => n.to !== "/analytics" && n.to !== "/settings" && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls")));
+      : STAFF_NAV.filter((n) => !OWNER_ONLY.includes(n.to) && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls")));
 
 function SideNav({ items, onNavigate }: { items: NavItem[]; onNavigate?: () => void }) {
   return (
@@ -258,7 +262,7 @@ function UserMenu({ me }: { me: User }) {
     <Menu
       width={290}
       trigger={(toggle) => (
-        <button onClick={toggle} aria-label="Меню пользователя" className="flex items-center gap-2.5 rounded-full py-1 pr-2 pl-1 hover:bg-[#f4f2ec]">
+        <button onClick={toggle} aria-label="Меню пользователя" className="flex items-center gap-2.5 rounded-full py-1 pr-1 pl-1 hover:bg-[#f4f2ec] sm:pr-2">
           <Avatar name={me.name} size={42} variant="person" />
           <span className="hidden text-[15px] font-semibold text-ink sm:inline">{me.name.split(" ")[0]}</span>
           <ChevronDown size={18} className="hidden text-ink-2 sm:inline" />

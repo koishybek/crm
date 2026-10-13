@@ -1,4 +1,4 @@
-import { Ban, Copy, FileSpreadsheet, KeyRound, Plus, Upload, UserPlus, Users } from "lucide-react";
+import { Ban, Copy, FileSpreadsheet, KeyRound, Plus, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
 import { useRef, useState } from "react";
 import { readSheet } from "read-excel-file/browser";
 import { api } from "../../convex/_generated/api";
@@ -8,6 +8,8 @@ import { useMe, useTeam } from "../data/hooks";
 import { createStaff, report, resetPassword, setUserActive, toast } from "../data/store";
 import { Avatar, Badge, Button, Card, FormRow, Input, Loading, Menu, MenuItem, Modal, PageHeader, Segmented } from "../components/ui";
 import { phone } from "../lib/format";
+import type { User } from "../data/types";
+import { AccessModal } from "../components/AccessModal";
 import { CatalogEditor } from "./CatalogEditor";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 
@@ -47,6 +49,7 @@ export default function Settings() {
   const [busy, setBusy] = useState(false);
   const [creds, setCreds] = useState<Creds | null>(null);
   const [importing, setImporting] = useState<"clients" | "executors" | null>(null);
+  const [accessOf, setAccessOf] = useState<User | null>(null);
   const clientsRef = useRef<HTMLInputElement>(null);
   const execRef = useRef<HTMLInputElement>(null);
 
@@ -172,6 +175,9 @@ export default function Settings() {
                   >
                     {(close) => (
                       <>
+                        <MenuItem icon={ShieldCheck} hint="Оператор, руководитель или владелец" onClick={() => (close(), setAccessOf(u))}>
+                          Изменить роль
+                        </MenuItem>
                         <MenuItem
                           icon={KeyRound}
                           hint="Старые входы закроются"
@@ -297,6 +303,8 @@ export default function Settings() {
           )}
         </div>
       </Modal>
+
+      <AccessModal user={accessOf} onClose={() => setAccessOf(null)} />
 
       <Modal open={!!creds} onClose={() => setCreds(null)} title={creds?.title ?? ""} width={520}>
         {creds && (

@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { OWNER, requireRole, STAFF } from "./lib/access";
+import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
 import { normalizeLogin } from "./lib/login";
@@ -13,7 +14,7 @@ import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { aiSummary } from "./schema";
 import { CITIES } from "../src/data/catalog";
-import { phone as fmtPhone } from "../src/lib/format";
+import { phone as fmtPhone, shortName } from "../src/lib/format";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
 const clientNumber = (c: Pick<Doc<"calls">, "direction" | "from" | "to">) => (c.direction === "in" ? c.from : c.to);
@@ -88,6 +89,12 @@ export const upload = mutation({
       aiStatus: "pending",
     });
     await ctx.scheduler.runAfter(0, internal.ai.processCall, { callId: id, autoLead });
+    // Номер в журнале — только последними цифрами: журнал не должен становиться копией базы клиентов.
+    const who = client ? ` — ${shortName(client.name)}` : validPhone(p) ? ` — номер ${maskPhone(p)}` : "";
+    await audit(ctx, me, "call.uploaded", `Загружена запись разговора${who}: ${autoLead === false ? "AI заполнит форму заявки" : "AI разберёт её и создаст заявку"}`, {
+      entityId: id,
+      meta: { clientId: client?._id, autoLead: autoLead !== false },
+    });
     return id;
   },
 });
@@ -104,13 +111,24 @@ export const reprocess = mutation({
   },
 });
 
-/** Заявка создана из звонка вручную — связываем. */
+/**
+ * Заявка создана из звонка вручную — связываем. Связь одна на звонок и одна на заявку:
+ * чужую не перезаписываем, иначе звонок «переехал» бы к другой заявке без следа.
+ */
 export const linkLead = mutation({
   args: { id: v.id("calls"), leadId: v.id("leads") },
   handler: async (ctx, { id, leadId }) => {
-    await requireRole(ctx, STAFF);
-    await ctx.db.patch(id, { leadId });
+    const me = await requireRole(ctx, STAFF);
+    const c = await ctx.db.get(id);
+    if (!c) throw new ConvexError("Звонок не найден");
+    const lead = await ctx.db.get(leadId);
+    if (!lead) throw new ConvexError("Заявка не найдена");
+    if (c.leadId === leadId && lead.callId === id) return;
+    if (c.leadId && c.leadId !== leadId) throw new ConvexError("Звонок уже привязан к другой заявке");
+    if (lead.callId && lead.callId !== id) throw new ConvexError("К заявке уже привязан другой звонок");
+    await ctx.db.patch(id, { leadId, ...(c.clientId ? {} : { clientId: lead.clientId, clientName: lead.clientName }) });
     await ctx.db.patch(leadId, { callId: id });
+    await audit(ctx, me, "call.linked", `Звонок ${almatyStamp(c.startedAt)} привязан к заявке №${lead.number}`, { entityId: id, meta: { leadId } });
   },
 });
 
@@ -135,6 +153,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   if (!svc) return null;
   const city = c.draft?.city && CITIES.some((x) => x === c.draft!.city) ? c.draft.city : (c.draft?.city ?? env("COMPANY_CITY") ?? "Алматы");
   let client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first();
+  const newClient = !client;
   if (!client) {
     const id = await insertClient(ctx, { name: c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source: "phone" });
     client = (await ctx.db.get(id))!;
@@ -164,6 +183,11 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: "phone", title: "Новая заявка", text: svc.label, at, leadId });
   await ctx.db.patch(client._id, { lastActivityAt: at });
   await ctx.db.patch(c._id, { leadId, clientId: client._id, clientName: client.name });
+  // Заявку завёл не человек — автор записи «AI» (ТЗ п.27): оператор видит, что её надо проверить.
+  await audit(ctx, "AI", "lead.created", `Заявка №${number}: ${svc.label} — ${shortName(client.name)}${newClient ? " (новый клиент)" : ""}, звонок разобран AI`, {
+    entityId: leadId,
+    meta: { source: "phone", serviceId, city, urgency: c.draft?.urgency ?? "normal", clientId: client._id, newClient, callId: c._id, ai: true },
+  });
   await notify(ctx, await staffIds(ctx, svc.category), `Звонок разобран AI → заявка №${number}: ${svc.label} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info" });
   return leadId;
 }
@@ -293,11 +317,13 @@ export const pbxSettings = query({
 export const regeneratePbxSecret = mutation({
   args: {},
   handler: async (ctx) => {
-    await requireRole(ctx, OWNER);
+    const me = await requireRole(ctx, OWNER);
     const value = Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, "0")).join("");
     const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique();
     if (row) await ctx.db.patch(row._id, { value });
     else await ctx.db.insert("settings", { key: "pbxSecret", value });
+    // Сам ключ в журнал не пишем — только факт смены: АТС со старым ключом после неё получает отказ.
+    await audit(ctx, me, "integration.pbxSecret", row ? "Телефония: выпущен новый ключ АТС — прежний больше не действует" : "Телефония: выпущен ключ АТС", { entityId: "pbx", meta: { rotated: !!row } });
     return value;
   },
 });
