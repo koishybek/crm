@@ -8,9 +8,10 @@ import { OWNER, requireRole, STAFF } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
-import { markOk } from "./lib/health";
+import { markError, markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
 import { dropFile } from "./lib/files";
+import { hitLimit } from "./lib/rateLimit";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -250,7 +251,9 @@ export const _ingest = internalMutation({
   },
   handler: async (ctx, a): Promise<Id<"calls">> => {
     const event = a.event.toLowerCase();
-    const at = a.at && !Number.isNaN(Date.parse(a.at)) ? new Date(a.at).toISOString() : nowIso();
+    // Время события — только в пределах суток от «сейчас»: иначе звонок «из 1970-го» или «из будущего» ломает списки и отчёты (аудит L-2).
+    const t = a.at ? Date.parse(a.at) : NaN;
+    const at = Number.isFinite(t) && Math.abs(t - Date.now()) <= 86400_000 ? new Date(t).toISOString() : nowIso();
     let c = a.externalId ? await ctx.db.query("calls").withIndex("by_external", (q) => q.eq("externalId", a.externalId)).first() : null;
     if (!c) {
       const direction = a.direction ?? "in";
@@ -309,18 +312,46 @@ export const _ingest = internalMutation({
 
 // ── Настройки телефонии ──────────────────────────────────────────────────────
 
+const pbxSecretOf = async (ctx: QueryCtx): Promise<string | null> => (await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique())?.value ?? null;
+
 export const _pbxSecret = internalQuery({
   args: {},
-  handler: async (ctx) => (await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique())?.value ?? null,
+  handler: (ctx) => pbxSecretOf(ctx),
 });
 
+/**
+ * Событие АТС без ключа или с неверным ключом: красная отметка «Телефония» и запись в журнал (аудит L-2, E20).
+ * В журнал — не чаще раза в 10 минут: перебор ключа не должен заливать журнал. Сам присланный ключ не пишем.
+ */
+export const _pbxRejected = internalMutation({
+  args: { via: v.union(v.literal("header"), v.literal("query"), v.literal("none")) },
+  handler: async (ctx, { via }): Promise<void> => {
+    await markError(ctx, "pbx", "АТС прислала событие без ключа или с неверным ключом");
+    if (!(await hitLimit(ctx, "pbx:rejected", 1, 10 * 60_000))) return;
+    await audit(ctx, "АТС", "integration.pbxRejected", "Телефония: событие отклонено — ключ не передан или неверный", { entityId: "pbx", meta: { via } });
+  },
+});
+
+/** Настройки для карточки «Телефония»: адрес и только последние 4 символа ключа — сам ключ отдаёт revealPbxSecret. */
 export const pbxSettings = query({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, OWNER);
-    const secret = (await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique())?.value ?? null;
+    const secret = await pbxSecretOf(ctx);
     const site = env("CONVEX_SITE_URL");
-    return { url: site ? `${site}/pbx/events` : null, secret };
+    return { url: site ? `${site}/pbx/events` : null, configured: !!secret, tail: secret ? secret.slice(-4) : null };
+  },
+});
+
+/** Показать ключ АТС владельцу. Каждый показ — в журнале (аудит M-11): ключом можно слать события от имени АТС. */
+export const revealPbxSecret = mutation({
+  args: {},
+  handler: async (ctx): Promise<string> => {
+    const me = await requireRole(ctx, OWNER);
+    const secret = await pbxSecretOf(ctx);
+    if (!secret) throw new ConvexError("Ключ АТС ещё не создан");
+    await audit(ctx, me, "integration.pbxSecretViewed", "Телефония: владелец открыл ключ АТС", { entityId: "pbx" });
+    return secret;
   },
 });
 

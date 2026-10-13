@@ -5,14 +5,20 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, internalAction, internalMutation, mutation, query, type ActionCtx } from "./_generated/server";
 import { currentUser } from "./lib/access";
+import { audit } from "./lib/audit";
 import { PLACEHOLDER } from "./lib/chat";
 import { findKzPhone } from "./lib/phone";
 import { cardHtml, esc, workerButtons, type CardData, type TgButton } from "./lib/tg";
 import { canExtract, canTranscribe, extract, toSummary, transcribe, type CatalogHint } from "./ai";
 import { env } from "./env";
 import { APP_NAME } from "../src/data/catalog";
-import { phone as fmtPhone } from "../src/lib/format";
+import { phone as fmtPhone, shortName } from "../src/lib/format";
 import type { MessageKind } from "../src/data/types";
+
+/** Ссылка привязки t.me/<бот>?start=<код> живёт 30 минут и срабатывает один раз (аудит M-9). */
+const LINK_TTL_MS = 30 * 60_000;
+/** Голосовые длиннее 2 минут не скачиваем и AI не отдаём: расшифровка платная, а это путь для флуда (аудит H-4). */
+const VOICE_MAX_SEC = 120;
 
 type Markup = { inline_keyboard: { text: string; callback_data?: string; url?: string }[][] } | { keyboard: unknown[][]; resize_keyboard?: boolean; one_time_keyboard?: boolean } | { remove_keyboard: true };
 
@@ -64,7 +70,10 @@ export const status = query({
   },
 });
 
-/** Одноразовая ссылка t.me/<бот>?start=<код> для привязки аккаунта. */
+/**
+ * Одноразовая ссылка t.me/<бот>?start=<код> для привязки аккаунта: 30 минут. Перепривязка — только явно: сначала
+ * «Отключить Telegram», потом новая ссылка — иначе утёкшая ссылка молча увела бы уведомления в чужой чат (аудит M-9).
+ */
 export const linkUrl = mutation({
   args: {},
   handler: async (ctx) => {
@@ -72,33 +81,55 @@ export const linkUrl = mutation({
     if (!me) throw new ConvexError("Нужно войти");
     const bot = env("TELEGRAM_BOT_USERNAME");
     if (!bot || !env("TELEGRAM_BOT_TOKEN")) throw new ConvexError("Бот ещё не подключён");
+    if (me.telegramChatId) throw new ConvexError("Telegram уже подключён. Чтобы подключить другой чат, сначала нажмите «Отключить Telegram»");
     const code = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("");
-    await ctx.db.patch(me._id, { telegramLinkCode: code });
+    await ctx.db.patch(me._id, { telegramLinkCode: code, telegramLinkExpiresAt: Date.now() + LINK_TTL_MS });
     return `https://t.me/${bot.replace(/^@/, "")}?start=${code}`;
   },
 });
+
+const whoLinks = (u: { name?: string; email?: string }) => shortName(u.name || u.email || "сотрудник");
 
 export const unlink = mutation({
   args: {},
   handler: async (ctx) => {
     const me = await currentUser(ctx);
     if (!me) throw new ConvexError("Нужно войти");
-    await ctx.db.patch(me._id, { telegramChatId: undefined, telegramLinkCode: undefined });
+    await ctx.db.patch(me._id, { telegramChatId: undefined, telegramLinkCode: undefined, telegramLinkExpiresAt: undefined });
+    if (me.telegramChatId) await audit(ctx, me, "user.telegram", `Telegram отключён: ${whoLinks(me)}`, { entityId: me._id, meta: { linked: false } });
   },
 });
 
+export type LinkResult = { ok: true; name: string; role: string } | { ok: false; reason: "expired" | "elsewhere" };
+
 export const linkChat = internalMutation({
   args: { code: v.string(), chatId: v.string() },
-  handler: async (ctx, { code, chatId }): Promise<{ name: string; role: string } | null> => {
-    if (!/^[0-9a-f]{24}$/.test(code)) return null;
+  handler: async (ctx, { code, chatId }): Promise<LinkResult> => {
+    if (!/^[0-9a-f]{24}$/.test(code)) return { ok: false, reason: "expired" };
     const u = await ctx.db.query("users").withIndex("by_telegram_code", (q) => q.eq("telegramLinkCode", code)).first();
-    if (!u) return null;
+    if (!u) return { ok: false, reason: "expired" };
+    // Код гасим при любой попытке: ссылка одноразовая.
+    await ctx.db.patch(u._id, { telegramLinkCode: undefined, telegramLinkExpiresAt: undefined });
+    // Просроченная ссылка, отключённый доступ или ещё не сменённый временный пароль — не привязываем.
+    if (!u.telegramLinkExpiresAt || u.telegramLinkExpiresAt <= Date.now() || u.active === false || !u.role || u.mustChangePassword) return { ok: false, reason: "expired" };
+    if (u.telegramChatId && u.telegramChatId !== chatId) return { ok: false, reason: "elsewhere" };
     // Один чат — один аккаунт.
     for (const other of await ctx.db.query("users").withIndex("by_telegram_chat", (q) => q.eq("telegramChatId", chatId)).collect()) {
       if (other._id !== u._id) await ctx.db.patch(other._id, { telegramChatId: undefined });
     }
-    await ctx.db.patch(u._id, { telegramChatId: chatId, telegramLinkCode: undefined });
-    return { name: u.name ?? "", role: u.role ?? "" };
+    await ctx.db.patch(u._id, { telegramChatId: chatId });
+    await audit(ctx, u, "user.telegram", `Telegram подключён: ${whoLinks(u)}`, { entityId: u._id, meta: { linked: true } });
+    return { ok: true, name: u.name ?? "", role: u.role };
+  },
+});
+
+/** Обновление с этим update_id уже принимали (Telegram повторил доставку) — false. Записи чистит maintenance через 2 суток. */
+export const _firstSeen = internalMutation({
+  args: { updateId: v.number() },
+  handler: async (ctx, { updateId }): Promise<boolean> => {
+    if (await ctx.db.query("telegramUpdates").withIndex("by_update", (q) => q.eq("updateId", updateId)).first()) return false;
+    await ctx.db.insert("telegramUpdates", { updateId });
+    return true;
   },
 });
 
@@ -187,10 +218,13 @@ type Incoming = {
   reply?: string;
 };
 
-async function readIncoming(ctx: ActionCtx, msg: TgMessage): Promise<Incoming | null> {
+async function readIncoming(ctx: ActionCtx, chatId: string, msg: TgMessage): Promise<Incoming | null> {
   const caption = (msg.text ?? msg.caption ?? "").trim();
   const voice = msg.voice ?? msg.audio;
   if (voice) {
+    // Длинное голосовое и поток голосовых — без скачивания и AI: в «Сообщениях» отметка, клиенту — просьба написать текстом.
+    if ((voice.duration ?? 0) > VOICE_MAX_SEC) return { kind: "audio", text: PLACEHOLDER.voice, draft: "", reply: "Голосовое длиннее 2 минут — расскажите, пожалуйста, покороче или напишите текстом 🙏" };
+    if (canTranscribe() && !(await ctx.runMutation(internal.bot._voiceAllowed, { chatId }))) return { kind: "audio", text: PLACEHOLDER.voice, draft: "", reply: "Слишком много голосовых подряд — напишите, пожалуйста, текстом." };
     const blob = await download(voice.file_id);
     const fileId = await keep(ctx, blob);
     const fileName = msg.audio?.file_name ?? "voice.ogg";
@@ -251,7 +285,7 @@ async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
   const externalMessageId = `${chatId}:${msg.message_id}`;
   // Повтор вебхука — уже записано (и голосовое уже расшифровано).
   if (await ctx.runQuery(internal.inbox._seen, { channel: "telegram", externalMessageId })) return;
-  const inc = await readIncoming(ctx, msg);
+  const inc = await readIncoming(ctx, chatId, msg);
   if (!inc) return;
   const st = await ctx.runQuery(internal.bot._state, { chatId });
   const toLead = !!st.openLead && st.state === "idle";
@@ -279,10 +313,18 @@ async function clientMessage(ctx: ActionCtx, chatId: string, msg: TgMessage) {
     await ctx.runMutation(internal.bot._toOpenLead, { chatId, leadId: st.openLead!.id, text: inc.draft });
     return void (await say(ctx, chatId, conv, `Передали оператору по заявке №${st.openLead!.number} ✅`));
   }
-  await ctx.runMutation(internal.bot._addDraft, { chatId, text: inc.draft, name: fullName(msg.from) });
+  const { full } = await ctx.runMutation(internal.bot._addDraft, { chatId, text: inc.draft, name: fullName(msg.from) });
   // Номер написали текстом («мой номер 8 701 …») — заявка сразу, без кнопки.
   if (phone) return void (await finishLead(ctx, chatId, conv, phone, msg.from));
+  if (full) return void (await say(ctx, chatId, conv, "Подробности уже записали — осталось поделиться номером, кнопка ниже 👇", PHONE_BUTTON));
   await say(ctx, chatId, conv, inc.voice ? `Записал: «${esc(inc.draft.slice(0, 300))}»\n\nОстался номер телефона — нажмите кнопку ниже 👇` : "Принято! Чтобы оператор перезвонил, поделитесь номером — кнопка ниже 👇", PHONE_BUTTON);
+}
+
+/** Ответ клиенту вне сценария (команда, чужой контакт): в идущий диалог «Сообщений» — копией; новый диалог ради него не заводим. */
+async function answer(ctx: ActionCtx, chatId: string, html: string, markup?: Markup) {
+  const conv = await ctx.runQuery(internal.inbox._find, { channel: "telegram", externalId: chatId });
+  if (conv) await say(ctx, chatId, conv, html, markup);
+  else await sendHtml(chatId, html, markup);
 }
 
 /** Клиент поделился контактом кнопкой. */
@@ -363,7 +405,12 @@ async function rateCallback(ctx: ActionCtx, cb: NonNullable<TgUpdate["callback_q
 }
 
 async function callback(ctx: ActionCtx, cb: NonNullable<TgUpdate["callback_query"]>) {
-  const chatId = String(cb.message?.chat.id ?? cb.from.id);
+  // Кнопка действует от имени нажавшего (from.id), а не владельца чата: в группе карточку мог бы нажать кто угодно (аудит L-3).
+  if (cb.message && cb.message.chat.id !== cb.from.id) {
+    await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "Кнопки работают только в личном чате с ботом", show_alert: true });
+    return;
+  }
+  const chatId = String(cb.from.id);
   const data = cb.data ?? "";
   if (data.startsWith("rv:")) return void (await rateCallback(ctx, cb, chatId, data));
   let res: { ok: true; card: CardData } | { ok: false; error: string } | null = null;
@@ -415,7 +462,14 @@ export const handleUpdate = internalAction({
     const m = /^\/start\s+([0-9a-f]{24})$/.exec(text);
     if (m) {
       const linked = await ctx.runMutation(internal.telegram.linkChat, { code: m[1]!, chatId });
-      if (!linked) return void (await sendHtml(chatId, `Ссылка устарела. Откройте ${APP_NAME} → меню профиля → «Подключить Telegram» ещё раз.`));
+      if (!linked.ok) {
+        return void (await sendHtml(
+          chatId,
+          linked.reason === "elsewhere"
+            ? `Этот аккаунт уже подключён к другому Telegram. Чтобы получать уведомления здесь, в ${APP_NAME} откройте меню профиля → «Отключить Telegram», затем «Подключить Telegram».`
+            : `Ссылка устарела. Откройте ${APP_NAME} → меню профиля → «Подключить Telegram» ещё раз.`,
+        ));
+      }
       const first = linked.name.split(" ")[0];
       await sendHtml(chatId, `Готово${first ? `, ${esc(first)}` : ""}! 🎉 Telegram подключён к ${APP_NAME}.\n\n${esc(linked.role === "executor" ? HELP_EXECUTOR : HELP_STAFF)}`);
       return;
@@ -440,14 +494,22 @@ export const handleUpdate = internalAction({
       return void (await sendHtml(chatId, esc(who.role === "executor" ? HELP_EXECUTOR : HELP_STAFF)));
     }
 
-    // Клиент. Флуд из одного чата не разбираем — ни AI, ни заявок, ни уведомлений.
-    if (!(await ctx.runMutation(internal.bot._allow, { chatId }))) return;
-    if (msg.contact) return void (await clientContact(ctx, chatId, msg));
-    if (text.startsWith("/")) {
-      // Команда — не обращение: новый диалог не заводим, но в уже идущий ответ бота записываем.
-      const conv = await ctx.runQuery(internal.inbox._find, { channel: "telegram", externalId: chatId });
-      return void (conv ? await say(ctx, chatId, conv, esc(HELP_CLIENT), { remove_keyboard: true }) : await sendHtml(chatId, esc(HELP_CLIENT), { remove_keyboard: true }));
+    // Клиент. Флуд из одного чата не разбираем — ни AI, ни заявок, ни уведомлений; почему — скажем один раз в 10 минут.
+    const allow = await ctx.runMutation(internal.bot._allow, { chatId });
+    if (!allow.ok) {
+      if (allow.warn) await sendHtml(chatId, "Вы пишете слишком часто — подождите минуту. Всё, что вы уже отправили, оператор увидит.");
+      return;
     }
+    if (msg.contact) {
+      // Только свой номер: кнопка «Отправить мой номер» присылает контакт с user_id отправителя (Bot API, Contact.user_id).
+      // Чужая карточка из записной книжки — отказ: иначе заявка и переписка анонима легли бы в историю чужого клиента (аудит H-4).
+      if (!msg.from || msg.contact.user_id !== msg.from.id) {
+        return void (await answer(ctx, chatId, "Нужен ваш собственный номер — нажмите кнопку «📱 Отправить мой номер» ниже.", PHONE_BUTTON));
+      }
+      return void (await clientContact(ctx, chatId, msg));
+    }
+    // Команда — не обращение: новый диалог не заводим, но в уже идущий ответ бота записываем.
+    if (text.startsWith("/")) return void (await answer(ctx, chatId, esc(HELP_CLIENT), { remove_keyboard: true }));
     await clientMessage(ctx, chatId, msg);
   },
 });

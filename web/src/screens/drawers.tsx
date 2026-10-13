@@ -881,7 +881,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
     return (
       <div className="flex min-h-full flex-col gap-5">
         <div className="rounded-[14px] border border-[#bfeed5] bg-ok-bg/60 p-4 text-[14.5px] text-ink-2">
-          <b className="text-ink">{name.trim()}</b> добавлен и уже видит подходящие заказы. Передайте ему данные для входа — пароль показывается один раз.
+          <b className="text-ink">{name.trim()}</b> добавлен. Передайте ему данные для входа — пароль показывается один раз; при первом входе он придумает свой и увидит подходящие заказы.
         </div>
         <div className="rounded-[14px] border border-line p-4">
           <div className="flex items-center gap-2 text-[14px] font-semibold text-ink">

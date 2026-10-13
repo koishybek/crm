@@ -14,7 +14,13 @@ const http = httpRouter();
 
 auth.addHttpRoutes(http);
 
-/** Вебхук Telegram. Секрет из setWebhook приходит в заголовке — чужие запросы отбрасываем. */
+/** update_id обновления Telegram; null — его нет (не обновление Bot API). */
+function updateIdOf(update: unknown): number | null {
+  const id = typeof update === "object" && update !== null ? (update as { update_id?: unknown }).update_id : undefined;
+  return typeof id === "number" && Number.isSafeInteger(id) ? id : null;
+}
+
+/** Вебхук Telegram. Секрет из setWebhook приходит в заголовке — чужие запросы отбрасываем (сравнение за постоянное время). */
 http.route({
   path: "/telegram",
   method: "POST",
@@ -27,6 +33,9 @@ http.route({
     } catch {
       return new Response("bad json", { status: 400 });
     }
+    // Повтор доставки (Telegram не дождался ответа) приходит с тем же update_id — второй раз не обрабатываем (аудит L-3).
+    const updateId = updateIdOf(update);
+    if (updateId !== null && !(await ctx.runMutation(internal.telegram._firstSeen, { updateId }))) return new Response("ok", { status: 200 });
     // Отвечаем Telegram сразу, обработка — фоном (иначе он повторит запрос).
     await ctx.scheduler.runAfter(0, internal.telegram.handleUpdate, { update });
     return new Response("ok", { status: 200 });
@@ -34,10 +43,15 @@ http.route({
 });
 
 // ── Телефония: события АТС ──────────────────────────────────────────────────
-// POST /pbx/events?secret=… (или заголовок X-Pbx-Secret), тело JSON или form-urlencoded:
+// POST /pbx/events, ключ — в заголовке X-Pbx-Secret. ?secret=… в адресе тоже принимается — для АТС, которые не умеют
+// заголовки, но это менее безопасно: адрес с ключом оседает в журналах АТС и прокси (аудит L-2, E20).
+// Тело JSON или form-urlencoded, не больше 64 КБ:
 //   event: ringing | answered | ended | missed | recording
 //   callId, direction (in|out), from, to, operator (email/телефон сотрудника), duration (сек), recordingUrl, at (ISO)
 // Названия полей у АТС разные — принимаем распространённые варианты.
+
+/** Событие звонка — несколько полей: больше 64 КБ — не событие АТС. */
+const PBX_MAX_BODY = 64 * 1024;
 
 const pick = (o: Record<string, unknown>, ...keys: string[]) => {
   for (const k of keys) {
@@ -64,13 +78,21 @@ http.route({
     };
     const expected = await ctx.runQuery(internal.calls._pbxSecret, {});
     if (!expected) return new Response("not configured", { status: 503 });
-    const url = new URL(request.url);
-    const given = request.headers.get("x-pbx-secret") ?? url.searchParams.get("secret");
-    if (!given || !safeEqual(given, expected)) return reject(403, "forbidden", "АТС прислала событие без ключа или с неверным ключом");
+    // Заголовок важнее адреса: если ключ есть в обоих, проверяем заголовок.
+    const header = request.headers.get("x-pbx-secret");
+    const given = header ?? new URL(request.url).searchParams.get("secret");
+    if (!given || !safeEqual(given, expected)) {
+      await ctx.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
+      return new Response("forbidden", { status: 403 });
+    }
+    const tooLarge = "АТС прислала слишком большое событие (больше 64 КБ)";
+    if (Number(request.headers.get("content-length") ?? 0) > PBX_MAX_BODY) return reject(413, "too large", tooLarge);
+    const raw = await request.text();
+    if (raw.length > PBX_MAX_BODY) return reject(413, "too large", tooLarge);
     let parsed: unknown;
     const type = request.headers.get("content-type") ?? "";
     try {
-      parsed = type.includes("application/json") ? await request.json() : Object.fromEntries(new URLSearchParams(await request.text()));
+      parsed = type.includes("application/json") ? (JSON.parse(raw) as unknown) : Object.fromEntries(new URLSearchParams(raw));
     } catch {
       parsed = null;
     }

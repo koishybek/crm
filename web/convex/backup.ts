@@ -57,9 +57,9 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
 
 /**
  * Что не копируем: вход и сессии (auth*), счётчики лимитов, одноразовые OAuth-state, сами копии,
- * колокольчик и отметки мониторинга — их не восстанавливают.
+ * колокольчик, отметки мониторинга и принятые обновления Telegram — их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus"] as const satisfies readonly TableNames[];
+const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;
@@ -68,7 +68,7 @@ void allTablesSorted;
 /** Поля-секреты, которые вырезаются из копии. */
 const SECRET_FIELDS: Partial<Record<BackupTable, readonly string[]>> = {
   integrations: ["accessToken", "refreshToken"],
-  users: ["telegramLinkCode"],
+  users: ["telegramLinkCode", "telegramLinkExpiresAt"],
   apiKeys: ["hash"],
   reviewRequests: ["token"],
 };

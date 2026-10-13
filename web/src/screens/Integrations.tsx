@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { Badge, Button, Card, IconButton, Loading } from "../components/ui";
 import { APP_NAME } from "../data/catalog";
 import { run } from "../data/convex";
+import { revealPbxSecret } from "../data/securityActions";
 import { regeneratePbxSecret, report, toast } from "../data/store";
 
 export const copy = (text: string) => {
@@ -13,13 +14,14 @@ export const copy = (text: string) => {
   toast("Скопировано", "info");
 };
 
-export function CopyRow({ label, value, shown, children }: { label: string; value: string; shown?: string; children?: ReactNode }) {
+/** onCopy — своё копирование (например, значение сначала нужно получить с сервера). */
+export function CopyRow({ label, value, shown, onCopy, children }: { label: string; value: string; shown?: string; onCopy?: () => void; children?: ReactNode }) {
   return (
     <div>
       <div className="mb-1 text-[12.5px] font-medium text-muted">{label}</div>
       <div className="flex items-center gap-1.5">
         <code className="min-w-0 flex-1 truncate rounded-[9px] bg-field px-3 py-2 font-mono text-[12.5px] text-ink-2">{shown ?? value}</code>
-        <IconButton icon={Copy} label={`Скопировать: ${label}`} onClick={() => copy(value)} className="h-9 w-9" />
+        <IconButton icon={Copy} label={`Скопировать: ${label}`} onClick={() => (onCopy ? onCopy() : copy(value))} className="h-9 w-9" />
         {children}
       </div>
     </div>
@@ -76,6 +78,8 @@ const EVENTS = `{"event": "ringing",  "callId": "abc-123", "direction": "in", "f
 
 export function TelephonyCard() {
   const s = useQuery(api.calls.pbxSettings);
+  // Ключ целиком сервер отдаёт только по «Показать» / «Скопировать» (каждый показ — в журнале) или сразу после выпуска.
+  const [secret, setSecret] = useState<string | null>(null);
   const [show, setShow] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -84,13 +88,39 @@ export function TelephonyCard() {
     const t = setTimeout(() => setConfirming(false), 5000);
     return () => clearTimeout(t);
   }, [confirming]);
+  // Ключ сменили (здесь или в другой вкладке) — прежний из памяти больше не годится.
+  const tail = s?.tail ?? null;
+  useEffect(() => {
+    setSecret((k) => (k && tail && k.endsWith(tail) ? k : null));
+  }, [tail]);
 
   const regenerate = async () => {
     setBusy(true);
     const r = await regeneratePbxSecret();
     setBusy(false);
     setConfirming(false);
-    if (report(r, "Новый ключ создан")) setShow(true);
+    if (report(r, "Новый ключ создан")) {
+      setSecret(r.value);
+      setShow(true);
+    }
+  };
+  /** Ключ целиком: уже открытый — из памяти, иначе с сервера. */
+  const fullSecret = async (): Promise<string | null> => {
+    if (secret) return secret;
+    setBusy(true);
+    const r = await revealPbxSecret();
+    setBusy(false);
+    if (!report(r)) return null;
+    setSecret(r.value);
+    return r.value;
+  };
+  const toggleShow = async () => {
+    if (show) return setShow(false);
+    if (await fullSecret()) setShow(true);
+  };
+  const copyWith = async (make: (key: string) => string) => {
+    const key = await fullSecret();
+    if (key) copy(make(key));
   };
 
   return (
@@ -103,27 +133,35 @@ export function TelephonyCard() {
         <Loading className="py-6" />
       ) : !s.url ? (
         <p className="mt-3 text-[14px] text-bad-ink">Адрес сервера не определён — проверьте настройки деплоя.</p>
-      ) : !s.secret ? (
+      ) : !s.configured ? (
         <Button className="mt-3" icon={KeyRound} disabled={busy} onClick={() => void regenerate()}>
           Создать ключ подключения
         </Button>
       ) : (
         <div className="mt-3 space-y-3">
           <CopyRow label="Адрес для событий (webhook)" value={s.url} />
-          <CopyRow label="Ключ — заголовок X-PBX-Secret" value={s.secret} shown={show ? s.secret : `${"•".repeat(16)}${s.secret.slice(-4)}`}>
-            <Button size="sm" variant="ghost" onClick={() => setShow((v) => !v)}>
+          <CopyRow
+            label="Ключ — заголовок X-PBX-Secret"
+            value={secret ?? ""}
+            shown={show && secret ? secret : `${"•".repeat(16)}${s.tail ?? ""}`}
+            onCopy={() => void copyWith((key) => key)}
+          >
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => void toggleShow()}>
               {show ? "Скрыть" : "Показать"}
             </Button>
           </CopyRow>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" icon={Copy} onClick={() => copy(`${s.url}?secret=${s.secret}`)}>
+            <Button size="sm" variant="secondary" icon={Copy} disabled={busy} onClick={() => void copyWith((key) => `${s.url}?secret=${key}`)}>
               Адрес с ключом
             </Button>
             <Button size="sm" variant={confirming ? "danger" : "ghost"} icon={KeyRound} disabled={busy} onClick={() => (confirming ? void regenerate() : setConfirming(true))}>
               {confirming ? "Старый ключ перестанет работать — сменить?" : "Сменить ключ"}
             </Button>
           </div>
-          <p className="text-[12.5px] text-muted">«Адрес с ключом» — для АТС, которые не умеют добавлять заголовки.</p>
+          <p className="text-[12.5px] text-muted">
+            Надёжнее передавать ключ заголовком X-PBX-Secret. «Адрес с ключом» — только для АТС, которые не умеют добавлять заголовки: ключ в адресе может осесть в журналах АТС и прокси. Каждый показ ключа
+            записывается в журнал.
+          </p>
           <details className="group rounded-[12px] border border-line">
             <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Формат событий — для настройки АТС</summary>
             <div className="border-t border-line px-3.5 py-3 text-[13px] text-ink-2">

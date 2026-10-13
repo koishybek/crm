@@ -4,6 +4,7 @@ import { api } from "../convex/_generated/api";
 import { setCatalog } from "./data/catalog";
 import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { Navigate, RouterProvider, createBrowserRouter, useLocation } from "react-router";
+import { ForcedPasswordChange } from "./components/PasswordChange";
 import { Shell } from "./components/Shell";
 import { LogoMark } from "./components/icons";
 import { Button } from "./components/ui";
@@ -64,12 +65,15 @@ function Guard({ roles }: { roles: Role[] }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useMe();
   const loc = useLocation();
+  // Временный пароль: до его смены — только экран «Смените пароль» (сервер всё равно ничего не отдаёт).
+  const forced = !!me?.mustChangePassword;
   // Справочник услуг из базы — до первого экрана, чтобы подписи и формы были актуальными.
-  const catalog = useQuery(api.catalog.list, me ? {} : "skip");
+  const catalog = useQuery(api.catalog.list, me && !forced ? {} : "skip");
   useMemo(() => catalog && setCatalog(catalog.categories, catalog.services), [catalog]);
-  if (isLoading || (isAuthenticated && me === undefined) || (me && catalog === undefined)) return <Splash />;
+  if (isLoading || (isAuthenticated && me === undefined) || (me && !forced && catalog === undefined)) return <Splash />;
   if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
   if (!me) return <Blocked />;
+  if (forced) return <ForcedPasswordChange me={me} />;
   if (!roles.includes(me.role)) return <Navigate to={me.role === "executor" ? "/w" : "/"} replace />;
   return <Shell me={me} />;
 }

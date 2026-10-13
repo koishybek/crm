@@ -382,7 +382,7 @@ export function sendErrorText(f: OlxFailure): string {
 }
 
 /** Короткий код причины для адреса возврата после подключения (/settings?olx=error&reason=…): ни токенов, ни тел ответов. */
-export type OlxReturnReason = "state" | "expired" | "denied" | "code" | "exchange" | "client" | "scope" | "account" | "blocked" | "config";
+export type OlxReturnReason = "state" | "expired" | "denied" | "code" | "exchange" | "client" | "scope" | "account" | "blocked" | "config" | "key";
 
 export function returnReason(f: OlxFailure, step: "exchange" | "account"): OlxReturnReason {
   if (f.kind === "grant") return "code";

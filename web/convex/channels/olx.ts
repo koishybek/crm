@@ -70,6 +70,7 @@ import {
   type TokenLease,
 } from "../lib/olxApi";
 import { hitLimit } from "../lib/rateLimit";
+import { integrationsKeyIssue, isSealed, sealSecret } from "../lib/secretBox";
 import { safeFileName, storageMime } from "../lib/whatsapp";
 import type { OlxSettings } from "../../src/data/types";
 
@@ -124,19 +125,26 @@ async function pauseFor(ctx: MutationCtx, row: Doc<"integrations">, f: OlxFailur
   await markError(ctx, "olx", text);
 }
 
-/** Доступ к OLX потерян (refresh-токен протух или отозван): стоп опросу, владельцам — одно уведомление. */
-async function markLost(ctx: MutationCtx, row: Doc<"integrations">): Promise<void> {
+/** Токены не расшифровываются ключом INTEGRATIONS_KEY: его сменили (или данные испорчены) — токены бесполезны. */
+const KEY_CHANGED_TEXT = "Токены OLX не расшифровываются: ключ шифрования INTEGRATIONS_KEY сменили — подключите OLX заново";
+
+/**
+ * Доступ к OLX потерян (refresh-токен протух или отозван, либо токены не расшифровываются): стоп опросу, токены стираем,
+ * владельцам — одно уведомление. why — причина для карточки и мониторинга, по умолчанию «Нужно заново подключить OLX».
+ */
+async function markLost(ctx: MutationCtx, row: Doc<"integrations">, why?: string): Promise<void> {
   if (row.status !== "connected") return; // уже отмечено или отключено — второй раз не пишем
+  const text = why ?? OLX_REAUTH_TEXT;
   await ctx.db.patch(row._id, {
     status: "error",
-    lastError: OLX_REAUTH_TEXT,
+    lastError: text,
     accessToken: undefined,
     refreshToken: undefined,
     expiresAt: undefined,
     refreshLeaseUntil: undefined,
     syncLeaseUntil: undefined,
   });
-  await markError(ctx, "olx", OLX_REAUTH_TEXT);
+  await markError(ctx, "olx", text);
   const owners = await ctx.db
     .query("users")
     .withIndex("by_role", (q) => q.eq("role", "owner"))
@@ -144,12 +152,17 @@ async function markLost(ctx: MutationCtx, row: Doc<"integrations">): Promise<voi
   await notify(
     ctx,
     owners.filter((u) => u.active !== false).map((u) => u._id),
-    "OLX отключился: доступ истёк или отозван. Подключите OLX заново в настройках — до этого новые сообщения с OLX не приходят.",
+    `OLX отключился: ${why ? "токены доступа не расшифровываются (сменился ключ шифрования)" : "доступ истёк или отозван"}. Подключите OLX заново в настройках — до этого новые сообщения с OLX не приходят.`,
     { link: "/settings", tone: "bad", email: { kind: "channel_lost" } },
   );
-  await audit(ctx, "OLX", "integration.expired", `Доступ к OLX${row.accountName ? ` (${row.accountName})` : ""} истёк или отозван — нужно подключить заново`, {
+  await audit(ctx, "OLX", "integration.expired", `Доступ к OLX${row.accountName ? ` (${row.accountName})` : ""} ${why ? "потерян: токены не расшифровываются ключом INTEGRATIONS_KEY" : "истёк или отозван"} — нужно подключить заново`, {
     meta: { provider: "olx", accountId: row.accountId },
   });
+}
+
+/** Перед записью токенов: только зашифрованные (секреты в базе — никогда открытым текстом, аудит E28). */
+function assertSealed(...tokens: (string | undefined)[]): void {
+  if (tokens.some((t) => t !== undefined && !isSealed(t))) throw new ConvexError("Токены OLX не зашифрованы — сохранение отменено");
 }
 
 // ── Карточка владельца ───────────────────────────────────────────────────────
@@ -164,6 +177,7 @@ export const settings = query({
     return {
       configured: olxConfig() !== null,
       missing: olxMissingEnv(),
+      keyIssue: integrationsKeyIssue() ?? undefined,
       callbackUrl: olxCallbackUrl(),
       status: row?.status ?? "disconnected",
       accountId: row?.accountId,
@@ -191,6 +205,9 @@ export const connectUrl = mutation({
     const me = await requireRole(ctx, OWNER);
     const cfg = olxConfig();
     if (!cfg) throw new ConvexError("OLX ещё не настроен: на сервере нет ключей приложения (OLX_CLIENT_ID и OLX_CLIENT_SECRET)");
+    // Токены OLX храним только зашифрованными: без ключа подключение бессмысленно — говорим об этом до страницы OLX.
+    const keyIssue = integrationsKeyIssue();
+    if (keyIssue) throw new ConvexError(`Подключить OLX пока нельзя. ${keyIssue}`);
     if (!(await hitLimit(ctx, `olx:connect:${me._id}`, 10, STATE_TTL_MS))) throw new ConvexError("Слишком много попыток подключения — подождите 10 минут");
     await dropExpiredStates(ctx);
     const state = randomToken(32);
@@ -258,6 +275,7 @@ export const _takeState = internalMutation({
 export const _connect = internalMutation({
   args: { userId: v.id("users"), accessToken: v.string(), refreshToken: v.optional(v.string()), expiresAt: v.string(), accountId: v.string(), accountName: v.string() },
   handler: async (ctx, a): Promise<void> => {
+    assertSealed(a.accessToken, a.refreshToken);
     const user = await ctx.db.get(a.userId);
     const row = await olxIntegration(ctx);
     const connectedAt = nowIso();
@@ -306,6 +324,8 @@ export const olxCallback = httpAction(async (ctx, request) => {
   const cfg = olxConfig();
   if (!cfg) return fail("config");
   if (q.get("error")) return fail("denied");
+  // Без ключа шифрования токены сохранить нельзя — код не обмениваем вовсе.
+  if (integrationsKeyIssue()) return fail("key");
   const code = q.get("code") ?? "";
   if (!code || code.length > 1000) return fail("code");
   const startedAt = Date.now();
@@ -326,10 +346,20 @@ export const olxCallback = httpAction(async (ctx, request) => {
     console.warn(`olx: аккаунт не получен (${f.kind})`);
     return fail(returnReason(f, "account"));
   }
+  // В базу — только шифртекст: открытые токены живут лишь в памяти этого запроса.
+  let sealed: { accessToken: string; refreshToken?: string };
+  try {
+    sealed = {
+      accessToken: await sealSecret(token.accessToken, "olx.accessToken"),
+      refreshToken: token.refreshToken === undefined ? undefined : await sealSecret(token.refreshToken, "olx.refreshToken"),
+    };
+  } catch (e) {
+    console.warn(`olx: токены не зашифрованы (${e instanceof Error ? e.name : "ошибка"})`);
+    return fail("key");
+  }
   await ctx.runMutation(internal.channels.olx._connect, {
     userId: taken.userId,
-    accessToken: token.accessToken,
-    refreshToken: token.refreshToken,
+    ...sealed,
     expiresAt: new Date(startedAt + token.expiresIn * 1000).toISOString(),
     accountId: account.id,
     accountName: accountLabel(account),
@@ -363,9 +393,19 @@ export const _tokenLease = internalMutation({
 export const _tokenRefreshed = internalMutation({
   args: { accessToken: v.string(), refreshToken: v.optional(v.string()), expiresAt: v.string() },
   handler: async (ctx, a): Promise<void> => {
+    assertSealed(a.accessToken, a.refreshToken);
     const row = await olxIntegration(ctx);
     if (!row || row.status !== "connected") return; // пока обновляли, OLX отключили — токены не возвращаем
     await ctx.db.patch(row._id, { accessToken: a.accessToken, refreshToken: a.refreshToken ?? row.refreshToken, expiresAt: a.expiresAt, refreshLeaseUntil: undefined });
+  },
+});
+
+/** Токены OLX не расшифровываются нынешним ключом (его сменили) — доступ потерян, владельцу подключить заново. */
+export const _undecryptable = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<void> => {
+    const row = await olxIntegration(ctx);
+    if (row) await markLost(ctx, row, KEY_CHANGED_TEXT);
   },
 });
 
@@ -735,6 +775,9 @@ export const sync = internalAction({
   handler: async (ctx): Promise<void> => {
     const cfg = olxConfig();
     if (!cfg) return;
+    // Без ключа шифрования токены не открыть и новые не сохранить: в OLX не ходим, токены не трогаем — с ключом всё продолжится.
+    // Причину владелец видит в карточке OLX и в «Состоянии системы» (там она считается по окружению).
+    if (integrationsKeyIssue()) return;
     const start = await ctx.runMutation(internal.channels.olx._syncStart, {});
     if (!start) return;
     const cursor = readCursor(start.cursor);

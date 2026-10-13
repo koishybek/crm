@@ -61,12 +61,14 @@ export async function notify(
   let emails = 0;
   for (const id of new Set(userIds.filter((x): x is Id<"users"> => !!x))) {
     if (id === opts.except) continue;
-    const notificationId = await ctx.db.insert("notifications", { userId: id, text, link: opts.link, at, read: false, tone: opts.tone ?? "info" });
     const u = await ctx.db.get(id);
-    if (u?.telegramChatId) {
+    // Отключённым (уволен, доступ закрыт) — ни колокольчика, ни Telegram, ни писем (аудит M-5).
+    if (!u || u.active === false) continue;
+    const notificationId = await ctx.db.insert("notifications", { userId: id, text, link: opts.link, at, read: false, tone: opts.tone ?? "info" });
+    if (u.telegramChatId) {
       await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId, text, html: opts.html, link: opts.link, buttons: opts.buttons });
     }
-    if (u && opts.email && (await queueEmail(ctx, u, notificationId, { text, link: opts.link, event: opts.email }, emails))) emails++;
+    if (opts.email && (await queueEmail(ctx, u, notificationId, { text, link: opts.link, event: opts.email }, emails))) emails++;
   }
 }
 

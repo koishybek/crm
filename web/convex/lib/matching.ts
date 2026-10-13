@@ -19,6 +19,15 @@ export async function suitableUsers(ctx: QueryCtx, o: FitOrder): Promise<Id<"use
   return out;
 }
 
+/** Мастера с действующим доступом: отключённых нет ни в подборе, ни в назначении (аудит M-5). */
+export async function activeExecutorIds(ctx: QueryCtx): Promise<Set<Id<"executors">>> {
+  const users = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q) => q.eq("role", "executor"))
+    .collect();
+  return new Set(users.filter((u) => u.active !== false && u.executorId).map((u) => u.executorId!));
+}
+
 /** Лента мастера: свободные заказы, которые ему подходят. */
 export async function openOrdersFor(ctx: QueryCtx, ex: Doc<"executors">): Promise<Doc<"orders">[]> {
   const waiting = await ctx.db

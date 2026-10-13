@@ -91,7 +91,8 @@ export const _insert = internalMutation({
     const city = cleanText(a.city, 60, "Город");
     if (!name || !city) throw new ConvexError("Укажите имя и город");
     const id = await ctx.db.insert("executors", { ...a, categories, skills, name, city, phone, tenantId: TENANT, available: true, rating: 5, reviews: 0, joinedAt: nowIso() });
-    await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true });
+    // Пароль выдаёт сотрудник (создание или импорт) — он временный: при первом входе мастер задаёт свой (аудит M-8).
+    await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true, mustChangePassword: true });
     await audit(ctx, (await currentUser(ctx)) ?? "Система", "executor.created", `Добавлен исполнитель ${shortName(name)}${skills.length ? `, навыков: ${skills.length}` : ""}`, {
       entityId: id,
       meta: { categories, skills },

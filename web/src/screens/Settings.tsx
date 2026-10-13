@@ -38,7 +38,7 @@ function col(header: string[], ...names: string[]) {
 }
 
 const credsText = (c: Creds) =>
-  `${APP_NAME} — вход: ${window.location.origin}\n\n` + c.rows.map((r) => `${r.name}\nЛогин: ${r.login}\nПароль: ${r.password}`).join("\n\n");
+  `${APP_NAME} — вход: ${window.location.origin}\nПароль временный: при первом входе придумайте свой.\n\n` + c.rows.map((r) => `${r.name}\nЛогин: ${r.login}\nПароль: ${r.password}`).join("\n\n");
 
 export default function Settings() {
   const me = useMe()!;
@@ -326,7 +326,7 @@ export default function Settings() {
       <Modal open={!!creds} onClose={() => setCreds(null)} title={creds?.title ?? ""} width={520}>
         {creds && (
           <div>
-            <p className="text-[14px] text-muted">Пароли показываются один раз — скопируйте и передайте людям лично.</p>
+            <p className="text-[14px] text-muted">Пароли показываются один раз — скопируйте и передайте людям лично. Пароль временный: при первом входе система попросит придумать свой.</p>
             <div className="scroll-thin mt-3 max-h-[320px] space-y-2 overflow-y-auto">
               {creds.rows.map((r) => (
                 <div key={r.login} className="rounded-[12px] border border-line px-3.5 py-2.5 text-[14px]">

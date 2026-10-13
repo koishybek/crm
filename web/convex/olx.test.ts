@@ -22,6 +22,7 @@ import F7 from "../test/fixtures/olx/F7.json?raw";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { asMessage, asThread, asToken, classifyFailure, hasScopes, parseOlxDate, sendErrorText } from "./lib/olx";
+import { openSecret } from "./lib/secretBox";
 import schema from "./schema";
 
 const modules = Object.fromEntries(
@@ -45,6 +46,8 @@ const CLIENT_SECRET = "secret-test";
 const NOW = new Date("2026-10-12T10:30:00Z");
 const REAUTH = "Нужно заново подключить OLX";
 const CF_ID = "6M0q-VjzE8C1cATaVRL8BgsR8r42wV0sfbyrBKMQph6J22jL7QZKrg==";
+/** Ключ шифрования токенов (32 байта в base64): без него токены OLX не сохраняются. */
+const INTEGRATIONS_KEY = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 
 const parse = (raw: string): Rec => JSON.parse(raw) as Rec;
 const dataOf = (raw: string): Rec[] => parse(raw).data as Rec[];
@@ -172,6 +175,7 @@ beforeEach(() => {
   };
   vi.stubEnv("OLX_CLIENT_ID", CLIENT_ID);
   vi.stubEnv("OLX_CLIENT_SECRET", CLIENT_SECRET);
+  vi.stubEnv("INTEGRATIONS_KEY", INTEGRATIONS_KEY);
   vi.stubEnv("CONVEX_SITE_URL", SITE);
   vi.stubEnv("APP_URL", APP);
   vi.stubGlobal(
@@ -199,7 +203,10 @@ async function setup() {
   return { t, ids, as, owner: as(ids.owner), op: as(ids.operator) };
 }
 
-/** OLX уже подключён (как после callback). По умолчанию первая загрузка закончена — всё новое «живое». */
+/**
+ * OLX уже подключён (как после callback). По умолчанию первая загрузка закончена — всё новое «живое».
+ * Токены здесь открытым текстом — как сохранённые до шифрования: такие работают и заменяются зашифрованными при обновлении.
+ */
 async function connect(t: TestEnv, owner: Id<"users">, extra: Partial<WithoutSystemFields<Doc<"integrations">>> = {}): Promise<void> {
   await t.run(async (ctx) => {
     await ctx.db.insert("integrations", {
@@ -221,6 +228,15 @@ async function connect(t: TestEnv, owner: Id<"users">, extra: Partial<WithoutSys
 const sync = (t: TestEnv) => t.action(internal.channels.olx.sync, {});
 const drain = (t: TestEnv) => t.finishAllScheduledFunctions(vi.runAllTimers);
 const integration = (t: TestEnv) => t.run((ctx) => ctx.db.query("integrations").first());
+/** Токены из базы, расшифрованные; enc — оба сохранены шифртекстом. */
+async function tokensOf(row: Doc<"integrations"> | null): Promise<{ accessToken?: string; refreshToken?: string; enc: boolean }> {
+  const open = async (s: string | undefined, purpose: "olx.accessToken" | "olx.refreshToken") => (s === undefined ? undefined : (await openSecret(s, purpose)).value);
+  return {
+    accessToken: await open(row?.accessToken, "olx.accessToken"),
+    refreshToken: await open(row?.refreshToken, "olx.refreshToken"),
+    enc: [row?.accessToken, row?.refreshToken].every((s) => s === undefined || s.startsWith("enc:v1:")),
+  };
+}
 const conversation = (t: TestEnv, key: string) =>
   t.run((ctx) =>
     ctx.db
@@ -349,12 +365,13 @@ describe("подключение OLX", () => {
       status: "connected",
       accountId: "870012345",
       accountName: "Home Max Service · homemax.service@example.com",
-      accessToken: ACCESS,
-      refreshToken: REFRESH,
       expiresAt: iso(NOW.getTime() + 86400_000),
       connectedBy: ids.owner,
       connectedAt: NOW.toISOString(),
     });
+    // В базе — только шифртекст (INTEGRATIONS_KEY), расшифровывается в те же токены.
+    expect(await tokensOf(row)).toEqual({ accessToken: ACCESS, refreshToken: REFRESH, enc: true });
+    expect(JSON.stringify(row)).not.toContain(ACCESS);
     expect((await table(t, "audit")).map((a) => [a.action, a.actorId])).toEqual([["integration.connected", ids.owner]]);
 
     // Ни карточка владельца, ни мониторинг, ни адрес возврата токенов не содержат.
@@ -495,7 +512,9 @@ describe("синхронизация OLX", () => {
     ]);
     expect(calls[1]!.body).toEqual({ grant_type: "refresh_token", client_id: CLIENT_ID, client_secret: CLIENT_SECRET, refresh_token: "ref-1" });
     let row = await integration(t);
-    expect(row).toMatchObject({ status: "connected", accessToken: "fresh-access", refreshToken: "ref-2", expiresAt: iso(NOW.getTime() + 86400_000), lastSyncAt: NOW.toISOString() });
+    expect(row).toMatchObject({ status: "connected", expiresAt: iso(NOW.getTime() + 86400_000), lastSyncAt: NOW.toISOString() });
+    // Токены, сохранённые до шифрования, при обновлении записываются уже зашифрованными.
+    expect(await tokensOf(row)).toEqual({ accessToken: "fresh-access", refreshToken: "ref-2", enc: true });
     expect(row!.refreshLeaseUntil).toBeUndefined();
     expect(await conversation(t, THIRD)).not.toBeNull();
 
@@ -507,7 +526,7 @@ describe("синхронизация OLX", () => {
     await sync(t);
     expect(calls.slice(before, before + 2).map((c) => c.url.replace(/\?.*/, ""))).toEqual([TOKEN_URL, `${API}/threads`]);
     row = await integration(t);
-    expect(row).toMatchObject({ accessToken: "fresh-access-2", refreshToken: "ref-2" });
+    expect(await tokensOf(row)).toEqual({ accessToken: "fresh-access-2", refreshToken: "ref-2", enc: true });
   });
 
   test("invalid_grant при обновлении → «Нужно заново подключить OLX», одно уведомление владельцу, журнал; дальше опрос молчит", async () => {

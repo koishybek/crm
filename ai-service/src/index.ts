@@ -12,8 +12,47 @@ interface Env {
 const STT = "@cf/openai/whisper-large-v3-turbo";
 const LLM = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const MAX_AUDIO = 25 * 1024 * 1024;
+/** Запрос на разбор — текст до 12 000 символов и справочник услуг: 1 МБ с большим запасом. */
+const MAX_JSON = 1024 * 1024;
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
+
+/** Сравнение секретов за постоянное время: SHA-256 обеих строк, побайтно без раннего выхода (аудит L-9). */
+async function safeEqual(given: string, expected: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(given)), crypto.subtle.digest("SHA-256", enc.encode(expected))]);
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i]! ^ y[i]!;
+  return diff === 0;
+}
+
+/** Тело запроса не больше max байт: сначала по Content-Length, затем потоково — целиком в память не читаем. */
+async function readBody(req: Request, max: number): Promise<Uint8Array> {
+  if (Number(req.headers.get("content-length") ?? 0) > max) throw new HttpError(413, "Слишком большой запрос");
+  const reader = req.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      throw new HttpError(413, "Слишком большой запрос");
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
 
 function toBase64(bytes: Uint8Array): string {
   let s = "";
@@ -23,9 +62,8 @@ function toBase64(bytes: Uint8Array): string {
 }
 
 async function transcribe(req: Request, env: Env, url: URL) {
-  const bytes = new Uint8Array(await req.arrayBuffer());
+  const bytes = await readBody(req, MAX_AUDIO);
   if (!bytes.length) throw new HttpError(400, "Пустой файл");
-  if (bytes.length > MAX_AUDIO) throw new HttpError(413, "Запись больше 25 МБ");
   const language = url.searchParams.get("language") || undefined;
   const out = (await env.AI.run(STT, {
     audio: toBase64(bytes),
@@ -123,20 +161,34 @@ class HttpError extends Error {
   }
 }
 
+/** Тело /v1/extract — JSON-объект; иначе 400 (а не 500 из-за разбора). */
+async function extractInput(req: Request): Promise<ExtractIn> {
+  let body: unknown;
+  try {
+    body = JSON.parse(new TextDecoder().decode(await readBody(req, MAX_JSON)));
+  } catch (e) {
+    if (e instanceof HttpError) throw e;
+    throw new HttpError(400, "Тело запроса — не JSON");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "Тело запроса — не объект");
+  return body as ExtractIn;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
-    if (url.pathname === "/v1/health") return json({ ok: true, stt: STT, llm: LLM });
-    if (!env.AI_SECRET || req.headers.get("authorization") !== `Bearer ${env.AI_SECRET}`) return json({ error: "unauthorized" }, 401);
+    // Проверка живости — без подробностей: какие модели стоят, посторонним знать не нужно (аудит L-9).
+    if (url.pathname === "/v1/health") return json({ ok: true });
+    if (!env.AI_SECRET || !(await safeEqual(req.headers.get("authorization") ?? "", `Bearer ${env.AI_SECRET}`))) return json({ error: "unauthorized" }, 401);
     try {
       if (req.method === "POST" && url.pathname === "/v1/transcribe") return json(await transcribe(req, env, url));
-      if (req.method === "POST" && url.pathname === "/v1/extract") return json(await extract((await req.json()) as ExtractIn, env));
+      if (req.method === "POST" && url.pathname === "/v1/extract") return json(await extract(await extractInput(req), env));
       return json({ error: "not found" }, 404);
     } catch (e) {
       if (e instanceof HttpError) return json({ error: e.message }, e.status);
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("ai error", message);
-      return json({ error: "AI временно недоступен", detail: message.slice(0, 300) }, 502);
+      // Текст внутренней ошибки — только в журнал воркера, наружу — общий ответ.
+      console.error("ai error", e instanceof Error ? e.message : String(e));
+      return json({ error: "AI временно недоступен" }, 502);
     }
   },
 };
