@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { buildSeed } from "../src/data/seed";
-import { ACTIVE_STATUSES } from "../src/data/catalog";
+import { ACTIVE_STATUSES, serviceById } from "../src/data/catalog";
 import type { Actor } from "../src/data/types";
 
 const envLocal = Object.fromEntries(
@@ -18,12 +18,12 @@ const envLocal = Object.fromEntries(
 const url = process.env.CONVEX_URL ?? envLocal.VITE_CONVEX_URL;
 const secret = process.env.SEED_SECRET;
 // Пароль демо-аккаунтов — только из окружения: в публичном репозитории его быть не должно.
-const password = process.env.DEMO_PASSWORD;
+const password: string = process.env.DEMO_PASSWORD ?? "";
 if (!url || !secret) throw new Error("Нужны CONVEX_URL (или .env.local) и SEED_SECRET");
 if (!password || password.length < 10) throw new Error("Нужен DEMO_PASSWORD (не короче 10 символов) — пароль демо-аккаунтов");
 
 const client = new ConvexHttpClient(url);
-type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls";
+type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend";
 
 async function insert(table: Table, rows: Record<string, unknown>[]): Promise<string[]> {
   const ids: string[] = [];
@@ -69,7 +69,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await client.mutation(api.seed.wipe, { secret: secret!, table: t })) > 0);
     }
     while ((await client.mutation(api.seed.wipeFiles, { secret: secret! })) > 0);
@@ -214,6 +214,101 @@ async function main() {
   }
   const callIds = await insert("calls", [...fromLeads, ...today, ...liveRows]);
   await client.mutation(api.seed.patchMany, { secret: secret!, table: "leads", patches: fromLeads.map((c, i) => ({ id: c.leadId!, fields: { callId: callIds[i] } })) });
+
+  // ── Требуемые навыки у части открытых заказов — чтобы подбор по навыкам было видно на демо ──
+  const SKILL_BY_SERVICE: Record<string, string[]> = { "ac-install": ["Монтаж сплит-систем"], "wm-repair": ["Стиральные машины"], boiler: ["Бойлеры"], "boiler-service": ["Газовые котлы"], cctv: ["Видеонаблюдение"] };
+  const skillPatches = db.orders
+    .filter((o) => (o.status === "awaiting_executor" || o.status === "new") && SKILL_BY_SERVICE[o.serviceId])
+    .map((o) => ({ id: orderMap.get(o.id)!, fields: { requiredSkills: SKILL_BY_SERVICE[o.serviceId] } }));
+  if (skillPatches.length) await client.mutation(api.seed.patchMany, { secret: secret!, table: "orders", patches: skillPatches });
+
+  // ── Переписка в разделе «Сообщения»: заявки из Telegram, WhatsApp, OLX и с сайта за последние дни ──
+  type Channel = "telegram" | "whatsapp" | "olx" | "site";
+  type Msg = { direction: "in" | "out"; text: string; at: number; authorId?: string };
+  const ADVERT: Record<string, string> = {
+    ac: "Ремонт и чистка кондиционеров — выезд в день обращения",
+    appliances: "Ремонт стиральных машин и холодильников на дому",
+    plumbing: "Сантехник: протечки, смесители, засоры",
+    electric: "Электрик: розетки, проводка, щитки",
+    heating: "Установка и ремонт бойлеров и котлов",
+    furniture: "Сборка мебели ИКЕА и корпусной",
+    cleaning: "Генеральная уборка квартир и офисов",
+    it: "Компьютерная помощь и настройка Wi‑Fi",
+    intercom: "Домофоны и видеонаблюдение под ключ",
+    other: "Мастер на час",
+  };
+  const WHEN = ["завтра после 18:00", "сегодня до 20:00", "в субботу утром", "в будни после обеда"];
+  const convs: { row: Record<string, unknown>; msgs: Msg[] }[] = [];
+  const chatId = (n: number) => String(500000000 + Math.floor(frac(n) * 400000000));
+  for (const l of db.leads.filter((x) => ["telegram", "whatsapp", "olx", "site"].includes(x.source) && now - Date.parse(x.createdAt) < 10 * 86400_000).slice(0, 45)) {
+    const c = clientById.get(l.clientId)!;
+    const channel = l.source as Channel;
+    const t0 = Date.parse(l.createdAt) - 7 * MIN;
+    const op = userMap.get(l.operatorId);
+    const msgs: Msg[] =
+      channel === "site"
+        ? [{ direction: "in", text: `Заявка с сайта: ${l.description}`, at: t0 }]
+        : [
+            { direction: "in", text: channel === "olx" ? `Здравствуйте! Актуально? ${l.description}` : l.description, at: t0 },
+            { direction: "out", text: "Здравствуйте! Спасибо, что написали. Подскажите адрес и когда удобно принять мастера?", at: t0 + 3 * MIN, authorId: op },
+            { direction: "in", text: `${c.address ?? c.city}. Удобно ${WHEN[l.number % WHEN.length]}${channel === "olx" ? `. Мой номер ${c.phone.replace(/^7/, "8")}` : ""}`, at: t0 + 6 * MIN },
+          ];
+    const last = msgs[msgs.length - 1]!;
+    const fresh = now - last.at < 3 * 86400_000;
+    convs.push({
+      row: {
+        tenantId,
+        channel,
+        externalId: channel === "telegram" ? chatId(l.number) : channel === "olx" ? `demo-olx-${l.number}` : c.phone,
+        contactName: c.name,
+        contactPhone: channel === "telegram" && l.number % 3 === 0 ? undefined : c.phone,
+        clientId: clientMap.get(c.id),
+        leadId: leadMap.get(l.id),
+        subject: channel === "olx" ? ADVERT[serviceById(l.serviceId).category] ?? ADVERT.other : undefined,
+        lastMessageAt: iso(last.at),
+        lastText: last.text.slice(0, 140),
+        lastDirection: last.direction,
+        unread: 0,
+        status: fresh ? "open" : "closed",
+        replyUntil: channel === "whatsapp" ? iso(last.at + 86400_000) : undefined,
+      },
+      msgs,
+    });
+  }
+  // Свежие непрочитанные обращения без заявки — с них удобно показать «Создать заявку» из чата.
+  const unreadToday: { channel: Channel; externalId: string; name: string; phone?: string; subject?: string; texts: string[]; ago: number }[] = [
+    { channel: "whatsapp", externalId: "77019887766", name: "Дина", phone: "77019887766", texts: ["Здравствуйте, у вас есть мастер по посудомоечным машинам?", "Bosch не сливает воду, Алматы, Самал-1. Можно сегодня вечером?"], ago: 12 },
+    { channel: "olx", externalId: "demo-olx-new-1", name: "Сергей", subject: ADVERT.appliances, texts: ["Актуально? Сколько стоит замена подшипника на Samsung 6 кг?"], ago: 35 },
+    { channel: "telegram", externalId: chatId(9001), name: "Айгерим", texts: ["Добрый день! Нужна генеральная уборка 3-комнатной квартиры в эту пятницу, Астана, Есиль"], ago: 8 },
+  ];
+  for (const u of unreadToday) {
+    const msgs: Msg[] = u.texts.map((text, i) => ({ direction: "in", text, at: now - (u.ago - i) * MIN }));
+    const last = msgs[msgs.length - 1]!;
+    convs.push({
+      row: {
+        tenantId,
+        channel: u.channel,
+        externalId: u.externalId,
+        contactName: u.name,
+        contactPhone: u.phone,
+        subject: u.subject,
+        lastMessageAt: iso(last.at),
+        lastText: last.text.slice(0, 140),
+        lastDirection: "in",
+        unread: msgs.length,
+        status: "open",
+        replyUntil: u.channel === "whatsapp" ? iso(last.at + 86400_000) : undefined,
+      },
+      msgs,
+    });
+  }
+  const convIds = await insert("conversations", convs.map((c) => c.row));
+  await insert(
+    "conversationMessages",
+    convs.flatMap((c, i) =>
+      c.msgs.map((m) => ({ conversationId: convIds[i], direction: m.direction, kind: "text", text: m.text, at: iso(m.at), authorId: m.authorId, status: m.direction === "out" ? "read" : undefined })),
+    ),
+  );
 
   const logins = db.users.map((u) => ({ login: loginOf(u), password }));
   for (let i = 0; i < logins.length; i += 5) await client.action(api.seed.logins, { secret: secret!, logins: logins.slice(i, i + 5) });

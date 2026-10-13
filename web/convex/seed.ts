@@ -12,9 +12,10 @@ function guard(secret: string) {
   if (env("ALLOW_SEED") !== "1" || !env("SEED_SECRET") || secret !== env("SEED_SECRET")) throw new ConvexError("Загрузка демо-данных выключена");
 }
 
-const SEED_TABLES = ["executors", "users", "clients", "leads", "orders", "messages", "history", "interactions", "clientNotes", "notifications", "counters", "calls"] as const;
+const SEED_TABLES = ["executors", "users", "clients", "leads", "orders", "messages", "history", "interactions", "clientNotes", "notifications", "counters", "calls", "conversations", "conversationMessages", "audit", "reviews", "adSpend"] as const;
 // settings (секрет АТС) не трогаем: это настройка, а не демо-данные.
-const WIPE_TABLES = [...SEED_TABLES, "botChats", "categories", "services", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const;
+// settings и integrations не трогаем: это настройки и подключения, а не демо-данные.
+const WIPE_TABLES = [...SEED_TABLES, "botChats", "apiKeys", "apiLeads", "reviewRequests", "rateLimits", "systemStatus", "backups", "oauthStates", "categories", "services", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const;
 const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));
 
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
