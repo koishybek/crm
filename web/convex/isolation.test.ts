@@ -312,7 +312,7 @@ describe("AI-разбор: адрес и бюджет — не в описани
     expect(ai.extracted.map((e) => e.label)).toEqual(expect.arrayContaining(["Адрес", "Когда", "Бюджет"]));
   });
 
-  test("заявка из бота: адрес — в служебном комментарии; в заказе и ленте мастера его нет", async () => {
+  test("заявка из бота: адрес — полем заявки, не в описании; в ленте мастера его нет, в заказе — только после подтверждения", async () => {
     const { t, ids, as } = await setup();
     const { ai, draft } = toSummary(x, () => "Ремонт кондиционера");
     const res = await t.mutation(internal.bot._createLead, {
@@ -325,11 +325,15 @@ describe("AI-разбор: адрес и бюджет — не в описани
       address: draft.address,
       urgency: draft.urgency,
       description: draft.description,
+      preferredTime: draft.when,
+      budget: draft.budget,
     });
     if (!res.ok) throw new Error("заявка не создана");
     const lead = (await t.run((ctx) => ctx.db.query("leads").withIndex("by_number", (q) => q.eq("number", res.number)).unique()))!;
     expect(lead.description).toBe("Не холодит кондиционер");
-    expect(lead.comment).toContain("Адрес из обращения: мкр. Самал-2, д. 58");
+    // Адрес, удобное время и бюджет — структурными полями заявки (ТЗ п.8.3), а не текстом в комментарии.
+    expect(lead).toMatchObject({ address: "мкр. Самал-2, д. 58", preferredTime: "завтра после 18:00", budget: 15000 });
+    expect(lead.comment ?? "").not.toContain("Самал");
 
     const created = await as(ids.operator).mutation(api.leads.convert, { id: lead._id });
     await as(ids.operator).mutation(api.orders.updateFinance, { id: created.id, clientPrice: 30000, payoutMode: "fixed", payoutValue: 20000, payoutPaid: false });

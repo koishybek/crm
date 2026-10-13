@@ -11,8 +11,8 @@ import { ServiceGlyph } from "../icons";
 import { MUTED, WBadge, WButton } from "./kit";
 import { DueText, OrderThumb } from "./parts";
 
-/** Можно ли сейчас взять: да; приём выключен (кнопка серая, но объясняет); нет связи. */
-export type TakeMode = "ready" | "off_shift" | "offline";
+/** Можно ли сейчас взять: да; приём выключен или лимит заказов в работе (кнопка серая, но объясняет); нет связи. */
+export type TakeMode = "ready" | "off_shift" | "limit" | "offline";
 
 interface OrderCardProps {
   item: FeedItem;
@@ -25,6 +25,8 @@ interface OrderCardProps {
 export const OrderCard = memo(function OrderCard({ item, now, mode, highlighted, onTake }: OrderCardProps) {
   const s = serviceById(item.serviceId);
   const late = isPast(item.deadline, now);
+  const locked = mode === "off_shift" || mode === "limit";
+  const why = mode === "off_shift" ? "Сначала включите приём заказов" : "Лимит заказов — сначала сдайте текущий";
   return (
     <article id={`order-${item.id}`} className={cn("card overflow-hidden transition-shadow lg:flex", highlighted && "ring-2 ring-brand")}>
       <Link to={`/w/orders/${item.id}`} className="block min-w-0 flex-1 p-4 pb-3 active:bg-[#faf8f3] lg:pb-4">
@@ -69,15 +71,15 @@ export const OrderCard = memo(function OrderCard({ item, now, mode, highlighted,
         <WButton
           size="lg"
           full
-          icon={mode === "off_shift" ? Lock : undefined}
-          softDisabled={mode === "off_shift"}
+          icon={locked ? Lock : undefined}
+          softDisabled={locked}
           disabled={mode === "offline"}
           onClick={() => onTake(item)}
-          aria-label={mode === "offline" ? undefined : mode === "off_shift" ? `Взять заказ №${item.number}. Сначала включите приём заказов` : `Взять заказ №${item.number}`}
+          aria-label={mode === "offline" ? undefined : locked ? `Взять заказ №${item.number}. ${why}` : `Взять заказ №${item.number}`}
         >
           {mode === "offline" ? "Нет связи" : "Взять заказ"}
         </WButton>
-        {mode === "off_shift" && <p className={cn("mt-1.5 text-center text-[13.5px]", MUTED)}>Сначала включите приём заказов</p>}
+        {locked && <p className={cn("mt-1.5 text-center text-[13.5px]", MUTED)}>{why}</p>}
       </div>
     </article>
   );

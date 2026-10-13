@@ -103,12 +103,13 @@ export const contactsLocked = (o: Pick<WorkerOrder, "status">) => o.status === "
 
 /**
  * Что значит отказ сервера — по тексту ConvexError (кодов ошибок у worker.* пока нет).
- * taken — заказ ушёл другому или снят с ленты; mine — уже ваш; off_shift — приём выключен;
- * not_fit — не подходит; changed — статус уже изменился; not_yours — заказ больше не ваш.
+ * taken — заказ ушёл другому или снят с ленты; mine — уже ваш; off_shift — приём выключен; limit — у мастера уже
+ * столько заказов в работе, сколько можно; not_fit — не подходит; changed — статус уже изменился; not_yours — заказ больше не ваш.
  */
-export type Refusal = "taken" | "mine" | "off_shift" | "not_fit" | "changed" | "not_yours" | "network" | "other";
+export type Refusal = "taken" | "mine" | "off_shift" | "limit" | "not_fit" | "changed" | "not_yours" | "network" | "other";
 
 export function refusalOf(error: string): Refusal {
+  if (/это ваш лимит|лимит заказов/i.test(error)) return "limit";
   if (/уже ваш/i.test(error)) return "mine";
   if (/уже взял|снят с ленты|заказ не найден/i.test(error)) return "taken";
   if (/выходн|при[её]м заказов/i.test(error)) return "off_shift";

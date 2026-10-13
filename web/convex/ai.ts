@@ -13,6 +13,7 @@ import { currentUser } from "./lib/access";
 import { fetchPublicFile } from "./lib/safeFetch";
 import { env } from "./env";
 import { URGENCY } from "../src/data/catalog";
+import { normalizeCity } from "../src/data/cities";
 import { money } from "../src/lib/format";
 import type { AiDraft, AiSummary, Urgency } from "../src/data/types";
 
@@ -268,8 +269,8 @@ export async function extract(text: string, hint: CatalogHint, channel: "call" |
   return sanitize(await extractViaWorker(worker!, text, hint, channel), hint);
 }
 
-/** Доверяем AI только в рамках справочника: чужие id и мусор — в null. */
-function sanitize(r: Record<string, unknown>, hint: CatalogHint): Extraction {
+/** Доверяем AI только в рамках справочника: чужие id и мусор — в null; город — в едином написании (E11). */
+export function sanitize(r: Record<string, unknown>, hint: CatalogHint): Extraction {
   const s = (x: unknown, max = 300) => (typeof x === "string" && x.trim() && x.trim().toLowerCase() !== "null" ? x.trim().slice(0, max) : null);
   const city = s(r.city, 60);
   const serviceId = s(r.serviceId, 80);
@@ -277,7 +278,7 @@ function sanitize(r: Record<string, unknown>, hint: CatalogHint): Extraction {
   return {
     summary: s(r.summary, 600) ?? "",
     serviceId: serviceId && hint.services.some((x) => x.id === serviceId) ? serviceId : null,
-    city: city ? (hint.cities.find((c) => c.toLowerCase() === city.toLowerCase()) ?? city) : null,
+    city: normalizeCity(city).slice(0, 60) || null,
     address: s(r.address, 200),
     when: s(r.when, 120),
     budget: Number.isFinite(budget) && budget > 0 && budget < 100_000_000 ? Math.round(budget) : null,
@@ -299,7 +300,8 @@ export function toSummary(x: Extraction, serviceLabel: (id: string) => string): 
     x.clientName && { label: "Имя", value: x.clientName },
   ].filter((e): e is { label: string; value: string } => !!e);
   // Описание уходит в заявку, а из неё — в заказ, ленту и Telegram мастерам (аудит H-3): только суть обращения.
-  // Адрес — в draft.address (мастеру — после подтверждения), бюджет и удобное время — только в AI-блоке сотрудников.
+  // Адрес — в draft.address (мастеру — после подтверждения), удобное время и бюджет — полями заявки только для
+  // сотрудников (ТЗ п.8.3): в заказ переходит адрес, время — подсказкой к сроку, бюджет в цену сам не попадает.
   const description = x.summary;
   return {
     ai: { summary: x.summary || "AI не смог кратко пересказать обращение", extracted, questions: x.questions },
@@ -310,6 +312,8 @@ export function toSummary(x: Extraction, serviceLabel: (id: string) => string): 
       urgency: x.urgency,
       clientName: x.clientName ?? undefined,
       description: description || undefined,
+      when: x.when ?? undefined,
+      budget: x.budget ?? undefined,
     },
   };
 }

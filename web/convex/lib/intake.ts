@@ -1,9 +1,11 @@
 // Приём заявки из внешнего канала — один путь для бота Telegram, формы сайта, публичного API и сообщений
 // (WhatsApp, OLX): клиент по телефону (найти или создать) → заявка → история клиента → уведомление команде → журнал.
+// Заявку из канала никто не ведёт, пока оператор не возьмёт её в работу (E12): на владельца её не записываем.
 import type { Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
-import type { AiSummary, SourceId, Urgency } from "../../src/data/types";
+import type { AiSummary, LeadOrigin, SourceId, Urgency } from "../../src/data/types";
 import { CITIES } from "../../src/data/catalog";
+import { normalizeCity } from "../../src/data/cities";
 import { insertClient } from "../clients";
 import { loadCatalog } from "../catalog";
 import { env } from "../env";
@@ -15,6 +17,8 @@ const MESSENGERS: SourceId[] = ["telegram", "whatsapp", "olx", "instagram"];
 
 export interface IntakeInput {
   source: SourceId;
+  /** Кто завёл: бот, сайт, API, WhatsApp, OLX. */
+  origin: Exclude<LeadOrigin, "operator" | "ai">;
   /** Уже нормализованный номер «7XXXXXXXXXX». */
   phone: string;
   name?: string;
@@ -23,6 +27,10 @@ export interface IntakeInput {
   serviceId?: string;
   city?: string;
   address?: string;
+  /** Когда клиенту удобно — как он сказал (AI-разбор). */
+  preferredTime?: string;
+  /** Бюджет клиента, ₸ (AI-разбор) — только для сотрудников. */
+  budget?: number;
   urgency?: Urgency;
   description: string;
   comment?: string;
@@ -50,27 +58,20 @@ export interface IntakeResult {
  */
 export const safeName = (raw: string | undefined): string => (raw ?? "").replace(/^[\s=+\-@]+/, "").trim().slice(0, 80);
 
-/** На кого записать заявку из канала: первый активный владелец. */
-async function intakeOperator(ctx: MutationCtx): Promise<Id<"users"> | null> {
-  const owners = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q) => q.eq("role", "owner"))
-    .collect();
-  return (owners.find((u) => u.active !== false) ?? owners[0])?._id ?? null;
-}
+/** Бюджет из AI-разбора: целые тенге в разумных пределах, иначе — не назван. */
+const cleanBudget = (n: number | undefined) => (n !== undefined && Number.isFinite(n) && n > 0 && n < 100_000_000 ? Math.round(n) : undefined);
 
 /**
- * Создать заявку. null — в базе ещё нет владельца (заявку не на кого записать); в этом случае ничего не пишем.
- * Услуга не из справочника → «Другое — уточнить»: оператор уточнит.
+ * Создать заявку. null — справочник услуг пуст (заявку не к чему отнести); в этом случае ничего не пишем.
+ * Услуга не из справочника → «Другое — уточнить»: оператор уточнит. Город — в едином написании (E11).
  */
 export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<IntakeResult | null> {
-  const operatorId = await intakeOperator(ctx);
-  if (!operatorId) return null;
   const cat = await loadCatalog(ctx);
   const active = cat.services.filter((s) => s.active !== false);
   const svc = active.find((s) => s.id === a.serviceId) ?? active.find((s) => s.id === "other") ?? active[0] ?? cat.services[0];
   if (!svc) return null;
-  const city = a.city?.trim().slice(0, 60) || env("COMPANY_CITY") || CITIES[0];
+  const city = normalizeCity(a.city).slice(0, 60) || normalizeCity(env("COMPANY_CITY")) || CITIES[0];
+  const address = a.address?.trim().slice(0, 300) || undefined;
 
   let client = await ctx.db
     .query("clients")
@@ -82,7 +83,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
       name: safeName(a.name) || a.fallbackName,
       phone: a.phone,
       city,
-      address: a.address?.slice(0, 200),
+      address: address?.slice(0, 200),
       source: a.source,
       preferredChannel: MESSENGERS.includes(a.source) ? a.source : undefined,
     });
@@ -103,12 +104,15 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     description: a.description.trim().slice(0, 2000) || "Клиент оставил заявку",
     urgency: a.urgency ?? "normal",
     status: "new",
-    operatorId,
+    origin: a.origin,
     createdAt: at,
     ai: a.ai,
-    // Адрес из обращения — в служебный комментарий (в заказ он не копируется и мастерам не уходит, аудит H-3):
-    // у нового клиента он есть и в карточке, у знакомого — не потеряется.
-    comment: [a.comment?.trim(), a.address?.trim() ? `Адрес из обращения: ${a.address.trim().slice(0, 300)}` : ""].filter(Boolean).join("\n").slice(0, 2000) || undefined,
+    comment: a.comment?.trim().slice(0, 2000) || undefined,
+    // Адрес — полем заявки, не в описании (описание уходит мастерам в ленту, аудит H-3): в заказ он перейдёт сам,
+    // мастер увидит его только после подтверждения заказа.
+    address,
+    preferredTime: a.preferredTime?.trim().slice(0, 120) || undefined,
+    budget: cleanBudget(a.budget),
   });
   if (a.message) {
     await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: a.source, title: a.message.title, text: a.message.text.slice(0, 1000), at });
@@ -122,7 +126,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
   await notify(ctx, await staffIds(ctx, svc.category), `${title} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info", email: { kind: "lead_new", text: title } });
   await audit(ctx, a.actor, "lead.created", `Заявка №${number} ${a.via}: ${svc.label}`, {
     entityId: leadId,
-    meta: { source: a.source, serviceId: svc.id, newClient, ...a.auditMeta },
+    meta: { source: a.source, origin: a.origin, serviceId: svc.id, newClient, ...a.auditMeta },
   });
   return { leadId, number, clientId: client._id, newClient, serviceId: svc.id };
 }

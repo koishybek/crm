@@ -1,10 +1,12 @@
 import {
   ArrowRight,
   Ban,
+  CalendarClock,
   CircleAlert,
   Clock3,
   Clock,
   Copy,
+  Hand,
   KeyRound,
   Mail,
   MapPin,
@@ -33,8 +35,11 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useFileQuery } from "../data/files";
-import { useMe, useTeam, useUi } from "../data/hooks";
+import { useMe, useNow, useTeam, useUi } from "../data/hooks";
+import { normalizeCity } from "../data/cities";
+import { awaitsOperator, deadlineByUrgency, LEAD_ORIGIN } from "../data/leadRules";
 import { leadBadge } from "../data/logic";
+import { takeLead } from "../data/operationsActions";
 import {
   convertLead,
   createClient,
@@ -60,7 +65,7 @@ import { Source } from "../components/icons";
 import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
 import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
 import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
-import { cn, dateTime, digits, phone, phoneMask } from "../lib/format";
+import { cn, dateTime, digits, money, phone, phoneMask } from "../lib/format";
 
 // ── Общие поля ───────────────────────────────────────────────────────────────
 
@@ -206,6 +211,9 @@ function NewLeadForm({
   const [description, setDescription] = useState("");
   const [urgency, setUrgency] = useState<Urgency>("normal");
   const [comment, setComment] = useState("");
+  const [address, setAddress] = useState("");
+  const [preferredTime, setPreferredTime] = useState("");
+  const [budget, setBudget] = useState("");
   const [suggest, setSuggest] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -237,8 +245,13 @@ function NewLeadForm({
   /** Черновик от AI → поля формы. Оператор потом всё проверяет и правит. */
   const apply = (d: AiDraft, summary: AiSummary) => {
     if (d.serviceId && SERVICES.some((x) => x.id === d.serviceId && x.active !== false)) setServiceId(d.serviceId);
-    if (d.city && (CITIES as readonly string[]).includes(d.city)) setCity(d.city);
+    const c = normalizeCity(d.city);
+    if (c && (CITIES as readonly string[]).includes(c)) setCity(c);
     if (d.description) setDescription(d.description);
+    // Адрес, удобное время и бюджет — полями заявки (ТЗ п.8.3): адрес перейдёт в заказ, бюджет видят только сотрудники.
+    if (d.address) setAddress((x) => x || d.address!);
+    if (d.when) setPreferredTime((x) => x || d.when!);
+    if (d.budget) setBudget((x) => x || String(d.budget));
     if (d.urgency) setUrgency(d.urgency);
     if (d.clientName) setName((n) => (n.trim() ? n : d.clientName!));
     setAi(summary);
@@ -302,7 +315,22 @@ function NewLeadForm({
     if (!source || !serviceId || !city) return setError("Заполните источник, услугу и город");
     if (!description.trim()) return setError("Опишите, что требуется сделать");
     setBusy(true);
-    const res = await createLead({ clientId: client?.id, clientName: name, phone: ph, source, serviceId, city, description, urgency, comment, ai, callId });
+    const res = await createLead({
+      clientId: client?.id,
+      clientName: name,
+      phone: ph,
+      source,
+      serviceId,
+      city,
+      description,
+      urgency,
+      comment,
+      ai,
+      callId,
+      address: address.trim() || undefined,
+      preferredTime: preferredTime.trim() || undefined,
+      budget: digits(budget) ? Number(digits(budget)) : undefined,
+    });
     if (!res.ok) return (setBusy(false), setError(res.error));
     if (conversationId) {
       const linked = await linkConversationLead(conversationId, res.value.id);
@@ -496,6 +524,15 @@ function NewLeadForm({
           <Segmented options={URGENCY_OPTIONS} value={urgency} onChange={setUrgency} />
         </div>
 
+        <LeadDetailsFields
+          address={address}
+          preferredTime={preferredTime}
+          budget={budget}
+          onAddress={setAddress}
+          onPreferredTime={setPreferredTime}
+          onBudget={setBudget}
+        />
+
         <FormRow label="Комментарий">
           {(id) => <Textarea id={id} rows={2} placeholder="Дополнительная информация (не обязательно)..." value={comment} onChange={(e) => setComment(e.target.value)} />}
         </FormRow>
@@ -523,11 +560,13 @@ function LeadView({ id }: { id: string }) {
   const close = useUi((s) => s.closeLead);
   const team = useTeam();
   const me = useMe();
+  const now = useNow();
   const data = useQuery(api.leads.get, { id: id as Id<"leads"> });
   const lead = data?.lead;
   const [draft, setDraft] = useState<Partial<Lead>>({});
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState(REJECT_REASONS[0]!);
+  const [taking, setTaking] = useState(false);
 
   useEffect(() => setDraft({}), [id]);
   if (data === undefined) return <div className="py-10 text-center text-muted">Загружаем…</div>;
@@ -537,10 +576,19 @@ function LeadView({ id }: { id: string }) {
   const badge = leadBadge(lead, order);
   const v = { ...lead, ...draft };
   const dirty = Object.keys(draft).length > 0;
-  const locked = lead.status === "converted";
+  // Заявку, ставшую заказом или закрытую отказом, сервер не правит (E24) — и форма её не предлагает.
+  const locked = lead.status === "converted" || lead.status === "rejected";
+  // Бюджет стёрли — серверу нужен null, а не «нет поля».
+  const patch = () => ({ ...draft, ...("budget" in draft ? { budget: draft.budget ?? null } : {}) });
+  const take = async () => {
+    setTaking(true);
+    const ok = report(await takeLead(lead.id), `Заявка №${lead.number} в работе`);
+    setTaking(false);
+    return ok;
+  };
 
   const toOrder = async () => {
-    if (dirty) await updateLead(lead.id, draft);
+    if (dirty && !report(await updateLead(lead.id, patch()))) return;
     const res = await convertLead(lead.id);
     if (!res.ok) return toast(res.error, "bad");
     toast(`Заказ №${res.value.number} создан. Укажите цену и опубликуйте`);
@@ -553,9 +601,23 @@ function LeadView({ id }: { id: string }) {
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={badge.tone}>{badge.label}</Badge>
         <span className="text-[13.5px] text-muted">
-          {dateTime(lead.createdAt)} · {team.userName(lead.operatorId).split(" ")[0]}
+          {dateTime(lead.createdAt)}
+          {lead.origin && lead.origin !== "operator" && ` · ${LEAD_ORIGIN[lead.origin].label}`}
+          {lead.operatorId && ` · ${team.userName(lead.operatorId).split(" ")[0]}`}
         </span>
       </div>
+
+      {awaitsOperator(lead) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-[14px] border border-brand-line bg-brand-soft px-4 py-3">
+          <div className="min-w-0 flex-1 text-[14px] text-ink-2">
+            <div className="font-semibold text-ink">Заявка ждёт оператора</div>
+            Пришла сама — её ещё никто не взял в работу.
+          </div>
+          <Button size="sm" icon={Hand} disabled={taking} onClick={() => void take()}>
+            Взять в работу
+          </Button>
+        </div>
+      )}
 
       <div className="rounded-[14px] border border-line p-4">
         <div className="flex items-center gap-3">
@@ -618,6 +680,15 @@ function LeadView({ id }: { id: string }) {
         <div className="mb-2 text-[14px] font-semibold text-ink">Срочность</div>
         <Segmented options={URGENCY_OPTIONS} value={v.urgency} onChange={(urgency) => setDraft((d) => ({ ...d, urgency }))} />
       </div>
+      <LeadDetailsFields
+        address={v.address ?? ""}
+        preferredTime={v.preferredTime ?? ""}
+        budget={v.budget ? String(v.budget) : ""}
+        disabled={locked}
+        onAddress={(address) => setDraft((d) => ({ ...d, address }))}
+        onPreferredTime={(preferredTime) => setDraft((d) => ({ ...d, preferredTime }))}
+        onBudget={(b) => setDraft((d) => ({ ...d, budget: digits(b) ? Number(digits(b)) : undefined }))}
+      />
       {lead.comment && (
         <div className="rounded-[12px] bg-[#f8f6f1] px-4 py-3 text-[14px] text-ink-2">
           <span className="font-semibold text-ink">Комментарий: </span>
@@ -632,7 +703,7 @@ function LeadView({ id }: { id: string }) {
           <Button
             size="sm"
             onClick={async () => {
-              if (report(await updateLead(lead.id, draft), "Заявка обновлена")) setDraft({});
+              if (report(await updateLead(lead.id, patch()), "Заявка обновлена")) setDraft({});
             }}
           >
             Сохранить изменения
@@ -694,6 +765,21 @@ function LeadView({ id }: { id: string }) {
         </div>
       )}
 
+      {!order && !locked && (
+        <div className="flex items-start gap-2.5 rounded-[12px] bg-[#f8f6f1] px-4 py-3 text-[13.5px] text-ink-2">
+          <CalendarClock size={17} className="mt-0.5 shrink-0 text-muted" aria-hidden />
+          <span>
+            Срок заказа будет {dateTime(deadlineByUrgency(v.urgency, now))} — по срочности.
+            {(v.preferredTime ?? "").trim() && (
+              <>
+                {" "}
+                Клиенту удобно: <b className="text-ink">{v.preferredTime}</b> — при необходимости поправьте срок в заказе.
+              </>
+            )}
+          </span>
+        </div>
+      )}
+
       <EntityHistory entity="lead" entityId={lead.id} />
 
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-auto flex flex-wrap justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
@@ -723,6 +809,33 @@ function LeadView({ id }: { id: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** Поля обращения (ТЗ п.8.3): адрес (перейдёт в заказ), когда клиенту удобно, бюджет (видят только сотрудники). */
+function LeadDetailsFields(p: {
+  address: string;
+  preferredTime: string;
+  budget: string;
+  disabled?: boolean;
+  onAddress: (v: string) => void;
+  onPreferredTime: (v: string) => void;
+  onBudget: (v: string) => void;
+}) {
+  return (
+    <>
+      <FormRow label="Адрес" hint="Перейдёт в заказ; мастер увидит его после подтверждения">
+        {(fid) => <Input id={fid} icon={MapPin} placeholder="Улица, дом, квартира" value={p.address} disabled={p.disabled} onChange={(e) => p.onAddress(e.target.value)} />}
+      </FormRow>
+      <div className="grid grid-cols-2 gap-3">
+        <FormRow label="Когда удобно">
+          {(fid) => <Input id={fid} placeholder="Например, завтра после 18:00" value={p.preferredTime} disabled={p.disabled} onChange={(e) => p.onPreferredTime(e.target.value)} />}
+        </FormRow>
+        <FormRow label="Бюджет клиента" hint={p.budget && digits(p.budget) ? money(Number(digits(p.budget))) : "Видят только сотрудники"}>
+          {(fid) => <Input id={fid} inputMode="numeric" placeholder="₸" value={p.budget} disabled={p.disabled} onChange={(e) => p.onBudget(e.target.value.replace(/[^\d\s]/g, ""))} />}
+        </FormRow>
+      </div>
+    </>
   );
 }
 

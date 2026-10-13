@@ -103,6 +103,9 @@ export const _createLead = internalMutation({
     address: v.optional(v.string()),
     urgency: v.optional(v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"))),
     description: v.optional(v.string()),
+    /** Из AI-разбора: когда клиенту удобно и названный бюджет (только сотрудникам). */
+    preferredTime: v.optional(v.string()),
+    budget: v.optional(v.number()),
   },
   handler: async (ctx, a): Promise<BotLeadResult> => {
     const phone = normalizeLogin(a.phone);
@@ -123,12 +126,15 @@ export const _createLead = internalMutation({
 
     const res = await intakeLead(ctx, {
       source: "telegram",
+      origin: "bot",
       phone,
       name: a.name,
       fallbackName: "Клиент из Telegram",
       serviceId: a.serviceId,
       city: a.city,
       address: a.address,
+      preferredTime: a.preferredTime,
+      budget: a.budget,
       urgency: a.urgency,
       description: a.description || draft || "Клиент оставил заявку в Telegram",
       comment: draft && a.description && draft !== a.description ? `Сообщение клиента: ${draft.slice(0, 1500)}` : undefined,

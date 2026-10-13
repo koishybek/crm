@@ -10,6 +10,9 @@ export type CategoryId = string;
 
 export type Urgency = "normal" | "high" | "urgent";
 
+/** Кто завёл заявку: оператор сам или канал — AI по звонку, Telegram-бот, сайт, API, WhatsApp, OLX. */
+export type LeadOrigin = "operator" | "ai" | "bot" | "site" | "api" | "whatsapp" | "olx";
+
 /** Статус заявки, который хранится. Для сконвертированных заявок на экране показывается прогресс заказа. */
 export type LeadStatus = "new" | "qualifying" | "waiting" | "converted" | "rejected";
 
@@ -91,7 +94,12 @@ export interface Lead {
   description: string;
   urgency: Urgency;
   status: LeadStatus;
+  /** Кто ведёт заявку; пустая строка — заявку из канала ещё никто не взял в работу. */
   operatorId: string;
+  /** Кто завёл: нет — заявка заведена до учёта источника (считается заведённой оператором). */
+  origin?: LeadOrigin;
+  /** Первое действие сотрудника по заявке (взял в работу, правка, этап, заказ) — для сроков реакции. */
+  firstActionAt?: string;
   createdAt: string;
   orderId?: string;
   comment?: string;
@@ -99,6 +107,12 @@ export interface Lead {
   /** AI-разбор звонка или сообщения. */
   ai?: AiSummary;
   callId?: string;
+  /** Адрес из обращения — переходит в заказ (мастеру — только после подтверждения). */
+  address?: string;
+  /** Когда клиенту удобно — как он сказал: «завтра после 18:00». */
+  preferredTime?: string;
+  /** Бюджет, который назвал клиент, ₸ — только для сотрудников, в цену заказа сам не попадает. */
+  budget?: number;
 }
 
 export type CallStatus = "ringing" | "answered" | "missed" | "completed";
@@ -112,6 +126,10 @@ export interface AiDraft {
   urgency?: Urgency;
   clientName?: string;
   description?: string;
+  /** Когда клиенту удобно — как он сказал. */
+  when?: string;
+  /** Бюджет клиента, ₸ — только для сотрудников. */
+  budget?: number;
 }
 
 export interface Call {
@@ -287,6 +305,11 @@ export interface Executor {
   skills: string[];
   /** false — выходной/недоступен. Занятость считается по заказам автоматически. */
   available: boolean;
+  /** Недоступен до этого момента — потом снова на смене сам (ТЗ п.14). */
+  unavailableUntil?: string;
+  unavailableReason?: string;
+  /** Сколько заказов в работе одновременно; не задано — по умолчанию (DEFAULT_MAX_ACTIVE). */
+  maxActiveOrders?: number;
   rating: number;
   reviews: number;
   cooperation: "freelance" | "staff";

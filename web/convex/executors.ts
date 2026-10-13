@@ -1,16 +1,17 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
-import { currentUser, requireRole, scopeOf, TEAM } from "./lib/access";
-import { audit, ChangeLog, listDiff, listDiffText, quote } from "./lib/audit";
-import { nowIso, TENANT } from "./lib/domain";
+import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { currentUser, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
+import { almatyStamp, audit, ChangeLog, listDiff, listDiffText, quote, type AuditActor } from "./lib/audit";
+import { executorUser, notify, nowIso, TENANT } from "./lib/domain";
 import { toExecutor, toOrder, toUser } from "./lib/dto";
-import { cleanText } from "./lib/limits";
+import { cleanCity, cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
 import { createLogin } from "./users";
 import { loadCatalog } from "./catalog";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
+import { DEFAULT_MAX_ACTIVE } from "../src/data/logic";
 import { canonicalSkills, catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_EXECUTOR } from "../src/data/skills";
 import { shortName } from "../src/lib/format";
 import { category } from "./schema";
@@ -36,9 +37,87 @@ async function cleanCategories(ctx: QueryCtx, input: readonly string[]): Promise
   return { keys, label: (key) => known.find((c) => c.id === key)?.label ?? key };
 }
 
-/** Текст журнала о смене «на смене / выходной» — один для сотрудника и для самого мастера (worker.setAvailable). */
-export const availabilityNote = (name: string, available: boolean): string =>
-  available ? `${shortName(name)} — снова на смене` : `${shortName(name)} — выходной, новые заказы не приходят`;
+/** Текст журнала о смене «на смене / выходной / недоступен до …» — один для сотрудника и для самого мастера. */
+export function availabilityNote(name: string, available: boolean, until?: string, reason?: string): string {
+  if (available) return `${shortName(name)} — снова на смене`;
+  const why = reason ? ` (${reason})` : "";
+  return until ? `${shortName(name)} — недоступен до ${almatyStamp(until)}${why}, новые заказы не приходят` : `${shortName(name)} — выходной${why}, новые заказы не приходят`;
+}
+
+// ── Смена, недоступность и лимит заказов (ТЗ п.14) ──────────────────────────
+
+/** Дольше этого «недоступен до» не ставим: дальше — это уже увольнение или отключение доступа. */
+const MAX_UNAVAILABLE_DAYS = 90;
+const MAX_ACTIVE_LIMIT = 20;
+
+export const shiftArgs = { available: v.boolean(), until: v.optional(v.string()), reason: v.optional(v.string()) };
+
+/**
+ * На смену / выходной / «недоступен до …». Недоступность «до» — выходной с датой возвращения: в этот момент мастер сам
+ * возвращается на смену (запланированная задача _backOnShift и проверка крона _restoreShifts). Включили приём раньше —
+ * дата снимается. by — кто менял: сам мастер или сотрудник (для журнала).
+ */
+export async function applyShift(ctx: MutationCtx, ex: Doc<"executors">, a: { available: boolean; until?: string; reason?: string }, actor: AuditActor, by: "executor" | "staff"): Promise<void> {
+  let until: string | undefined;
+  let reason: string | undefined;
+  if (!a.available) {
+    reason = a.reason === undefined ? undefined : cleanText(a.reason, 120, "Причина") || undefined;
+    if (a.until !== undefined) {
+      const t = Date.parse(a.until);
+      const now = Date.now();
+      if (!Number.isFinite(t) || t <= now + 60_000) throw new ConvexError("Дата возвращения — в будущем");
+      if (t > now + MAX_UNAVAILABLE_DAYS * 86400_000) throw new ConvexError(`Недоступность — не дольше ${MAX_UNAVAILABLE_DAYS} дней`);
+      until = new Date(t).toISOString();
+    }
+  }
+  if (ex.available === a.available && ex.unavailableUntil === until && ex.unavailableReason === reason) return;
+  await ctx.db.patch(ex._id, { available: a.available, unavailableUntil: until, unavailableReason: reason });
+  if (until) await ctx.scheduler.runAt(new Date(until), internal.executors._backOnShift, { id: ex._id, until });
+  await audit(ctx, actor, "executor.availability", availabilityNote(ex.name, a.available, until, reason), {
+    entityId: ex._id,
+    meta: { available: a.available, ...(until ? { until } : {}), ...(reason ? { reason } : {}), ...(by === "executor" ? { by } : {}) },
+  });
+}
+
+/** Недоступность закончилась — снова на смене, мастер узнаёт об этом. Отключённого (уволен) на смену не возвращаем. */
+async function backOnShift(ctx: MutationCtx, ex: Doc<"executors">): Promise<boolean> {
+  const u = await executorUser(ctx, ex._id);
+  if (!u || u.active === false) {
+    await ctx.db.patch(ex._id, { unavailableUntil: undefined, unavailableReason: undefined });
+    return false;
+  }
+  await ctx.db.patch(ex._id, { available: true, unavailableUntil: undefined, unavailableReason: undefined });
+  await audit(ctx, "Система", "executor.availability", `${shortName(ex.name)} — снова на смене: закончилась недоступность до ${almatyStamp(ex.unavailableUntil ?? nowIso())}`, {
+    entityId: ex._id,
+    meta: { available: true, auto: true },
+  });
+  await notify(ctx, [u._id], "Вы снова принимаете заказы: недоступность закончилась. Новые заказы приходят сюда и в Telegram", { link: "/w", tone: "ok" });
+  return true;
+}
+
+/** Запланированное возвращение на смену. Дату за это время сменили или сняли — ничего не делаем. */
+export const _backOnShift = internalMutation({
+  args: { id: v.id("executors"), until: v.string() },
+  handler: async (ctx, { id, until }): Promise<boolean> => {
+    const ex = await ctx.db.get(id);
+    if (!ex || ex.available || ex.unavailableUntil !== until) return false;
+    return backOnShift(ctx, ex);
+  },
+});
+
+/** Проверка крона (раз в 5 минут, escalations.run): все, у кого срок недоступности прошёл, — снова на смене. */
+export const _restoreShifts = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    const now = Date.now();
+    let restored = 0;
+    for (const ex of await ctx.db.query("executors").collect()) {
+      if (ex.available || !ex.unavailableUntil || Date.parse(ex.unavailableUntil) > now) continue;
+      if (await backOnShift(ctx, ex)) restored++;
+    }
+    return restored;
+  },
+});
 
 /** Исполнители + их активные заказы (только статус — чтобы посчитать «свободен / на выезде»). */
 export const list = query({
@@ -88,8 +167,8 @@ export const _insert = internalMutation({
     const skills = await cleanExecutorSkills(ctx, a.skills);
     const { keys: categories } = await cleanCategories(ctx, a.categories);
     const name = cleanText(a.name, 120, "ФИО");
-    const city = cleanText(a.city, 60, "Город");
-    if (!name || !city) throw new ConvexError("Укажите имя и город");
+    if (!name) throw new ConvexError("Укажите имя и город");
+    const city = cleanCity(a.city);
     const id = await ctx.db.insert("executors", { ...a, categories, skills, name, city, phone, tenantId: TENANT, available: true, rating: 5, reviews: 0, joinedAt: nowIso() });
     // Пароль выдаёт сотрудник (создание или импорт) — он временный: при первом входе мастер задаёт свой (аудит M-8).
     await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true, mustChangePassword: true });
@@ -134,8 +213,7 @@ export const update = mutation({
     const { keys: categories, label } = await cleanCategories(ctx, a.categories);
     const skills = await cleanExecutorSkills(ctx, a.skills);
     const name = cleanText(a.name, 120, "ФИО") || e.name;
-    const city = cleanText(a.city, 60, "Город");
-    if (!city) throw new ConvexError("Укажите город");
+    const city = cleanCity(a.city);
 
     const cats = listDiff(e.categories, categories);
     const diff = skillsDiff(e.skills, skills);
@@ -158,15 +236,31 @@ export const update = mutation({
   },
 });
 
+/** На смену / выходной / «недоступен до … (причина)» — сотрудник; руководитель — в своём направлении. */
 export const setAvailable = mutation({
-  args: { id: v.id("executors"), available: v.boolean() },
-  handler: async (ctx, { id, available }) => {
+  args: { id: v.id("executors"), ...shiftArgs },
+  handler: async (ctx, { id, ...a }) => {
     const me = await requireRole(ctx, TEAM);
     const scope = scopeOf(me);
     const e = await ctx.db.get(id);
     if (!e || (scope && !e.categories.some((c) => scope.includes(c)))) throw new ConvexError("Это не ваше направление");
-    if (e.available === available) return;
-    await ctx.db.patch(id, { available });
-    await audit(ctx, me, "executor.availability", availabilityNote(e.name, available), { entityId: id, meta: { available } });
+    await applyShift(ctx, e, a, me, "staff");
+  },
+});
+
+/** Лимит заказов в работе у мастера (ТЗ п.14, E9) — только владелец; null — по умолчанию. */
+export const setMaxActive = mutation({
+  args: { id: v.id("executors"), max: v.union(v.number(), v.null()) },
+  handler: async (ctx, { id, max }) => {
+    const me = await requireRole(ctx, OWNER);
+    const e = await ctx.db.get(id);
+    if (!e) throw new ConvexError("Исполнитель не найден");
+    if (max !== null && (!Number.isInteger(max) || max < 1 || max > MAX_ACTIVE_LIMIT)) throw new ConvexError(`Лимит — целое число от 1 до ${MAX_ACTIVE_LIMIT}`);
+    const next = max === null || max === DEFAULT_MAX_ACTIVE ? undefined : max;
+    if (next === e.maxActiveOrders) return;
+    await ctx.db.patch(id, { maxActiveOrders: next });
+    const was = e.maxActiveOrders ?? DEFAULT_MAX_ACTIVE;
+    const now = next ?? DEFAULT_MAX_ACTIVE;
+    await audit(ctx, me, "executor.limit", `${shortName(e.name)}: заказов в работе одновременно — ${was} → ${now}`, { entityId: id, meta: { from: was, to: now } });
   },
 });

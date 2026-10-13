@@ -194,6 +194,8 @@ export const profile = query({
       rating: ex.rating,
       reviewsCount: ex.reviews,
       available: ex.available,
+      unavailableUntil: ex.unavailableUntil,
+      unavailableReason: ex.unavailableReason,
       cooperation: ex.cooperation,
       joinedAt: ex.joinedAt,
       telegram: { enabled: !!env("TELEGRAM_BOT_TOKEN") && !!env("TELEGRAM_BOT_USERNAME"), linked: !!me.telegramChatId },

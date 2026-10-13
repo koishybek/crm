@@ -17,6 +17,8 @@ export const source = v.union(
 /** Ключ направления — из справочника (таблица categories). */
 export const category = v.string();
 export const urgency = v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"));
+/** Кто завёл заявку: оператор или канал (AI по звонку, Telegram-бот, сайт, API, WhatsApp, OLX) — см. src/data/leadRules.ts. */
+export const leadOrigin = v.union(v.literal("operator"), v.literal("ai"), v.literal("bot"), v.literal("site"), v.literal("api"), v.literal("whatsapp"), v.literal("olx"));
 export const leadStatus = v.union(v.literal("new"), v.literal("qualifying"), v.literal("waiting"), v.literal("converted"), v.literal("rejected"));
 export const orderStatus = v.union(
   v.literal("new"),
@@ -105,6 +107,17 @@ export const aiSummary = v.object({
   extracted: v.array(v.object({ label: v.string(), value: v.string() })),
   questions: v.array(v.string()),
 });
+/** Черновик заявки от AI (звонок, переписка, бот): поля формы. when и budget — только для сотрудников. */
+export const aiDraft = v.object({
+  serviceId: v.optional(v.string()),
+  city: v.optional(v.string()),
+  address: v.optional(v.string()),
+  urgency: v.optional(urgency),
+  clientName: v.optional(v.string()),
+  description: v.optional(v.string()),
+  when: v.optional(v.string()),
+  budget: v.optional(v.number()),
+});
 
 export default defineSchema({
   ...authTables,
@@ -152,6 +165,11 @@ export default defineSchema({
     reviews: v.number(),
     cooperation: v.union(v.literal("freelance"), v.literal("staff")),
     joinedAt: v.string(),
+    /** Недоступен до (ТЗ п.14): пока задано, available = false; в этот момент мастер сам возвращается на смену. */
+    unavailableUntil: v.optional(v.string()),
+    unavailableReason: v.optional(v.string()),
+    /** Заказов в работе одновременно; не задано — DEFAULT_MAX_ACTIVE (src/data/logic.ts). Меняет владелец. */
+    maxActiveOrders: v.optional(v.number()),
   }).index("by_phone", ["phone"]),
 
   clients: defineTable({
@@ -191,7 +209,12 @@ export default defineSchema({
     description: v.string(),
     urgency,
     status: leadStatus,
-    operatorId: v.id("users"),
+    /** Кто ведёт заявку. Заявку из канала (бот, сайт, API, WhatsApp, OLX, AI) никто не ведёт, пока её не взяли в работу (E12). */
+    operatorId: v.optional(v.id("users")),
+    /** Кто завёл; нет — заявка заведена до появления поля (считается заведённой оператором). */
+    origin: v.optional(leadOrigin),
+    /** Первое действие сотрудника по заявке — для эскалации «заявка без ответа» и аналитики реакции. */
+    firstActionAt: v.optional(v.string()),
     createdAt: v.string(),
     orderId: v.optional(v.id("orders")),
     comment: v.optional(v.string()),
@@ -199,6 +222,10 @@ export default defineSchema({
     ai: v.optional(aiSummary),
     /** Звонок, из которого родилась заявка (запись, расшифровка). */
     callId: v.optional(v.id("calls")),
+    /** Структурные данные обращения (ТЗ п.8): адрес → в заказ, удобное время — подсказка к сроку, бюджет — только сотрудникам. */
+    address: v.optional(v.string()),
+    preferredTime: v.optional(v.string()),
+    budget: v.optional(v.number()),
   })
     .index("by_created", ["createdAt"])
     .index("by_status", ["status", "createdAt"])
@@ -355,16 +382,7 @@ export default defineSchema({
     transcript: v.optional(v.string()),
     ai: v.optional(aiSummary),
     /** Что AI понял для заявки — чтобы оператор создал её в один клик. */
-    draft: v.optional(
-      v.object({
-        serviceId: v.optional(v.string()),
-        city: v.optional(v.string()),
-        address: v.optional(v.string()),
-        urgency: v.optional(v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"))),
-        clientName: v.optional(v.string()),
-        description: v.optional(v.string()),
-      }),
-    ),
+    draft: v.optional(aiDraft),
     aiStatus: v.optional(v.union(v.literal("pending"), v.literal("done"), v.literal("failed"), v.literal("none"))),
     aiError: v.optional(v.string()),
   })
@@ -583,4 +601,19 @@ export default defineSchema({
   uploads: defineTable({ storageId: v.id("_storage"), userId: v.id("users"), at: v.string(), usedAt: v.optional(v.string()) })
     .index("by_storage", ["storageId"])
     .index("by_used", ["usedAt", "at"]),
+
+  /**
+   * Эскалации (ТЗ п.15, convex/escalations.ts): какой уровень уже сработал в эпизоде — ни один не повторяется.
+   * Эпизод (since): заказ попал в ленту, мастера назначили, срок заказа, заявка создана, звонок пропущен; новый эпизод —
+   * уровни заново. Одна строка на сущность и вид; старше 30 дней уборка удаляет.
+   */
+  escalations: defineTable({
+    kind: v.union(v.literal("feed"), v.literal("unconfirmed"), v.literal("overdue"), v.literal("lead"), v.literal("callback")),
+    entityId: v.string(),
+    since: v.string(),
+    level: v.number(),
+    at: v.string(),
+  })
+    .index("by_kind_entity", ["kind", "entityId"])
+    .index("by_at", ["at"]),
 });

@@ -132,8 +132,8 @@ function OperatorLine({ who, x }: { who: ReactNode; x: OperatorRow }) {
 }
 
 /**
- * Работа операторов за период (ТЗ п.17): кто сколько заявок завёл, сколько стали заказом, деньги из них
- * и как быстро. Заявки, которые пришли сами (бот, сайт, API, AI), — отдельной строкой, никому не засчитываются.
+ * Работа операторов за период (ТЗ п.17): кто сколько заявок завёл или взял в работу, сколько стали заказом, деньги
+ * из них и как быстро. Заявки, которые пришли сами (бот, сайт, API, AI) и которые никто не взял, — отдельной строкой.
  */
 export function OperatorsCard({ rows, auto, users }: { rows: OperatorRow[]; auto: OperatorRow | null; users: User[] }) {
   const user = (id?: string) => users.find((u) => u.id === id);
@@ -187,7 +187,7 @@ export function OperatorsCard({ rows, auto, users }: { rows: OperatorRow[]; auto
                       </span>
                       <span className="leading-tight">
                         <span className="block font-medium text-ink">Пришли сами</span>
-                        <span className="text-[12px] text-muted">бот, сайт, API, AI</span>
+                        <span className="text-[12px] text-muted">никто не взял в работу</span>
                       </span>
                     </span>
                   }
@@ -198,7 +198,7 @@ export function OperatorsCard({ rows, auto, users }: { rows: OperatorRow[]; auto
         </div>
       )}
       <p className="px-1 pt-3 text-[12.5px] text-muted">
-        Заявка засчитывается тому, кто её завёл; AI-разбор звонка — тому, кто принял звонок. Выручка и маржа — по выполненным заказам из этих заявок, «До заказа» — медиана.
+        Заявка засчитывается тому, кто её завёл или взял в работу; AI-разбор звонка — тому, кто принял звонок. «Пришли сами» — заявки бота, сайта, API и AI, которые ещё никто не взял. Выручка и маржа — по выполненным заказам из этих заявок, «До заказа» — медиана.
       </p>
     </Card>
   );

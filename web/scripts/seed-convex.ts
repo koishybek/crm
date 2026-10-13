@@ -9,8 +9,8 @@ import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { withDefaultPrices } from "../convex/lib/defaultPrices";
 import { buildSeed } from "../src/data/seed";
-import { ACTIVE_STATUSES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, serviceById, setCatalog } from "../src/data/catalog";
-import { paidAmount, payout } from "../src/data/logic";
+import { ACTIVE_STATUSES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, serviceById, setCatalog, WORK_STATUSES } from "../src/data/catalog";
+import { DEFAULT_MAX_ACTIVE, paidAmount, payout } from "../src/data/logic";
 import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
 import { money } from "../src/lib/format";
@@ -93,7 +93,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "systemStatus", "backups", "oauthStates", "uploads", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
     while ((await call(internal.seed.wipeFiles, {})) > 0);
@@ -103,7 +103,16 @@ async function main() {
   const db = buildSeed(new Date());
   console.log("Заливаю демо-данные…");
 
-  const exIds = await insert("executors", db.executors.map(strip));
+  // Лимит заказов в работе (ТЗ п.14): у кого в демо заказов больше лимита по умолчанию, тому владелец «поднял» лимит.
+  const activeBy = new Map<string, number>();
+  for (const o of db.orders) if (o.executorId && WORK_STATUSES.includes(o.status)) activeBy.set(o.executorId, (activeBy.get(o.executorId) ?? 0) + 1);
+  const exIds = await insert(
+    "executors",
+    db.executors.map((e) => {
+      const active = activeBy.get(e.id) ?? 0;
+      return { ...strip(e), ...(active > DEFAULT_MAX_ACTIVE ? { maxActiveOrders: active } : {}) };
+    }),
+  );
   const exMap = new Map(db.executors.map((e, i) => [e.id, exIds[i]!]));
 
   const loginOf = (u: (typeof db.users)[number]) => (u.role === "executor" ? u.phone : u.email.toLowerCase());
@@ -144,12 +153,24 @@ async function main() {
   );
   const clientMap = new Map(db.clients.map((c, i) => [c.id, clientIds[i]!]));
 
+  // Кто завёл заявку (E12): заявки сайта и бота Telegram пришли сами; ещё не взятые («Новая») — без оператора,
+  // на демо видно «Взять в работу»; остальные ведёт оператор, взявший их в работу через несколько минут.
+  const ORIGIN: Partial<Record<string, "site" | "bot">> = { site: "site", telegram: "bot" };
+  const originOf = (l: (typeof db.leads)[number]) => ORIGIN[l.source] ?? "operator";
+  const untaken = (l: (typeof db.leads)[number]) => originOf(l) !== "operator" && l.status === "new";
   const leadIds = await insert(
     "leads",
     db.leads.map((l) => {
       const { orderId: _o, ...rest } = strip(l);
       void _o;
-      return { ...rest, clientId: clientMap.get(l.clientId), operatorId: userMap.get(l.operatorId) };
+      const origin = originOf(l);
+      return {
+        ...rest,
+        clientId: clientMap.get(l.clientId),
+        operatorId: untaken(l) ? undefined : userMap.get(l.operatorId),
+        origin,
+        firstActionAt: untaken(l) ? undefined : origin === "operator" ? l.createdAt : iso(Date.parse(l.createdAt) + 4 * MIN),
+      };
     }),
   );
   const leadMap = new Map(db.leads.map((l, i) => [l.id, leadIds[i]!]));
@@ -461,14 +482,17 @@ async function main() {
   };
   const since = now - 14 * 86400_000;
   const auditRows: Record<string, unknown>[] = [];
+  const CHANNEL_ACTOR = { site: "Сайт", bot: "Telegram" } as const;
   for (const l of db.leads) {
     if (Date.parse(l.createdAt) < since) continue;
-    const u = userById.get(l.operatorId);
+    // Заявку канала завёл канал, а не оператор (он её только взял в работу).
+    const origin = originOf(l);
+    const u = origin === "operator" ? userById.get(l.operatorId) : undefined;
     auditRows.push({
       tenantId,
       at: l.createdAt,
       actorId: u ? userMap.get(u.id) : undefined,
-      actorName: u?.name ?? "Система",
+      actorName: u?.name ?? (origin === "operator" ? "Система" : CHANNEL_ACTOR[origin]),
       actorRole: u?.role,
       action: "lead.created",
       entity: "lead",

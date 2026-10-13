@@ -14,6 +14,7 @@ import { hitLimit } from "./lib/rateLimit";
 import { ingestMessage, linkConversation } from "./inbox";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
+import { cityKey } from "../src/data/cities";
 
 const MAX_BODY = 10 * 1024;
 /** Человек заполняет форму дольше 3 секунд. */
@@ -173,7 +174,7 @@ async function sameRecentLead(ctx: MutationCtx, a: SiteLead, serviceId: string, 
     .query("leads")
     .withIndex("by_client", (q) => q.eq("clientId", client._id).gte("createdAt", since))
     .collect();
-  const same = recent.find((l) => l.source === "site" && l.serviceId === serviceId && sameText(l.description, a.description || "Заявка с сайта") && (!a.city || l.city === a.city));
+  const same = recent.find((l) => l.source === "site" && l.serviceId === serviceId && sameText(l.description, a.description || "Заявка с сайта") && (!a.city || cityKey(l.city) === cityKey(a.city)));
   return same?.number ?? null;
 }
 
@@ -192,6 +193,7 @@ export const _submit = internalMutation({
     const description = a.description || "Заявка с сайта";
     const res = await intakeLead(ctx, {
       source: "site",
+      origin: "site",
       phone: a.phone,
       name: a.name,
       fallbackName: "Клиент с сайта",

@@ -7,7 +7,8 @@ import { audit } from "./lib/audit";
 import { insertClient } from "./clients";
 import { normalizeLogin } from "./lib/login";
 import { createLogin } from "./users";
-import { CITIES, SOURCES, type Category } from "../src/data/catalog";
+import { SOURCES, type Category } from "../src/data/catalog";
+import { normalizeCity } from "../src/data/cities";
 import type { CategoryId, SourceId } from "../src/data/types";
 
 const sourceOf = (s: string | undefined): SourceId => {
@@ -36,7 +37,8 @@ export const clients = mutation({
         duplicates++;
         continue;
       }
-      const city = CITIES.find((c) => c.toLowerCase() === (r.city ?? "").trim().toLowerCase()) ?? (r.city?.trim() || "Алматы");
+      // Город — в едином написании (E11): «г. Алматы», «almaty» → «Алматы»; не указан — Алматы.
+      const city = normalizeCity(r.city).slice(0, 60) || "Алматы";
       await insertClient(ctx, { name: r.name, phone, city, address: r.address, source: sourceOf(r.source), email: r.email });
       added++;
     }
@@ -85,7 +87,7 @@ export const executors = action({
         await ctx.runMutation(internal.executors._insert, {
           name: r.name,
           phone,
-          city: r.city.trim() || "Алматы",
+          city: normalizeCity(r.city).slice(0, 60) || "Алматы",
           categories: [...new Set(cats)],
           skills: (r.skills ?? "").split(/[,;]/).map((s) => s.trim()).filter(Boolean),
           cooperation: "freelance",

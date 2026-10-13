@@ -72,10 +72,14 @@ export interface LeadInput {
   /** AI-разбор, который оператор видел в форме. */
   ai?: AiSummary;
   callId?: string;
+  /** Адрес, удобное клиенту время и бюджет (только сотрудникам) — из формы или AI-разбора. */
+  address?: string;
+  preferredTime?: string;
+  budget?: number;
 }
 export const createLead = (a: LeadInput) =>
   run(convex.mutation(api.leads.create, { ...a, clientId: a.clientId ? cid(a.clientId) : undefined, callId: a.callId ? (a.callId as Id<"calls">) : undefined }));
-export const updateLead = (id: string, patch: { serviceId?: string; city?: string; description?: string; urgency?: Urgency; comment?: string }) =>
+export const updateLead = (id: string, patch: { serviceId?: string; city?: string; description?: string; urgency?: Urgency; comment?: string; address?: string; preferredTime?: string; budget?: number | null }) =>
   run(convex.mutation(api.leads.update, { id: lid(id), ...patch }));
 export const setLeadStatus = (id: string, status: Exclude<LeadStatus, "converted">, reason?: string) => run(convex.mutation(api.leads.setStatus, { id: lid(id), status, reason }));
 export const convertLead = (id: string) => run(convex.mutation(api.leads.convert, { id: lid(id) }));

@@ -6,7 +6,7 @@ import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor, type StatusMove } from "./lib/domain";
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
 import { cleanFileName, fileSigner, takeUpload } from "./lib/files";
-import { cleanMoney, cleanText } from "./lib/limits";
+import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { activeExecutorIds, suitableUsers } from "./lib/matching";
 import { hitLimit } from "./lib/rateLimit";
 import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
@@ -173,7 +173,7 @@ export const updateInfo = mutation({
     const info: Info = {
       serviceId: a.serviceId,
       description: cleanText(a.description, 4000, "Описание"),
-      city: cleanText(a.city, 60, "Город"),
+      city: cleanCity(a.city),
       address: cleanText(a.address, 300, "Адрес"),
       deadline: new Date(a.deadline).toISOString(),
       priority: a.priority,

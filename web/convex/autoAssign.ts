@@ -3,16 +3,18 @@
 // правилам, что и подбор при ручном назначении: fitsOrder (смена, город, направление, навыки), затем свободные
 // раньше занятых, меньше заказов в работе, выше рейтинг (rankExecutors). Не подтвердил за N минут или отказался —
 // заказ снова в ленте, на следующем запуске его получает следующий. Предлагать больше некому — один раз сообщаем
-// владельцам и руководителям направления.
+// владельцам и руководителям направления: это эскалация заказа в ленте (lib/escalation.ts), и крон эскалаций
+// (escalations.ts) тем же людям про тот же эпизод второй раз не пишет. Запускается из escalations.run — до эскалаций.
 import { ConvexError, v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
-import { executorUser, log, notify, nowIso, setStatus } from "./lib/domain";
+import { executorUser, log, notify, nowIso } from "./lib/domain";
 import { toExecutor } from "./lib/dto";
-import { suitableUsers } from "./lib/matching";
-import { announceOrder, notifyAssigned } from "./worker";
+import { markLevel, orderLevelRecipients, reachedLevel } from "./lib/escalation";
+import { releaseToFeed } from "./lib/feed";
+import { notifyAssigned } from "./worker";
 import { AUTO_ASSIGN, autoAssignWhy, type AutoAssignSettings } from "../src/data/autoAssign";
 import { WORK_STATUSES } from "../src/data/catalog";
 import { payout, rankExecutors, type Candidate, type FitOrder, type Load } from "../src/data/logic";
@@ -114,10 +116,10 @@ const ordersIn = (ctx: QueryCtx, status: Doc<"orders">["status"]) =>
     .collect();
 
 /** Назначила система, и назначение в силе: сотрудник не переназначил (assignedAt тот же), мастер не отказался. */
-const autoPending = (o: Doc<"orders">): boolean => o.status === "assigned" && !!o.autoAssignedAt && o.autoAssignedAt === o.assignedAt;
+export const autoPending = (o: Doc<"orders">): boolean => o.status === "assigned" && !!o.autoAssignedAt && o.autoAssignedAt === o.assignedAt;
 
-/** С какого момента заказ в ленте: последняя смена статуса (публикация или отказ мастера). */
-async function inFeedSince(ctx: QueryCtx, o: Doc<"orders">): Promise<number> {
+/** С какого момента заказ в ленте: последняя смена статуса (публикация или отказ мастера). Это и начало эпизода эскалации. */
+export async function inFeedSince(ctx: QueryCtx, o: Doc<"orders">): Promise<number> {
   const last = await ctx.db
     .query("history")
     .withIndex("by_order", (q) => q.eq("orderId", o._id))
@@ -125,21 +127,6 @@ async function inFeedSince(ctx: QueryCtx, o: Doc<"orders">): Promise<number> {
     .filter((q) => q.eq(q.field("kind"), "status"))
     .first();
   return Date.parse(last?.at ?? o.createdAt);
-}
-
-/** Владельцы и руководители направления заказа — им решать, если система не нашла исполнителя. */
-async function decisionMakers(ctx: QueryCtx, category: string): Promise<Id<"users">[]> {
-  const owners = await ctx.db
-    .query("users")
-    .withIndex("by_role", (q) => q.eq("role", "owner"))
-    .collect();
-  const managers = (
-    await ctx.db
-      .query("users")
-      .withIndex("by_role", (q) => q.eq("role", "manager"))
-      .collect()
-  ).filter((u) => u.categories?.includes(category));
-  return [...owners, ...managers].filter((u) => u.active !== false).map((u) => u._id);
 }
 
 /** Назначить кандидата — то же сообщение мастеру с кнопками «Подтвердить / Отказаться», что и при ручном назначении. */
@@ -159,26 +146,33 @@ async function offer(ctx: MutationCtx, o: Doc<"orders">, e: Doc<"executors">, pi
 /** Мастер не подтвердил вовремя — заказ снова в ленте, остальные подходящие узнают, что он свободен. */
 async function returnToFeed(ctx: MutationCtx, o: Doc<"orders">, minutes: number): Promise<void> {
   const e = o.executorId ? await ctx.db.get(o.executorId) : null;
-  const u = o.executorId ? await executorUser(ctx, o.executorId) : null;
   const who = e ? shortName(e.name) : "Исполнитель";
-  await setStatus(ctx, o, "awaiting_executor", SYSTEM, `AI-подбор: ${who} не подтвердил заказ за ${minutes} мин — заказ вернулся в ленту`, { executorId: undefined, assignedAt: undefined });
   await audit(ctx, "Система", "order.autoTimeout", `Заказ №${o.number}: ${who} не подтвердил за ${minutes} мин — заказ вернулся в ленту`, {
     entityId: o._id,
     meta: { executorId: o.executorId, minutes },
   });
-  await notify(ctx, [u?._id], `Заказ №${o.number} снят с вас: не подтвердили за ${minutes} мин`, { link: "/w", tone: "warn" });
-  const fresh = (await ctx.db.get(o._id))!;
-  await announceOrder(ctx, fresh, (await suitableUsers(ctx, fresh)).filter((id) => id !== u?._id), { again: true });
+  await releaseToFeed(ctx, o, {
+    history: `AI-подбор: ${who} не подтвердил заказ за ${minutes} мин — заказ вернулся в ленту`,
+    executor: `Заказ №${o.number} снят с вас: не подтвердили за ${minutes} мин`,
+  });
 }
 
-/** Предлагать больше некому — сообщаем один раз (до следующего предложения). */
+/**
+ * Предлагать больше некому — сообщаем один раз (до следующего предложения). Это эскалация заказа в ленте сразу
+ * до второго уровня: руководителям направления и владельцам, кроме тех, кого крон эскалаций в этом эпизоде уже позвал.
+ */
 async function exhausted(ctx: MutationCtx, o: Doc<"orders">): Promise<void> {
   await ctx.db.patch(o._id, { autoExhaustedAt: nowIso() });
   const tried = o.autoOffered?.length ?? 0;
   const why = tried ? `заказ не принял никто из подходящих мастеров (предлагали: ${tried})` : "подходящих мастеров на смене нет";
   await log(ctx, o._id, "assigned", `AI-подбор: ${why} — нужно назначить исполнителя вручную`, SYSTEM);
   await audit(ctx, "Система", "order.autoExhausted", `Заказ №${o.number}: AI-подбор — ${why}`, { entityId: o._id, meta: { offered: tried } });
-  await notify(ctx, await decisionMakers(ctx, o.category), `Заказ №${o.number}: ${why} — назначьте исполнителя вручную`, { link: `/orders/${o._id}`, tone: "warn" });
+  const since = new Date(await inFeedSince(ctx, o)).toISOString();
+  const reached = await reachedLevel(ctx, "feed", o._id, since);
+  await markLevel(ctx, "feed", o._id, since, 2);
+  if (reached >= 2) return;
+  const to = await orderLevelRecipients(ctx, o.category, reached + 1, 2);
+  await notify(ctx, to.ids, `Заказ №${o.number}: ${why} — назначьте исполнителя вручную`, { link: `/orders/${o._id}`, tone: "warn" });
 }
 
 /** Cron раз в 5 минут. Выключено — ничего не делает, в том числе не снимает уже назначенных. */

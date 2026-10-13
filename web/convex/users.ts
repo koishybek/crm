@@ -270,7 +270,8 @@ export const setActive = mutation({
     await ctx.db.patch(userId, { active, telegramChatId: undefined, telegramLinkCode: undefined, telegramLinkExpiresAt: undefined });
     const ex = u.executorId ? await ctx.db.get(u.executorId) : null;
     const shiftOff = !!ex?.available;
-    if (ex && shiftOff) await ctx.db.patch(ex._id, { available: false });
+    // «Недоступен до …» тоже снимаем: иначе в назначенный день уволенный вернулся бы на смену сам.
+    if (ex && (shiftOff || ex.unavailableUntil)) await ctx.db.patch(ex._id, { available: false, unavailableUntil: undefined, unavailableReason: undefined });
     await ctx.scheduler.runAfter(0, internal.users._closeSessions, { userId });
     const done = [u.telegramChatId ? "Telegram отвязан" : "", shiftOff ? "снят со смены" : "", "входы закрыты"].filter(Boolean).join(", ");
     await audit(ctx, me, "user.access", `Отключён доступ: ${whoIs(u)} — ${done}`, { entityId: userId, meta: { active, role: u.role, telegramUnlinked: !!u.telegramChatId, shiftOff } });

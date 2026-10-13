@@ -6,16 +6,16 @@ import { audit, lowerFirst } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor, type StatusMove } from "./lib/domain";
 import { describeForExecutor, executorThread, toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
 import { fileSigner } from "./lib/files";
-import { openOrdersFor, suitableUsers } from "./lib/matching";
+import { loadOf, openOrdersFor, suitableUsers } from "./lib/matching";
 import { finishWork } from "./lib/money";
 import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
-import { availabilityNote } from "./executors";
+import { applyShift, shiftArgs } from "./executors";
 import { orderNotice } from "./clientNotify";
-import { contactsOpen, fitsOrder, payout } from "../src/data/logic";
+import { contactsOpen, fitsOrder, maxActiveOf, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES, ORDER_STATUS } from "../src/data/catalog";
-import { money, shortName } from "../src/lib/format";
+import { money, plural, shortName } from "../src/lib/format";
 
 async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
   const me = await requireRole(ctx, EXECUTOR);
@@ -25,8 +25,8 @@ async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
 }
 
 /**
- * Лента: свободные заказы, которые мне подходят (ТЗ п.11) — специализация, навыки, город и «на смене».
- * На выходном лента пуста: те же правила, что у уведомлений и «Взять заказ».
+ * Лента: свободные заказы, которые мне подходят (ТЗ п.11) — специализация, навыки, город.
+ * На выходном и на лимите заказов лента видна, но взять заказ нельзя: load — сколько заказов в работе и лимит.
  */
 export const feed = query({
   args: {},
@@ -35,6 +35,7 @@ export const feed = query({
     return {
       executor: toExecutor(ex),
       feed: (await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(o, { contacts: false })),
+      load: { active: await loadOf(ctx, ex._id), max: maxActiveOf(ex) },
     };
   },
 });
@@ -103,6 +104,26 @@ export async function announceOrder(ctx: MutationCtx, o: Doc<"orders">, users: I
 }
 
 /**
+ * Заказы из ленты, чья услуга переехала в другое направление (catalog.saveService, E10): «Новый заказ» тем мастерам,
+ * кому заказ подходит теперь, но не подходил раньше.
+ */
+export const _announceMoved = internalMutation({
+  args: { ids: v.array(v.id("orders")), fromCategory: v.string() },
+  handler: async (ctx, { ids, fromCategory }): Promise<number> => {
+    let sent = 0;
+    for (const id of ids) {
+      const o = await ctx.db.get(id);
+      if (!o || o.status !== "awaiting_executor" || o.executorId || o.category === fromCategory) continue;
+      const before = new Set(await suitableUsers(ctx, { ...o, category: fromCategory }));
+      const added = (await suitableUsers(ctx, o)).filter((u) => !before.has(u));
+      await announceOrder(ctx, o, added);
+      sent += added.length;
+    }
+    return sent;
+  },
+});
+
+/**
  * «Вам назначен заказ» мастеру (ТЗ п.12, п.18): колокольчик + карточка в Telegram с кнопками «Подтвердить / Отказаться».
  * Одно сообщение для ручного назначения и автораспределения; note — что добавить к просьбе подтвердить.
  */
@@ -133,7 +154,11 @@ export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id
   if (o.executorId) throw new ConvexError(o.executorId === ex._id ? "Этот заказ уже ваш" : "Этот заказ уже взял другой исполнитель");
   if (o.status !== "awaiting_executor") throw new ConvexError("Заказ уже снят с ленты");
   if (!ex.available) throw new ConvexError("Сначала включите приём заказов в профиле");
-  const fit = fitsOrder(ex, o);
+  // Лимит заказов в работе (ТЗ п.14, E9): больше мастер не успеет — новый заказ он возьмёт, когда сдаст текущий.
+  const load = await loadOf(ctx, ex._id);
+  const max = maxActiveOf(ex);
+  if (load >= max) throw new ConvexError(`У вас уже ${load} ${plural(load, "заказ", "заказа", "заказов")} в работе — это ваш лимит. Завершите текущий, чтобы взять новый`);
+  const fit = fitsOrder(ex, o, load);
   if (!fit.fits) throw new ConvexError(`Этот заказ вам не подходит (${fit.reasons.join("; ")})`);
   // acceptedPayout — сумма, за которую мастер взялся: дальше любая её правка приходит ему уведомлением (E7).
   await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted", acceptedPayout: payout(o) });
@@ -202,13 +227,12 @@ export const act = mutation({
   },
 });
 
+/** «Принимаю заказы» / «Не принимаю» — сам мастер; until — «не принимаю до …» (сам вернётся на смену в это время). */
 export const setAvailable = mutation({
-  args: { available: v.boolean() },
-  handler: async (ctx, { available }) => {
+  args: shiftArgs,
+  handler: async (ctx, a) => {
     const { me, ex } = await myExecutor(ctx);
-    if (ex.available === available) return;
-    await ctx.db.patch(ex._id, { available });
-    await audit(ctx, me, "executor.availability", availabilityNote(ex.name, available), { entityId: ex._id, meta: { available, by: "executor" } });
+    await applyShift(ctx, ex, a, me, "executor");
   },
 });
 

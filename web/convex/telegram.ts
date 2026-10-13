@@ -374,6 +374,8 @@ async function finishLead(ctx: ActionCtx, chatId: string, conv: Id<"conversation
     address: parsed.draft?.address,
     urgency: parsed.draft?.urgency,
     description: parsed.draft?.description,
+    preferredTime: parsed.draft?.when,
+    budget: parsed.draft?.budget,
   });
   if (!res.ok) {
     const text =

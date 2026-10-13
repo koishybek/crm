@@ -243,8 +243,8 @@ function operatorRow(userId: string | undefined, leads: readonly LeadLike[], ord
 
 /**
  * Работа операторов за период: заявки, конверсия, деньги из этих заявок и как быстро заявка становится заказом.
- * Заявки, которые завела система (бот Telegram, сайт, API, AI), — отдельной строкой: каналы записывают их
- * на владельца, и без этого он выглядел бы самым загруженным оператором.
+ * Заявки, которые пришли сами (бот Telegram, сайт, API, AI) и которые никто не взял в работу, — отдельной строкой:
+ * оператора у них нет (пустой operatorId), а старые каналы записывали их на владельца (auto).
  */
 export function operatorRows(leads: readonly LeadLike[], orders: readonly OrderLike[], auto: ReadonlySet<string>, s: Span): { rows: OperatorRow[]; auto: OperatorRow | null } {
   const orderById = new Map(orders.map((o) => [o.id, o]));
@@ -252,7 +252,7 @@ export function operatorRows(leads: readonly LeadLike[], orders: readonly OrderL
   const system: LeadLike[] = [];
   for (const l of leads) {
     if (!inSpan(l.createdAt, s)) continue;
-    if (auto.has(l.id)) system.push(l);
+    if (auto.has(l.id) || !l.operatorId) system.push(l);
     else byUser.set(l.operatorId, [...(byUser.get(l.operatorId) ?? []), l]);
   }
   const rows = [...byUser].map(([id, list]) => operatorRow(id, list, orderById)).sort((a, b) => b.leads - a.leads || b.converted - a.converted);
