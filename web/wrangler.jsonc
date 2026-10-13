@@ -1,6 +1,6 @@
-// Демо для заказчика: статика из dist/, любые пути отдают index.html (SPA).
+// Рабочий стенд: статика из dist/, любые пути отдают index.html (SPA); заголовки безопасности — public/_headers.
 {
-  "name": "servicepro-demo",
+  "name": "servicepro-app",
   "compatibility_date": "2026-09-26",
   "assets": {
     "directory": "./dist",

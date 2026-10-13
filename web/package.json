@@ -13,7 +13,7 @@
     "test": "vitest run",
     "seed": "tsx scripts/seed-convex.ts",
     "deploy:convex": "convex deploy -y --typecheck disable",
-    "deploy": "vite build && wrangler deploy --name servicepro-app"
+    "deploy": "vite build && wrangler deploy"
   },
   "dependencies": {
     "@auth/core": "^0.41.3",
