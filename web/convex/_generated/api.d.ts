@@ -29,6 +29,7 @@ import type * as lib_domain from "../lib/domain.js";
 import type * as lib_dto from "../lib/dto.js";
 import type * as lib_health from "../lib/health.js";
 import type * as lib_login from "../lib/login.js";
+import type * as lib_matching from "../lib/matching.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_tg from "../lib/tg.js";
 import type * as metrics from "../metrics.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   "lib/dto": typeof lib_dto;
   "lib/health": typeof lib_health;
   "lib/login": typeof lib_login;
+  "lib/matching": typeof lib_matching;
   "lib/rateLimit": typeof lib_rateLimit;
   "lib/tg": typeof lib_tg;
   metrics: typeof metrics;

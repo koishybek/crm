@@ -52,6 +52,8 @@ import {
 import type { AiDraft, AiSummary, CategoryId, Client, Lead, SourceId, Urgency } from "../data/types";
 import { AiCard } from "../components/AiCard";
 import { Source } from "../components/icons";
+import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
+import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
 import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
 import { cn, dateTime, digits, phone, phoneMask } from "../lib/format";
 
@@ -793,14 +795,24 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
   const [ph, setPh] = useState(ex ? phoneMask(ex.phone) : "");
   const [city, setCity] = useState(ex?.city ?? "");
   const [cats, setCats] = useState<CategoryId[]>(ex?.categories ?? []);
-  const [skills, setSkills] = useState(ex?.skills.join(", ") ?? "");
+  const [skills, setSkills] = useState<string[]>(ex?.skills ?? []);
   const [coop, setCoop] = useState(ex?.cooperation ?? "freelance");
   const [error, setError] = useState("");
+
+  /** Сняли специализацию — уходят и навыки, которые были только в её справочнике. */
+  const toggleCategory = (id: CategoryId) => {
+    if (!cats.includes(id)) return setCats([...cats, id]);
+    const rest = cats.filter((x) => x !== id);
+    setCats(rest);
+    setSkills((list) => withoutCategory(list, id, rest));
+  };
 
   const save = async () => {
     setError("");
     if (!city) return setError("Укажите город");
-    const data = { name: name.trim(), phone: ph, city, categories: cats, skills: skills.split(",").map((s) => s.trim()).filter(Boolean), cooperation: coop };
+    const checked = normalizeSkills(skills, SKILLS_PER_EXECUTOR);
+    if (!checked.ok) return setError(checked.error);
+    const data = { name: name.trim(), phone: ph, city, categories: cats, skills: checked.skills, cooperation: coop };
     if (ex) {
       if (!cats.length) return setError("Выберите хотя бы одну специализацию");
       const r = await updateExecutor(ex.id, { ...data, phone: ex.phone });
@@ -888,7 +900,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
                 key={c.id}
                 type="button"
                 aria-pressed={on}
-                onClick={() => setCats((xs) => (on ? xs.filter((x) => x !== c.id) : [...xs, c.id]))}
+                onClick={() => toggleCategory(c.id)}
                 className={cn("rounded-[10px] border px-3 py-2 text-[13.5px] font-medium transition-colors", on ? "border-brand bg-brand-soft text-brand-ink" : "border-line-strong text-ink-2 hover:border-brand-line")}
               >
                 {c.label}
@@ -896,11 +908,13 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
             );
           })}
         </div>
-        <div className="mt-1.5 text-[12.5px] text-muted">По специализации и городу исполнитель видит заказы в ленте.</div>
+        <div className="mt-1.5 text-[12.5px] text-muted">По специализации, навыкам и городу исполнитель видит заказы в ленте.</div>
       </div>
-      <FormRow label="Навыки" hint="Через запятую">
-        {(id) => <Input id={id} value={skills} onChange={(e) => setSkills(e.target.value)} placeholder="Монтаж сплит-систем, Заправка фреоном" />}
-      </FormRow>
+      <div>
+        <div className="mb-1 text-[14px] font-semibold text-ink">Навыки</div>
+        <p className="mb-2.5 text-[12.5px] text-muted">Заказ, где нужен навык, увидят только исполнители, у которых он отмечен.</p>
+        <ExecutorSkillsField categories={cats} value={skills} onChange={setSkills} />
+      </div>
       <div>
         <div className="mb-2 text-[14px] font-semibold text-ink">Тип сотрудничества</div>
         <Segmented

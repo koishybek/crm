@@ -4,9 +4,11 @@ import { useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Category, Service, ServiceIcon, Tone } from "../data/catalog";
 import { convex, run } from "../data/convex";
-import { report } from "../data/store";
+import { report, toast } from "../data/store";
 import { SERVICE_ICON_NAMES, ServiceTile, TONE_SOFT } from "../components/icons";
+import { SkillChips, SkillListEditor } from "../components/SkillChips";
 import { Badge, Button, Card, FormRow, Input, Loading, Modal, Select, Textarea, Toggle } from "../components/ui";
+import { normalizeSkills, SKILLS_PER_CATEGORY } from "../data/skills";
 import { cn, digits, num } from "../lib/format";
 
 const TONES: { id: Tone; label: string }[] = [
@@ -40,7 +42,9 @@ export function CatalogEditor() {
         </Button>
       }
     >
-      <p className="-mt-1 mb-4 text-[13.5px] text-muted">По направлениям исполнители видят заказы в ленте. Цена — подсказка оператору, доля — выплата исполнителю по умолчанию.</p>
+      <p className="-mt-1 mb-4 text-[13.5px] text-muted">
+        По направлениям, навыкам и городу исполнители видят заказы в ленте. Навыки направления мастер отмечает у себя, оператор — в заказе. Цена — подсказка оператору, доля — выплата исполнителю по умолчанию.
+      </p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {data.categories.map((c) => {
           const list = data.services.filter((s) => s.category === c.id);
@@ -57,6 +61,10 @@ export function CatalogEditor() {
                   <Plus size={15} /> Услуга
                 </button>
               </header>
+              <button onClick={() => setCat(c)} className="mb-2 block w-full rounded-[10px] px-1 py-1.5 text-left hover:bg-hover" aria-label={`Навыки направления ${c.label}: изменить`}>
+                <span className="mb-1 block text-[12px] font-semibold tracking-wide text-muted uppercase">Навыки · {c.skills?.length ?? 0}</span>
+                <SkillChips skills={c.skills} max={8} empty={<span className="text-[13px] text-warn-ink">Не заданы — добавьте, чтобы точнее подбирать исполнителей</span>} />
+              </button>
               <ul className="divide-y divide-line">
                 {list.map((s) => (
                   <li key={s.id}>
@@ -89,10 +97,13 @@ function CategoryModal({ value, onClose }: { value: Category | null; onClose: ()
   const [label, setLabel] = useState(value?.label ?? "");
   const [tone, setTone] = useState<Tone>(value?.tone ?? "blue");
   const [active, setActive] = useState(value?.active !== false);
+  const [skills, setSkills] = useState<string[]>(value?.skills ?? []);
   const [busy, setBusy] = useState(false);
   const save = async () => {
+    const checked = normalizeSkills(skills, SKILLS_PER_CATEGORY);
+    if (!checked.ok) return toast(checked.error, "bad");
     setBusy(true);
-    const r = await run(convex.mutation(api.catalog.saveCategory, { id: value?.id, label, tone, active }));
+    const r = await run(convex.mutation(api.catalog.saveCategory, { id: value?.id, label, tone, active, skills: checked.skills }));
     setBusy(false);
     if (report(r, "Направление сохранено")) onClose();
   };
@@ -101,7 +112,7 @@ function CategoryModal({ value, onClose }: { value: Category | null; onClose: ()
       open
       onClose={onClose}
       title={value ? "Направление" : "Новое направление"}
-      width={440}
+      width={520}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -126,6 +137,11 @@ function CategoryModal({ value, onClose }: { value: Category | null; onClose: ()
               </button>
             ))}
           </div>
+        </div>
+        <div>
+          <div className="mb-1 text-[14px] font-semibold text-ink">Навыки</div>
+          <p className="mb-2 text-[12.5px] text-muted">Мастер отмечает свои навыки из этого списка, оператор — нужные в заказе. Заказ с навыком увидят только мастера, у которых он есть.</p>
+          <SkillListEditor label={`Навыки направления ${label || "без названия"}`} value={skills} onChange={setSkills} max={SKILLS_PER_CATEGORY} placeholder="Например: Монтаж сплит-систем" />
         </div>
         <Toggle checked={active} onChange={setActive} label={active ? "Показывается в формах" : "Скрыто (старые заказы не меняются)"} />
       </div>

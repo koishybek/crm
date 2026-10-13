@@ -11,6 +11,7 @@ import { changeStatus, toast } from "../data/store";
 import { useTeam } from "../data/hooks";
 import type { Order, OrderStatus } from "../data/types";
 import { ServiceLabel } from "../components/icons";
+import { SkillChips, SkillLine } from "../components/SkillChips";
 import { Avatar, Badge, Button, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
 import { cn, dayDiff, dateTime, deadline, money } from "../lib/format";
 
@@ -236,6 +237,7 @@ export default function Orders() {
                       <td className="max-w-[170px] truncate text-ink">{o.clientName}</td>
                       <td>
                         <ServiceLabel serviceId={o.serviceId} className="max-w-[220px] text-ink-2" />
+                        <SkillLine skills={o.requiredSkills} label="Нужные навыки" icon className="mt-1 max-w-[240px]" />
                       </td>
                       <td className="text-ink-2">{o.city}</td>
                       <td className={cn("whitespace-nowrap", isOverdue(o, now) ? "font-medium text-bad" : "text-ink-2")}>{deadline(o.deadline, new Date(now))}</td>
@@ -307,7 +309,9 @@ function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: 
                       onClick={async () => {
                         close();
                         const r = await changeStatus(o.id, "awaiting_executor");
-                        toast(r.ok ? `Заказ №${o.number} опубликован в ленту` : r.error, r.ok ? "ok" : "bad");
+                        if (!r.ok) return toast(r.error, "bad");
+                        const n = r.value?.notified ?? 0;
+                        toast(n ? `Заказ №${o.number} в ленте — уведомили исполнителей: ${n}` : `Заказ №${o.number} в ленте, но подходящих исполнителей сейчас нет — назначьте вручную`, n ? "ok" : "info");
                       }}
                     >
                       Опубликовать в ленту
@@ -341,6 +345,7 @@ function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: 
         </div>
       </div>
       <ServiceLabel serviceId={o.serviceId} className="mt-3 w-full text-[14.5px] text-ink-2" />
+      <SkillChips skills={o.requiredSkills} max={2} variant="outline" className="mt-2" />
       <div className="mt-3 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-2 text-[16px] font-bold text-ink tabular-nums">
           <Wallet size={18} className="text-muted" strokeWidth={1.8} />
