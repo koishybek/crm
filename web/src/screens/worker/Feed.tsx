@@ -1,0 +1,309 @@
+// «Заказы» — лента свободных заказов мастера (как OLX/Krisha: чипы, сортировка, карточка «деньги → что → когда → где»).
+// Живые данные не сдвигают список под пальцем: новые заказы ждут за пилюлей «Показать новые заказы (N)»,
+// пропавшие превращаются в «надгробия» на своём месте.
+import { useQuery } from "convex/react";
+import { ArrowUp, ArrowUpDown, Check, ChevronRight, Flame, Inbox, Phone, Send, SlidersHorizontal, Wrench, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { api } from "../../../convex/_generated/api";
+import { categoryById, serviceById } from "../../data/catalog";
+import { useNow } from "../../data/hooks";
+import { report } from "../../data/store";
+import type { WorkerOrder } from "../../data/types";
+import { connectTelegram } from "../../data/workerActions";
+import {
+  chipCounts,
+  feedRows,
+  freshIds,
+  isFiltered,
+  matchesFilter,
+  NO_FILTER,
+  readFeedParams,
+  SORT_LABEL,
+  sortFeed,
+  withExtras,
+  writeFeedParams,
+  type FeedFilter,
+  type FeedItem,
+  type FeedSort,
+} from "../../data/workerFeed";
+import { SUPPORT_TEL } from "../../data/workerLinks";
+import { missingSkills } from "../../data/workerMatch";
+import { TG_BANNER_PAUSE_MS, useWorkerPrefs } from "../../data/workerPrefs";
+import { isActiveWork } from "../../data/workerStats";
+import { isOverdueWork, sortActive } from "../../data/workerStatus";
+import { dueLabel } from "../../data/workerTime";
+import { cn, plural } from "../../lib/format";
+import { OffShiftCard } from "../../components/worker/Availability";
+import { Chip, Empty, IconBtn, ListSkeleton, MUTED, ScreenTitle, WButton, WLinkButton } from "../../components/worker/kit";
+import { useNet } from "../../components/worker/net";
+import { GoneCard, OrderCard, type TakeMode } from "../../components/worker/OrderCard";
+import { Sheet } from "../../components/worker/Sheet";
+import { TakeSheet } from "../../components/worker/TakeSheet";
+
+type Snapshot = { key: string; rows: { id: string; number: number }[] };
+
+const snapshotOf = (key: string, items: readonly FeedItem[]): Snapshot => ({ key, rows: items.map((o) => ({ id: o.id, number: o.number })) });
+
+export function Feed() {
+  const data = useQuery(api.worker.feed);
+  const extras = useQuery(api.executorApp.feedExtras);
+  const mine = useQuery(api.worker.mine);
+  const now = useNow();
+  const nav = useNavigate();
+  const offline = useNet((s) => s.offline);
+  const markSeen = useWorkerPrefs((s) => s.markFeedSeen);
+  const [params, setParams] = useSearchParams();
+  const { filter, sort } = readFeedParams(params);
+  const [take, setTake] = useState<FeedItem | null>(null);
+  const [sorting, setSorting] = useState(false);
+  const [highlight, setHighlight] = useState<string | null>(null);
+
+  // Требуемые навыки (ТЗ п.11): заказ без нужного навыка мастер не откроет — не показываем его и в ленте.
+  // После слияния с правилом подбора в worker.feed фильтр ничего не меняет.
+  const items = useMemo(() => (data ? withExtras(data.feed.filter((o) => missingSkills(data.executor, o.requiredSkills).length === 0), extras) : []), [data, extras]);
+  const allById = useMemo(() => new Map(items.map((o) => [o.id, o] as const)), [items]);
+  const { urgent, when, cat } = filter;
+  const visible = useMemo(() => sortFeed(items.filter((o) => matchesFilter(o, { urgent, when, cat }, now)), sort), [items, urgent, when, cat, sort, now]);
+  const counts = useMemo(() => chipCounts(items, now), [items, now]);
+
+  // Снимок порядка: обновляется при смене фильтра или сортировки, по пилюле и когда список был пуст.
+  // Времена публикации приходят отдельным запросом: когда они появились, «Сначала новые» сортируем заново.
+  const key = `${urgent}|${when}|${cat}|${sort}|${extras === undefined ? 0 : 1}`;
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  if (data !== undefined && (snap === null || snap.key !== key || (snap.rows.length === 0 && visible.length > 0))) {
+    setSnap(snapshotOf(key, visible));
+  }
+  const rows = snap && snap.key === key ? snap.rows : snapshotOf(key, visible).rows;
+  const ids = rows.map((r) => r.id);
+  const fresh = freshIds(ids, visible);
+  const list = feedRows(ids, allById, new Map(rows.map((r) => [r.id, r.number] as const)));
+
+  // Лента просмотрена: через 2 секунды на экране и при уходе — гасит счётчик на вкладке.
+  useEffect(() => {
+    const t = setTimeout(() => markSeen(Date.now()), 2000);
+    return () => {
+      clearTimeout(t);
+      markSeen(Date.now());
+    };
+  }, [markSeen]);
+
+  useEffect(() => {
+    if (!highlight) return;
+    const el = document.getElementById(`order-${highlight}`);
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+    const t = setTimeout(() => setHighlight(null), 2000);
+    return () => clearTimeout(t);
+  }, [highlight]);
+
+  const showFresh = () => {
+    setSnap(snapshotOf(key, visible));
+    setHighlight(fresh[0] ?? null);
+    markSeen(Date.now());
+  };
+
+  const setFilter = (f: FeedFilter) => setParams(writeFeedParams(f, sort), { replace: true });
+  const setSort = (s: FeedSort) => setParams(writeFeedParams(filter, s), { replace: true });
+
+  const onTake = useCallback((item: FeedItem) => setTake(item), []);
+  const onTaken = useCallback(
+    (id: string) => {
+      setTake(null);
+      nav(`/w/orders/${id}`);
+    },
+    [nav],
+  );
+
+  if (data === undefined) return <ListSkeleton />;
+  const ex = data.executor;
+  const mode: TakeMode = offline ? "offline" : ex.available ? "ready" : "off_shift";
+  const cats = ex.categories;
+  const subtitle = [ex.city, cats.map((c) => categoryById(c).label).join(", ")].filter(Boolean).join(" · ");
+
+  return (
+    <div className="mx-auto max-w-[760px]">
+      <ScreenTitle title="Заказы" subtitle={subtitle} />
+
+      <div className="flex flex-col gap-3">
+        {!ex.available && <OffShiftCard />}
+        <ActiveStrip orders={mine?.orders} now={now} />
+        {/* Пустая лента сама предлагает подключить Telegram — баннер не дублируем. */}
+        {ex.available && items.length > 0 && <TelegramBanner now={now} />}
+      </div>
+
+      {items.length > 0 && (
+        <>
+          <div className="-mx-4 mt-3 overflow-x-auto px-4 [scrollbar-width:none] lg:mx-0 lg:overflow-visible lg:px-0 [&::-webkit-scrollbar]:hidden">
+            <div className="flex w-max gap-2 lg:w-auto lg:flex-wrap">
+              <Chip pressed={!isFiltered(filter)} onClick={() => setFilter(NO_FILTER)}>
+                Все
+              </Chip>
+              <Chip pressed={urgent} icon={Flame} count={counts.urgent} onClick={() => setFilter({ ...filter, urgent: !urgent })}>
+                Срочные
+              </Chip>
+              <Chip pressed={when === "today"} count={counts.today} onClick={() => setFilter({ ...filter, when: when === "today" ? null : "today" })}>
+                Сегодня
+              </Chip>
+              <Chip pressed={when === "tomorrow"} count={counts.tomorrow} onClick={() => setFilter({ ...filter, when: when === "tomorrow" ? null : "tomorrow" })}>
+                Завтра
+              </Chip>
+              {cats.length >= 2 &&
+                cats.map((c) => (
+                  <Chip key={c} pressed={cat === c} count={counts.byCat[c]} onClick={() => setFilter({ ...filter, cat: cat === c ? null : c })}>
+                    {categoryById(c).label}
+                  </Chip>
+                ))}
+            </div>
+          </div>
+          <div className="mt-1 flex min-h-12 items-center justify-between gap-3">
+            <span className={cn("text-[14.5px]", MUTED)}>
+              {visible.length} {plural(visible.length, "заказ", "заказа", "заказов")}
+            </span>
+            <button type="button" onClick={() => setSorting(true)} className="inline-flex h-12 items-center gap-2 rounded-[10px] px-2 text-[15px] font-medium text-ink hover:bg-[#f4f2ec]">
+              <ArrowUpDown size={16} aria-hidden />
+              {SORT_LABEL[sort]}
+            </button>
+          </div>
+        </>
+      )}
+
+      {fresh.length > 0 && rows.length > 0 && (
+        <div className="sticky top-[68px] z-20 flex justify-center lg:top-[76px]">
+          <button type="button" onClick={showFresh} className="inline-flex h-12 items-center">
+            <span className="inline-flex h-10 items-center gap-2 rounded-full bg-ink px-4 text-[15px] font-semibold text-white shadow-[var(--shadow-pop)]">
+              <ArrowUp size={16} aria-hidden />
+              Показать новые заказы ({fresh.length})
+            </span>
+          </button>
+        </div>
+      )}
+
+      <div className="mt-2 flex flex-col gap-3">
+        {list.map((r) => (r.kind === "order" ? <OrderCard key={r.item.id} item={r.item} now={now} mode={mode} highlighted={highlight === r.item.id} onTake={onTake} /> : <GoneCard key={r.id} number={r.number} />))}
+      </div>
+
+      {list.length === 0 && <FeedEmpty hasOrders={items.length > 0} available={ex.available} city={ex.city} noServices={cats.length === 0} onReset={() => setFilter(NO_FILTER)} />}
+
+      {take && <TakeSheet order={allById.get(take.id) ?? take} gone={!allById.has(take.id)} available={ex.available} onClose={() => setTake(null)} onTaken={onTaken} />}
+
+      <Sheet open={sorting} onClose={() => setSorting(false)} title="Сортировка">
+        <div className="flex flex-col gap-1" role="radiogroup" aria-label="Сортировка">
+          {(Object.keys(SORT_LABEL) as FeedSort[]).map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={sort === s}
+              onClick={() => {
+                setSort(s);
+                setSorting(false);
+              }}
+              className={cn("flex min-h-14 items-center justify-between rounded-[12px] px-3 text-left text-[16px]", sort === s ? "bg-[#faf8f3] font-semibold text-ink" : "text-ink-2")}
+            >
+              {SORT_LABEL[s]}
+              {sort === s && <Check size={20} aria-hidden />}
+            </button>
+          ))}
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
+/** Полоса «активный заказ» над лентой — чтобы не забыть про взятый заказ. */
+function ActiveStrip({ orders, now }: { orders: WorkerOrder[] | undefined; now: number }) {
+  const first = sortActive((orders ?? []).filter(isActiveWork), now)[0];
+  if (!first) return null;
+  const service = serviceById(first.serviceId).label;
+  const label =
+    first.status === "assigned"
+      ? `Ждёт подтверждения: №${first.number} · ${service}`
+      : isOverdueWork(first, now)
+        ? `Просрочен: №${first.number} · ${service}`
+        : first.status === "in_progress"
+          ? `В работе: №${first.number} · ${service}`
+          : first.status === "awaiting_client"
+            ? `На паузе: №${first.number} · ${service}`
+            : `Следующий: №${first.number} · ${dueLabel(first.deadline, now)}`;
+  const urgent = first.status === "assigned" || isOverdueWork(first, now);
+  return (
+    <Link to={`/w/orders/${first.id}`} className={cn("card flex min-h-14 items-center gap-3 border-l-4 px-4 py-2 active:bg-[#faf8f3]", urgent ? "border-l-[#c41d3a]" : "border-l-brand")}>
+      <span className="min-w-0 flex-1 text-[15px] leading-snug font-semibold text-ink">{label}</span>
+      <ChevronRight size={20} className="shrink-0 text-ink-2" aria-hidden />
+    </Link>
+  );
+}
+
+/** Баннер «Подключите Telegram» — новые заказы будут приходить сразу. Скрывается на неделю. */
+function TelegramBanner({ now }: { now: number }) {
+  const tg = useQuery(api.telegram.status);
+  const hiddenAt = useWorkerPrefs((s) => s.tgBannerHiddenAt);
+  const hide = useWorkerPrefs((s) => s.hideTgBanner);
+  if (!tg?.enabled || tg.linked || (hiddenAt !== null && now - hiddenAt < TG_BANNER_PAUSE_MS)) return null;
+  return (
+    <div className="card py-2 pr-1 pl-4">
+      <div className="flex items-start gap-3">
+        <Send size={22} className="mt-2.5 shrink-0 text-[#1767c2]" aria-hidden />
+        <p className="min-w-0 flex-1 pt-2 text-[15px] leading-snug text-ink">Подключите Telegram — новые заказы будут приходить сразу</p>
+        <IconBtn icon={X} label="Скрыть на неделю" onClick={() => hide(Date.now())} />
+      </div>
+      <div className="mt-1 pr-3 pb-1 pl-[34px]">
+        <WButton variant="secondary" onClick={async () => void report(await connectTelegram())}>
+          Подключить Telegram
+        </WButton>
+      </div>
+    </div>
+  );
+}
+
+function FeedEmpty({ hasOrders, available, city, noServices, onReset }: { hasOrders: boolean; available: boolean; city: string; noServices: boolean; onReset: () => void }) {
+  const tg = useQuery(api.telegram.status);
+  if (noServices)
+    return (
+      <div className="mt-3">
+        <Empty
+          icon={Wrench}
+          title="У вас не выбраны услуги"
+          text="Попросите оператора добавить услуги в ваш профиль — тогда здесь появятся заказы."
+          action={
+            <WLinkButton href={SUPPORT_TEL} icon={Phone} full>
+              Позвонить в офис
+            </WLinkButton>
+          }
+        />
+      </div>
+    );
+  if (hasOrders)
+    return (
+      <div className="mt-3">
+        <Empty
+          icon={SlidersHorizontal}
+          title="По этим фильтрам заказов нет"
+          action={
+            <WButton variant="secondary" full onClick={onReset}>
+              Сбросить фильтры
+            </WButton>
+          }
+        />
+      </div>
+    );
+  // Приём выключен — карточка сверху уже всё объясняет.
+  if (!available) return null;
+  return (
+    <div className="mt-3">
+      <Empty
+        icon={Inbox}
+        title="Пока нет заказов"
+        text={`Новые заказы по вашим услугам в городе ${city} появятся здесь сами.`}
+        action={
+          tg?.enabled && !tg.linked ? (
+            <WButton icon={Send} full onClick={async () => void report(await connectTelegram())}>
+              Подключить Telegram
+            </WButton>
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}

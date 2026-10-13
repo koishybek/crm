@@ -1,11 +1,9 @@
 import {
   Bell,
-  Box,
   Briefcase,
   Building2,
   ChartNoAxesColumn,
   ChevronDown,
-  ClipboardList,
   FileText,
   House,
   LogOut,
@@ -17,7 +15,6 @@ import {
   Settings as SettingsIcon,
   UserRound,
   Users,
-  Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -35,6 +32,7 @@ import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui
 import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
+import { WorkerShell } from "./worker/WorkerShell";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -48,15 +46,9 @@ const STAFF_NAV: NavItem[] = [
   { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn },
   { to: "/settings", label: "Настройки", icon: SettingsIcon },
 ];
-const EXEC_NAV: NavItem[] = [
-  { to: "/w", label: "Доступные заказы", icon: Box, end: true },
-  { to: "/w/my", label: "Мои заказы", icon: ClipboardList },
-  { to: "/w/income", label: "Доход", icon: Wallet },
-];
-
 const navFor = (u: User) =>
   u.role === "executor"
-    ? EXEC_NAV
+    ? [] // у мастера свой каркас с вкладками — components/worker/WorkerShell
     : u.role === "owner"
       ? STAFF_NAV
       : STAFF_NAV.filter((n) => n.to !== "/analytics" && n.to !== "/settings" && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls")));
@@ -351,6 +343,12 @@ function PrimaryAction({ me }: { me: User }) {
 }
 
 export function Shell({ me, children }: { me: User; children?: ReactNode }) {
+  // Кабинет мастера — своя раскладка под телефон: шапка с приёмом заказов и вкладки внизу.
+  if (me.role === "executor") return <WorkerShell me={me}>{children}</WorkerShell>;
+  return <TeamShell me={me}>{children}</TeamShell>;
+}
+
+function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
   const items = navFor(me);
   const ui = useUi();
   const [mobileSearch, setMobileSearch] = useState(false);
@@ -423,18 +421,6 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
         >
           <Plus size={26} />
         </button>
-      )}
-
-      {/* Нижняя навигация исполнителя */}
-      {isExec && (
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Разделы">
-          {items.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => cn("flex flex-col items-center gap-1 py-2.5 text-[11.5px] font-medium", isActive ? "text-brand-ink" : "text-muted")}>
-              <n.icon size={22} strokeWidth={1.8} aria-hidden />
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
       )}
 
       {/* Звонки от АТС видят те, кто их принимает: владелец и операторы. */}

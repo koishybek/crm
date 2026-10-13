@@ -19,9 +19,17 @@ import Login from "./screens/Login";
 import OrderDetail from "./screens/OrderDetail";
 import Orders from "./screens/Orders";
 import Settings from "./screens/Settings";
-import { Feed, Income, MyOrders, WorkerOrder } from "./screens/worker/Worker";
+import { WorkerError } from "./screens/worker/WorkerError";
 
 const Analytics = lazy(() => import("./screens/Analytics"));
+
+// Кабинет мастера — один отдельный чанк: сотрудникам он не нужен. Suspense — в WorkerShell.
+const workerScreens = () => import("./screens/worker");
+const WorkerFeed = lazy(() => workerScreens().then((m) => ({ default: m.Feed })));
+const WorkerMyOrders = lazy(() => workerScreens().then((m) => ({ default: m.MyOrders })));
+const WorkerIncome = lazy(() => workerScreens().then((m) => ({ default: m.Income })));
+const WorkerProfile = lazy(() => workerScreens().then((m) => ({ default: m.Profile })));
+const WorkerOrderPage = lazy(() => workerScreens().then((m) => ({ default: m.OrderPage })));
 
 export function Splash({ children }: { children?: ReactNode }) {
   return (
@@ -107,11 +115,13 @@ const router = createBrowserRouter([
   },
   {
     element: <Guard roles={["executor"]} />,
+    errorElement: <WorkerError />,
     children: [
-      { path: "/w", element: <Feed /> },
-      { path: "/w/my", element: <MyOrders /> },
-      { path: "/w/income", element: <Income /> },
-      { path: "/w/orders/:id", element: <WorkerOrder /> },
+      { path: "/w", element: <WorkerFeed /> },
+      { path: "/w/my", element: <WorkerMyOrders /> },
+      { path: "/w/income", element: <WorkerIncome /> },
+      { path: "/w/profile", element: <WorkerProfile /> },
+      { path: "/w/orders/:id", element: <WorkerOrderPage /> },
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
