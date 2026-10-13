@@ -3,7 +3,7 @@ import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { assertScope, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
 import { audit, ChangeLog, quote } from "./lib/audit";
-import { cleanPhone, insertClient } from "./clients";
+import { assertNotErased, cleanPhone, insertClient } from "./clients";
 import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
 import { toLead, toOrder } from "./lib/dto";
 import { cleanText } from "./lib/limits";
@@ -93,6 +93,7 @@ export const create = mutation({
     // ТЗ п.7: ищем клиента по номеру, иначе создаём.
     let client = a.clientId ? await ctx.db.get(a.clientId) : null;
     if (!client) client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", phone)).first();
+    if (client) assertNotErased(client);
     const isNewClient = !client;
     const clientId = client?._id ?? (await insertClient(ctx, { name: clientName, phone, city, source: a.source }));
     const c = (await ctx.db.get(clientId))!;

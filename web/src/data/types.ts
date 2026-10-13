@@ -65,6 +65,8 @@ export interface Client {
   ordersCount?: number;
   activeCount?: number;
   lastOrderAt?: string;
+  /** Данные удалены по запросу клиента: карточка обезличена, телефона нет. */
+  anonymizedAt?: string;
 }
 
 export interface AiSummary {

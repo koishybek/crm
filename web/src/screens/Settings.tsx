@@ -13,6 +13,7 @@ import { AccessModal } from "../components/AccessModal";
 import { CatalogEditor } from "./CatalogEditor";
 import { ApiAndSiteCard, OlxCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
+import { SystemCards } from "./SystemCards";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
 
@@ -253,6 +254,8 @@ export default function Settings() {
       <div className="mt-4">
         <ApiAndSiteCard />
       </div>
+
+      <SystemCards />
 
       <div className="mt-4">
         <CatalogEditor />

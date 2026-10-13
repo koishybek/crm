@@ -2,6 +2,7 @@
 import type { Doc } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { payout } from "../../src/data/logic";
+import { checkPublicUrl } from "./safeFetch";
 import type {
   Attachment,
   Call,
@@ -51,7 +52,8 @@ export const toClient = (c: Doc<"clients">): Client => ({
   tenantId: c.tenantId,
   name: c.name,
   kind: c.kind,
-  phone: c.phone,
+  // У обезличенного клиента в базе — заглушка ради уникального индекса; наружу телефона нет.
+  phone: c.anonymizedAt ? "" : c.phone,
   email: c.email,
   city: c.city,
   address: c.address,
@@ -63,6 +65,7 @@ export const toClient = (c: Doc<"clients">): Client => ({
   ordersCount: c.ordersCount,
   activeCount: c.activeCount,
   lastOrderAt: c.lastOrderAt,
+  anonymizedAt: c.anonymizedAt,
 });
 
 export const toLead = (l: Doc<"leads">): Lead => ({
@@ -194,7 +197,8 @@ export async function toCall(ctx: QueryCtx, c: Doc<"calls">, withMedia: boolean)
     endedAt: c.endedAt,
     duration: c.duration,
     hasRecording: !!(c.recordingId || c.recordingUrl),
-    recordingSrc: withMedia ? (c.recordingId ? ((await ctx.storage.getUrl(c.recordingId)) ?? undefined) : c.recordingUrl) : undefined,
+    // Внешнюю ссылку АТС отдаём в браузер, только если это публичный https-адрес (аудит M-3).
+    recordingSrc: withMedia ? (c.recordingId ? ((await ctx.storage.getUrl(c.recordingId)) ?? undefined) : c.recordingUrl && checkPublicUrl(c.recordingUrl).ok ? c.recordingUrl : undefined) : undefined,
     transcript: withMedia ? c.transcript : undefined,
     ai: c.ai,
     draft: c.draft,

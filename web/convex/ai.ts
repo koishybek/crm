@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalAction, query, type ActionCtx } from "./_generated/server";
 import { currentUser } from "./lib/access";
+import { fetchPublicFile } from "./lib/safeFetch";
 import { env } from "./env";
 import { URGENCY } from "../src/data/catalog";
 import { money } from "../src/lib/format";
@@ -337,6 +338,14 @@ async function staffOnly(ctx: ActionCtx) {
   if (role !== "owner" && role !== "operator" && role !== "manager") throw new ConvexError("Нет доступа");
 }
 
+/** Текст ошибки для звонка и мониторинга: наш текст — как есть, остальное — общей фразой (без деталей провайдера). */
+const errorText = (e: unknown): string => (e instanceof ConvexError ? String(e.data) : "Ошибка AI");
+
+/** Отметка «AI» в «Состоянии системы»: провайдер ответил — зелёная, сбой провайдера — красная с причиной. */
+async function markAi(ctx: ActionCtx, ok: boolean, note: string): Promise<void> {
+  await ctx.runMutation(internal.health._mark, { key: "ai", ok, note });
+}
+
 /** Оператор вставил сообщение клиента (WhatsApp/OLX/Instagram) — AI раскладывает его по полям заявки. */
 export const parseText = action({
   args: { text: v.string() },
@@ -344,41 +353,82 @@ export const parseText = action({
     await staffOnly(ctx);
     if (text.trim().length < 5) throw new ConvexError("Вставьте текст обращения");
     if (text.length > 20_000) throw new ConvexError("Слишком длинный текст — оставьте главное");
+    if (!canExtract()) throw new ConvexError("AI не подключён");
     const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
-    const x = await extract(text, hint, "message");
+    let x: Extraction;
+    try {
+      x = await extract(text, hint, "message");
+    } catch (e) {
+      await markAi(ctx, false, `Разбор текста: ${errorText(e)}`);
+      throw e;
+    }
+    await markAi(ctx, true, "Разбор текста");
     return toSummary(x, (id) => hint.services.find((s) => s.id === id)?.label ?? id);
   },
 });
 
+/** Потолок записи звонка; больше — не скачиваем (память рантайма и лимиты расшифровки). */
+export const RECORDING_MAX_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Запись по ссылке от АТС — только с публичного https-адреса (аудит M-3: SSRF), до 50 МБ, с таймаутом;
+ * перенаправления проверяются на каждом шаге. Страница или JSON вместо аудио — отказ.
+ */
+async function downloadRecording(url: string): Promise<Blob> {
+  const blob = await fetchPublicFile(url, { maxBytes: RECORDING_MAX_BYTES, timeoutMs: STT_TIMEOUT_MS, maxRedirects: 3 });
+  if (/^(text\/|application\/(json|xml|xhtml))/i.test(blob.type)) throw new ConvexError("по ссылке не аудиофайл");
+  return blob;
+}
+
 /**
  * Фоновая обработка звонка: скачать запись (если пришла ссылкой от АТС) → в хранилище →
  * расшифровать → разобрать → сохранить на звонке; если AI уверенно понял услугу — создать заявку (кроме autoLead=false).
+ * Сбой на любом шаге — понятная причина на звонке; скачанная запись сохраняется и при сбое AI.
  */
 export const processCall = internalAction({
   args: { callId: v.id("calls"), autoLead: v.optional(v.boolean()) },
   handler: async (ctx, { callId, autoLead }): Promise<void> => {
     const c: Doc<"calls"> | null = await ctx.runQuery(internal.calls._get, { id: callId });
     if (!c) return;
-    if (!canTranscribe() || !canExtract()) return void (await ctx.runMutation(internal.calls._saveAi, { id: callId, status: "none" }));
-    try {
-      let recordingId: Id<"_storage"> | undefined = c.recordingId;
-      if (!recordingId && c.recordingUrl) {
-        const res = await call(c.recordingUrl, {}, STT_TIMEOUT_MS);
-        if (!res.ok) throw new ConvexError(`АТС не отдала запись (HTTP ${res.status})`);
-        recordingId = await ctx.storage.store(await res.blob());
+    const save = (a: { status: "done" | "failed" | "none"; error?: string; recordingId?: Id<"_storage"> }) => ctx.runMutation(internal.calls._saveAi, { id: callId, ...a });
+    if (!canTranscribe() || !canExtract()) return void (await save({ status: "none" }));
+
+    let recordingId: Id<"_storage"> | undefined = c.recordingId;
+    let audio: Blob | null = null;
+    if (!recordingId && c.recordingUrl) {
+      try {
+        audio = await downloadRecording(c.recordingUrl);
+        recordingId = await ctx.storage.store(audio);
+      } catch (e) {
+        const reason = e instanceof ConvexError ? String(e.data) : "ошибка загрузки";
+        // Саму ссылку в лог не пишем: в ссылках АТС бывают токены.
+        console.warn(`АТС: запись звонка ${callId} не скачана — ${reason}`);
+        return void (await save({ status: "failed", error: `Запись не скачана: ${reason}` }));
       }
-      if (!recordingId) return void (await ctx.runMutation(internal.calls._saveAi, { id: callId, status: "none" }));
-      const blob = await ctx.storage.get(recordingId);
-      if (!blob) throw new ConvexError("Запись не найдена в хранилище");
-      const { text } = await transcribe(blob);
-      if (!text) throw new ConvexError("В записи не распознана речь");
-      const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
-      const x = await extract(text, hint, "call");
-      const { ai, draft } = toSummary(x, (id) => hint.services.find((s) => s.id === id)?.label ?? id);
-      await ctx.runMutation(internal.calls._saveAi, { id: callId, status: "done", recordingId, transcript: text, ai, draft, autoLead: autoLead !== false && !!x.serviceId });
-    } catch (e) {
-      console.error(`AI: звонок ${callId} не разобран: ${e instanceof ConvexError ? String(e.data) : e instanceof Error ? e.message : "ошибка"}`);
-      await ctx.runMutation(internal.calls._saveAi, { id: callId, status: "failed", error: e instanceof ConvexError ? String(e.data) : "Ошибка AI" });
     }
+    if (!recordingId) return void (await save({ status: "none" }));
+    audio ??= await ctx.storage.get(recordingId);
+    if (!audio) return void (await save({ status: "failed", error: "Запись не найдена в хранилище" }));
+
+    let text: string;
+    let hint: CatalogHint | null = null;
+    let x: Extraction | null = null;
+    try {
+      ({ text } = await transcribe(audio));
+      if (text) {
+        hint = await ctx.runQuery(internal.catalog._hint, {});
+        x = await extract(text, hint, "call");
+      }
+    } catch (e) {
+      const error = errorText(e);
+      console.error(`AI: звонок ${callId} не разобран: ${error}`);
+      await markAi(ctx, false, `Звонок: ${error}`);
+      return void (await save({ status: "failed", error, recordingId }));
+    }
+    await markAi(ctx, true, x ? "Звонок разобран" : "Звонок расшифрован");
+    if (!x || !hint) return void (await save({ status: "failed", error: "В записи не распознана речь", recordingId }));
+    const labels = hint.services;
+    const { ai, draft } = toSummary(x, (id) => labels.find((s) => s.id === id)?.label ?? id);
+    await ctx.runMutation(internal.calls._saveAi, { id: callId, status: "done", recordingId, transcript: text, ai, draft, autoLead: autoLead !== false && !!x.serviceId });
   },
 });

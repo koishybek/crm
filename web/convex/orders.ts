@@ -9,9 +9,7 @@ import { cleanMoney, cleanText } from "./lib/limits";
 import { suitableUsers } from "./lib/matching";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
-import { announceOrder, cardOf } from "./worker";
-import { cardHtml, workerButtons } from "./lib/tg";
-import { env } from "./env";
+import { announceOrder, notifyAssigned } from "./worker";
 import { fitsOrder, isOpenForFeed, margin, payout } from "../src/data/logic";
 import { catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money, shortName } from "../src/lib/format";
@@ -351,13 +349,7 @@ export const assign = mutation({
       entityId: id,
       meta: { executorId, previousExecutorId: o.executorId, fits: fit.fits, reasons: fit.reasons },
     });
-    const assigned = (await ctx.db.get(id))!;
-    await notify(ctx, [(await executorUser(ctx, executorId))?._id], `Вам назначен заказ №${o.number}: ${(await loadCatalog(ctx)).label(o.serviceId)}. Подтвердите в кабинете`, {
-      link: `/w/orders/${id}`,
-      tone: "warn",
-      html: cardHtml(await cardOf(ctx, assigned, false), `📌 Вам назначен заказ №${o.number}`),
-      buttons: workerButtons("assigned", id, env("APP_URL")),
-    });
+    await notifyAssigned(ctx, (await ctx.db.get(id))!);
   },
 });
 
