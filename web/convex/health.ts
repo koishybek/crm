@@ -3,6 +3,10 @@ import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { markError, markOk, type HealthKey } from "./lib/health";
+import { canExtract, canTranscribe } from "./ai";
+import { configured as whatsappConfigured, missingEnv as whatsappMissing } from "./channels/whatsapp";
+import { env } from "./env";
+import type { HealthMark, SubsystemInfo, SystemOverview } from "../src/data/systemHealth";
 
 const healthKey = v.union(
   v.literal("ai"),
@@ -32,5 +36,61 @@ export const list = query({
     await requireRole(ctx, OWNER);
     const rows = await ctx.db.query("systemStatus").collect();
     return rows.map((r) => ({ key: r.key, okAt: r.okAt, okNote: r.okNote, errorAt: r.errorAt, error: r.error }));
+  },
+});
+
+const TELEGRAM_ENV = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME", "TELEGRAM_WEBHOOK_SECRET"];
+
+/**
+ * «Состояние системы» (ТЗ п.20): по каждой подсистеме — подключена ли (переменные окружения, ключи, интеграции)
+ * и её отметки. Цвет считает экран (src/data/systemHealth.ts): «давно не работало» зависит от текущего времени.
+ * Значения секретов не отдаём — только имена недостающих переменных.
+ */
+export const overview = query({
+  args: {},
+  handler: async (ctx): Promise<SystemOverview> => {
+    await requireRole(ctx, OWNER);
+    const marks = new Map<string, HealthMark>((await ctx.db.query("systemStatus").collect()).map((r) => [r.key, { okAt: r.okAt, okNote: r.okNote, errorAt: r.errorAt, error: r.error }]));
+    const integration = (provider: "olx" | "email") =>
+      ctx.db
+        .query("integrations")
+        .withIndex("by_provider", (q) => q.eq("provider", provider))
+        .first();
+    const [olx, email, pbxSecret, keys] = await Promise.all([
+      integration("olx"),
+      integration("email"),
+      ctx.db
+        .query("settings")
+        .withIndex("by_key", (q) => q.eq("key", "pbxSecret"))
+        .unique(),
+      ctx.db.query("apiKeys").collect(),
+    ]);
+    const sub = (key: SubsystemInfo["key"], configured: boolean, extra: Pick<SubsystemInfo, "hint" | "issue" | "warning"> = {}): SubsystemInfo => ({ key, configured, ...extra, mark: marks.get(key) });
+    /** OLX и email: подключение — строкой в integrations (отключили — серый); ошибка подключения — красный и без отметок. */
+    const linked = (key: "olx" | "email", row: typeof olx, hint: string) =>
+      sub(key, row ? row.status !== "disconnected" : marks.has(key), {
+        hint,
+        issue: row?.status === "error" ? (row.lastError ?? "Ошибка подключения") : undefined,
+      });
+    const tgMissing = TELEGRAM_ENV.filter((k) => !env(k));
+    const waMissing = whatsappMissing();
+    const activeKeys = keys.filter((k) => !k.revokedAt).length;
+    return {
+      subsystems: [
+        sub("reminders", true),
+        sub("backup", true),
+        sub("ai", canExtract(), {
+          hint: "Не заданы ключи AI: LLM_API_KEY или AI_URL + AI_SECRET",
+          warning: canTranscribe() ? undefined : "Разбор текста работает, расшифровка звонков не настроена (STT_API_KEY или AI_URL + AI_SECRET)",
+        }),
+        sub("pbx", !!pbxSecret, { hint: "Ключ подключения АТС не создан — раздел «Телефония (АТС)»" }),
+        sub("telegram", tgMissing.length === 0, { hint: `Не заданы: ${tgMissing.join(", ")}` }),
+        sub("whatsapp", whatsappConfigured(), { hint: `Не заданы: ${waMissing.join(", ")}` }),
+        linked("olx", olx, "Аккаунт OLX не подключён"),
+        linked("email", email, "Почта не подключена"),
+        sub("site", marks.has("site"), { hint: "Заявок с сайта ещё не было" }),
+        sub("api", activeKeys > 0 || marks.has("api"), { hint: "Ключей API нет" }),
+      ],
+    };
   },
 });

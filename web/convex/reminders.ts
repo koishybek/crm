@@ -1,6 +1,7 @@
 import { internalMutation } from "./_generated/server";
 import { almatyStamp, audit } from "./lib/audit";
 import { executorUser, notify, staffIds } from "./lib/domain";
+import { markOk } from "./lib/health";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 
@@ -13,8 +14,10 @@ export const run = internalMutation({
     const now = Date.now();
     const cat = await loadCatalog(ctx);
     const owners = (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).collect()).map((u) => u._id);
+    let checked = 0;
     for (const s of ACTIVE_STATUSES) {
       for (const o of await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", s)).collect()) {
+        checked++;
         const t = Date.parse(o.deadline);
         const ex = o.executorId ? (await executorUser(ctx, o.executorId))?._id : undefined;
         const label = `№${o.number} (${cat.label(o.serviceId)})`;
@@ -36,5 +39,7 @@ export const run = internalMutation({
         }
       }
     }
+    // Отметка для «Состояния системы»: давно нет — крон не запускается или падает.
+    await markOk(ctx, "reminders", `Проверено активных заказов: ${checked}`);
   },
 });

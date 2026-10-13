@@ -8,7 +8,9 @@ import { OWNER, requireRole, STAFF } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
+import { markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
+import { dropFile } from "./lib/files";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -215,6 +217,12 @@ export const _saveAi = internalMutation({
   handler: async (ctx, a): Promise<void> => {
     const c = await ctx.db.get(a.id);
     if (!c) return;
+    // Пока шёл разбор, данные клиента удалили по его запросу: результат не сохраняем, скачанную запись — тоже.
+    if (c.clientId && (await ctx.db.get(c.clientId))?.anonymizedAt) {
+      if (a.recordingId && a.recordingId !== c.recordingId) await dropFile(ctx, a.recordingId);
+      await ctx.db.patch(a.id, { recordingUrl: undefined, aiStatus: "none" });
+      return;
+    }
     await ctx.db.patch(a.id, {
       aiStatus: a.status,
       aiError: a.error,
@@ -280,7 +288,8 @@ export const _ingest = internalMutation({
       patch.endedAt = at;
     }
     if (a.duration !== undefined && a.duration >= 0) patch.duration = Math.round(a.duration);
-    if (a.recordingUrl && /^https?:\/\//.test(a.recordingUrl)) patch.recordingUrl = a.recordingUrl;
+    // Ссылку сохраняем как прислали: безопасность адреса проверяет скачивание (ai.processCall), отказ виден на звонке.
+    if (a.recordingUrl && a.recordingUrl.length <= 2000 && /^https?:\/\//.test(a.recordingUrl)) patch.recordingUrl = a.recordingUrl;
     await ctx.db.patch(c._id, patch);
 
     const became = patch.status;
@@ -293,6 +302,7 @@ export const _ingest = internalMutation({
       await ctx.db.patch(c._id, { aiStatus: "pending" });
       await ctx.scheduler.runAfter(0, internal.ai.processCall, { callId: c._id });
     }
+    await markOk(ctx, "pbx", "Событие АТС принято");
     return c._id;
   },
 });

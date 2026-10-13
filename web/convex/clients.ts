@@ -1,12 +1,13 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import { requireRole, STAFF } from "./lib/access";
+import { OWNER, requireRole, STAFF } from "./lib/access";
 import { audit, ChangeLog, listDiff, listDiffText, maskPhone, quote } from "./lib/audit";
 import { nowIso, TENANT } from "./lib/domain";
 import { toClient, toInteraction, toLead, toNote, toOrder } from "./lib/dto";
 import { cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
+import { assertCanErase, eraseClient } from "./lib/privacy";
 import { source } from "./schema";
 import { SOURCES } from "../src/data/catalog";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
@@ -103,6 +104,11 @@ export function cleanPhone(raw: string): string {
   return p;
 }
 
+/** Обезличенная карточка не меняется: иначе в «удалённого» клиента снова попали бы чьи-то данные. */
+export function assertNotErased(c: Pick<Doc<"clients">, "anonymizedAt">): void {
+  if (c.anonymizedAt) throw new ConvexError("Данные клиента удалены по его запросу — карточку изменить нельзя. Если он обратился снова, заведите его как нового клиента");
+}
+
 /** Необязательное поле формы: пустое — undefined, длинное — понятная ошибка. */
 const optionalText = (s: string | undefined, max: number, label: string) => (s === undefined ? undefined : cleanText(s, max, label) || undefined);
 
@@ -185,6 +191,7 @@ export const update = mutation({
     const me = await requireRole(ctx, STAFF);
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Клиент не найден");
+    assertNotErased(c);
     const phone = cleanPhone(a.phone);
     if (phone !== c.phone) {
       const dup = await ctx.db
@@ -240,6 +247,7 @@ export const setTags = mutation({
     const me = await requireRole(ctx, STAFF);
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Клиент не найден");
+    assertNotErased(c);
     const next = cleanTags(tags);
     const diff = listDiff(c.tags, next);
     if (!diff.added.length && !diff.removed.length) return;
@@ -254,10 +262,41 @@ export const addNote = mutation({
     const me = await requireRole(ctx, STAFF);
     const c = await ctx.db.get(clientId);
     if (!c) throw new ConvexError("Клиент не найден");
+    assertNotErased(c);
     const body = cleanText(text, MAX.note, "Комментарий");
     if (!body) throw new ConvexError("Пустой комментарий");
     const noteId = await ctx.db.insert("clientNotes", { clientId, authorId: me._id, text: body, at: nowIso() });
     // Текст комментария в журнал не копируем — он остаётся в карточке клиента.
     await audit(ctx, me, "client.note", `Клиент ${shortName(c.name)}: добавлен комментарий`, { entityId: clientId, meta: { noteId } });
+  },
+});
+
+/**
+ * Удаление персональных данных по запросу клиента (ТЗ п.26) — только владелец и только с вводом телефона клиента.
+ * Контакты, записи звонков, расшифровки и переписка удаляются безвозвратно; номера и суммы заказов остаются.
+ */
+export const anonymize = mutation({
+  args: { clientId: v.id("clients"), confirmPhone: v.string() },
+  handler: async (ctx, { clientId, confirmPhone }) => {
+    const me = await requireRole(ctx, OWNER);
+    const c = await ctx.db.get(clientId);
+    if (!c) throw new ConvexError("Клиент не найден");
+    if (c.anonymizedAt) throw new ConvexError("Данные этого клиента уже удалены");
+    if (normalizeLogin(confirmPhone.slice(0, 40)) !== c.phone) throw new ConvexError("Телефон не совпадает — данные не удалены");
+    const [leads, orders] = await Promise.all([
+      ctx.db.query("leads").withIndex("by_client", (q) => q.eq("clientId", clientId)).collect(),
+      ctx.db.query("orders").withIndex("by_client", (q) => q.eq("clientId", clientId)).collect(),
+    ]);
+    assertCanErase(leads, orders);
+    const n = await eraseClient(ctx, c, leads, orders);
+    // В журнале — только факт и счётчики: ни имени, ни телефона, ни текстов.
+    await audit(
+      ctx,
+      me,
+      "client.anonymized",
+      `Данные клиента удалены по его запросу: контакты, записи звонков (${n.recordings}), переписка (${n.messages} сообщ.), комментарии (${n.notes}); номера и суммы заказов (${n.orders}) сохранены`,
+      { entityId: clientId, meta: { ...n } },
+    );
+    return n;
   },
 });

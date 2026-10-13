@@ -57,34 +57,45 @@ http.route({
   path: "/pbx/events",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
+    // Отказ АТС — красная отметка «Телефония» в «Состоянии системы»: владелец видит, что события не доходят и почему.
+    const reject = async (status: number, body: string, why: string) => {
+      await ctx.runMutation(internal.health._mark, { key: "pbx", ok: false, note: why });
+      return new Response(body, { status });
+    };
     const expected = await ctx.runQuery(internal.calls._pbxSecret, {});
     if (!expected) return new Response("not configured", { status: 503 });
     const url = new URL(request.url);
     const given = request.headers.get("x-pbx-secret") ?? url.searchParams.get("secret");
-    if (!given || !safeEqual(given, expected)) return new Response("forbidden", { status: 403 });
-    let body: Record<string, unknown> = {};
+    if (!given || !safeEqual(given, expected)) return reject(403, "forbidden", "АТС прислала событие без ключа или с неверным ключом");
+    let parsed: unknown;
     const type = request.headers.get("content-type") ?? "";
     try {
-      if (type.includes("application/json")) body = (await request.json()) as Record<string, unknown>;
-      else body = Object.fromEntries(new URLSearchParams(await request.text()));
+      parsed = type.includes("application/json") ? await request.json() : Object.fromEntries(new URLSearchParams(await request.text()));
     } catch {
-      return new Response("bad body", { status: 400 });
+      parsed = null;
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return reject(400, "bad body", "АТС прислала событие, которое не удалось прочитать");
+    const body = parsed as Record<string, unknown>;
     const event = pick(body, "event", "type", "status", "state");
-    if (!event) return new Response("event required", { status: 400 });
+    if (!event) return reject(400, "event required", "АТС прислала событие без типа (event)");
     const dir = pick(body, "direction", "dir", "call_type");
     const duration = Number(pick(body, "duration", "billsec", "talk_time", "seconds"));
-    await ctx.runMutation(internal.calls._ingest, {
-      event,
-      externalId: pick(body, "callId", "call_id", "uuid", "id", "callid"),
-      direction: dir && /^(out|outgoing|исход)/i.test(dir) ? "out" : "in",
-      from: pick(body, "from", "caller", "caller_id", "src", "number_from", "client_number"),
-      to: pick(body, "to", "callee", "dst", "did", "number_to"),
-      operator: pick(body, "operator", "agent", "user", "employee", "operator_email"),
-      duration: Number.isFinite(duration) ? duration : undefined,
-      recordingUrl: pick(body, "recordingUrl", "recording_url", "recording", "record", "link", "record_url"),
-      at: pick(body, "at", "time", "timestamp", "date"),
-    });
+    try {
+      await ctx.runMutation(internal.calls._ingest, {
+        event,
+        externalId: pick(body, "callId", "call_id", "uuid", "id", "callid"),
+        direction: dir && /^(out|outgoing|исход)/i.test(dir) ? "out" : "in",
+        from: pick(body, "from", "caller", "caller_id", "src", "number_from", "client_number"),
+        to: pick(body, "to", "callee", "dst", "did", "number_to"),
+        operator: pick(body, "operator", "agent", "user", "employee", "operator_email"),
+        duration: Number.isFinite(duration) ? duration : undefined,
+        recordingUrl: pick(body, "recordingUrl", "recording_url", "recording", "record", "link", "record_url"),
+        at: pick(body, "at", "time", "timestamp", "date"),
+      });
+    } catch (e) {
+      console.error(`АТС: событие не сохранено: ${e instanceof Error ? e.name : "ошибка"}`);
+      return reject(500, "error", "Событие АТС не сохранено — внутренняя ошибка");
+    }
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   }),
 });

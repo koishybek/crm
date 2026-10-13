@@ -3,11 +3,12 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { EXECUTOR, requireRole } from "./lib/access";
 import { audit, lowerFirst } from "./lib/audit";
-import { log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
+import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
 import { toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
 import { openOrdersFor, suitableUsers } from "./lib/matching";
-import { cardHtml, workerButtons, type CardData } from "./lib/tg";
+import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
+import { env } from "./env";
 import { availabilityNote } from "./executors";
 import { fitsOrder, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
@@ -93,6 +94,22 @@ export async function announceOrder(ctx: MutationCtx, o: Doc<"orders">, users: I
     link: `/w/orders/${o._id}`,
     html: cardHtml(await cardOf(ctx, o, false), `${opts.again ? "🔁" : "🆕"} ${title}`),
     buttons: workerButtons("awaiting_executor", o._id),
+  });
+}
+
+/**
+ * «Вам назначен заказ» мастеру (ТЗ п.12, п.18): колокольчик + карточка в Telegram с кнопками «Подтвердить / Отказаться».
+ * Одно сообщение для ручного назначения и автораспределения; note — что добавить к просьбе подтвердить.
+ */
+export async function notifyAssigned(ctx: MutationCtx, o: Doc<"orders">, opts: { note?: string } = {}): Promise<void> {
+  if (!o.executorId) return;
+  const service = (await loadCatalog(ctx)).label(o.serviceId);
+  const card = cardHtml(await cardOf(ctx, o, false), `📌 Вам назначен заказ №${o.number}`);
+  await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Вам назначен заказ №${o.number}: ${service}. ${opts.note ?? "Подтвердите в кабинете"}`, {
+    link: `/w/orders/${o._id}`,
+    tone: "warn",
+    html: opts.note ? `${card}\n\n<b>${esc(opts.note)}</b>` : card,
+    buttons: workerButtons("assigned", o._id, env("APP_URL")),
   });
 }
 

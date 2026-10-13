@@ -30,6 +30,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { addClientNote, report, setClientTags, toast } from "../data/store";
 import type { Order } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
+import { ClientEraseCard, ErasedClientNotice } from "../components/ClientPrivacy";
 import { ServiceLabel, SourceIcon } from "../components/icons";
 import { Avatar, BackLink, Badge, Button, Card, EmptyState, IconTile, Loading, Menu, MenuItem, Textarea } from "../components/ui";
 import { cn, date, dateTime, money, phone, plural, shortName } from "../lib/format";
@@ -66,6 +67,8 @@ export default function ClientDetail() {
   const touches = d!.interactions;
   const notes = d!.notes;
   const st = clientState(c, now);
+  // Данные удалены по запросу клиента: карточка только для чтения, звонить и писать некому.
+  const erased = !!c.anonymizedAt;
 
   const copy = (v: string) => {
     void navigator.clipboard?.writeText(v);
@@ -81,6 +84,7 @@ export default function ClientDetail() {
     <>
       <BackLink to="/clients">К списку клиентов</BackLink>
       <h1 className="mb-5 text-[28px] font-bold tracking-[-0.025em] text-ink sm:text-[32px]">Карточка клиента</h1>
+      {c.anonymizedAt && <ErasedClientNotice at={c.anonymizedAt} />}
 
       <section className="card flex flex-wrap items-center gap-5 p-5 sm:p-6">
         <Avatar name={c.name} size={92} status={st.label === "В работе" || st.label === "Активный" ? "green" : undefined} />
@@ -90,9 +94,11 @@ export default function ClientDetail() {
             <Badge tone={st.tone}>{st.label}</Badge>
           </div>
           <div className="mt-2 flex flex-wrap gap-x-7 gap-y-1.5 text-[15px] text-ink-2">
-            <a href={`tel:+${c.phone}`} className="inline-flex items-center gap-2 hover:text-brand-ink">
-              <Phone size={18} className="text-muted" /> {phone(c.phone)}
-            </a>
+            {c.phone && (
+              <a href={`tel:+${c.phone}`} className="inline-flex items-center gap-2 hover:text-brand-ink">
+                <Phone size={18} className="text-muted" /> {phone(c.phone)}
+              </a>
+            )}
             <span className="inline-flex items-center gap-2">
               <MapPin size={18} className="text-muted" /> {c.city}
             </span>
@@ -113,7 +119,7 @@ export default function ClientDetail() {
                 </button>
               </span>
             ))}
-            {tag === null ? (
+            {erased ? null : tag === null ? (
               <button onClick={() => setTag("")} className="inline-flex items-center gap-1.5 rounded-[8px] bg-slate-bg px-3 py-1.5 text-[13.5px] font-medium text-muted hover:text-ink">
                 <Plus size={15} /> Добавить тег
               </button>
@@ -133,7 +139,7 @@ export default function ClientDetail() {
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className={cn("flex flex-wrap items-center gap-2.5", erased && "hidden")}>
           <Button size="lg" icon={Plus} className="h-[50px] text-[15px]" onClick={() => ui.openLead({ clientId: c.id })}>
             Новая заявка
           </Button>
@@ -169,14 +175,16 @@ export default function ClientDetail() {
         <Card
           title="Контактные данные"
           action={
-            <button onClick={() => ui.openClient(c.id)} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink">
-              <Pencil size={15} /> Редактировать
-            </button>
+            erased ? undefined : (
+              <button onClick={() => ui.openClient(c.id)} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink">
+                <Pencil size={15} /> Редактировать
+              </button>
+            )
           }
         >
           <dl className="divide-y divide-line">
-            <Row icon={Phone} label="Телефон" copy={() => copy(phone(c.phone))}>
-              {phone(c.phone)}
+            <Row icon={Phone} label="Телефон" copy={c.phone ? () => copy(phone(c.phone)) : undefined}>
+              {c.phone ? phone(c.phone) : <span className="text-muted">—</span>}
             </Row>
             <Row icon={Mail} label="Email" copy={c.email ? () => copy(c.email!) : undefined}>
               {c.email ?? <span className="text-muted">—</span>}
@@ -280,9 +288,11 @@ export default function ClientDetail() {
           <Card
             title="Комментарии"
             action={
-              <button onClick={() => setNoting(true)} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink">
-                <PlusCircle size={17} /> Добавить
-              </button>
+              erased ? undefined : (
+                <button onClick={() => setNoting(true)} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink">
+                  <PlusCircle size={17} /> Добавить
+                </button>
+              )
             }
           >
             {noting && (
@@ -337,6 +347,7 @@ export default function ClientDetail() {
       <Card className="mt-4" title="История заказов" bodyClass="px-3 pb-3 sm:px-4">
         <OrdersTable orders={past} empty="Завершённых заказов пока нет" />
       </Card>
+      <ClientEraseCard client={c} />
       <EntityHistory entity="client" entityId={c.id} variant="card" className="mt-4" />
     </>
   );

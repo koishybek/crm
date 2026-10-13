@@ -144,6 +144,8 @@ export default defineSchema({
     activeCount: v.number(),
     lastOrderAt: v.optional(v.string()),
     lastActivityAt: v.string(),
+    /** Данные удалены по запросу клиента (ТЗ п.26): карточка обезличена, номера и суммы заказов остались. */
+    anonymizedAt: v.optional(v.string()),
   })
     .index("by_phone", ["phone"])
     .index("by_activity", ["lastActivityAt"])
@@ -210,6 +212,11 @@ export default defineSchema({
     // Чтобы напоминания о сроке не уходили повторно.
     soonNotified: v.optional(v.boolean()),
     overdueNotified: v.optional(v.boolean()),
+    // Автораспределение (ТЗ п.23): кому система уже предлагала заказ, когда назначила текущего мастера
+    // (совпадает с assignedAt, пока назначение автоматическое) и когда сообщила, что кандидаты кончились.
+    autoOffered: v.optional(v.array(v.id("executors"))),
+    autoAssignedAt: v.optional(v.string()),
+    autoExhaustedAt: v.optional(v.string()),
   })
     .index("by_status", ["status", "deadline"])
     .index("by_executor", ["executorId", "status"])
@@ -324,7 +331,10 @@ export default defineSchema({
     .index("by_started", ["startedAt"])
     .index("by_external", ["externalId"])
     .index("by_status", ["status", "startedAt"])
-    .index("by_client", ["clientId", "startedAt"]),
+    .index("by_client", ["clientId", "startedAt"])
+    // Звонки по номеру — при удалении данных клиента по его запросу (ТЗ п.26): звонок мог прийти раньше, чем клиента завели.
+    .index("by_from", ["from"])
+    .index("by_to", ["to"]),
 
   /** Настройки компании ключ → значение (секрет вебхука АТС и т.п.). */
   settings: defineTable({ key: v.string(), value: v.string() }).index("by_key", ["key"]),
