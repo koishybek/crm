@@ -13,6 +13,8 @@ const at = new Date().toISOString();
 type Sent = { method: string; body: Record<string, unknown> };
 const AI_EXTRACT = { summary: "Стиральная машина не сливает воду", serviceId: "wm-repair", city: "Алматы", address: null, when: "сегодня после 19:00", budget: null, urgency: "high", clientName: "Ерлан", questions: ["Модель машины?"] };
 let sent: Sent[] = [];
+/** convex-test не хранит тип загрузки (Convex берёт его из Content-Type) — проставляем, как сделал бы сервер. */
+type RawDb = { patch: (id: string, value: Record<string, unknown>) => Promise<void> };
 
 beforeEach(() => {
   sent = [];
@@ -207,7 +209,16 @@ describe("запись звонка → AI", () => {
     vi.stubEnv("AI_SECRET", "s");
     const { t, ids } = await setup();
     const owner = t.withIdentity({ subject: `${ids.owner}|s` });
-    const rec = () => t.run((ctx) => ctx.storage.store(new Blob(["fake audio"], { type: "audio/mpeg" })));
+    // Запись загружена браузером и подтверждена (files.confirmUpload) — только такую можно отдать в звонок.
+    const rec = async () => {
+      const storageId = await t.run(async (ctx) => {
+        const id = await ctx.storage.store(new Blob(["fake audio"], { type: "audio/mpeg" }));
+        await (ctx.db as unknown as RawDb).patch(id, { contentType: "audio/mpeg" });
+        return id;
+      });
+      await owner.mutation(api.files.confirmUpload, { storageId });
+      return storageId;
+    };
     const fromForm = await owner.mutation(api.calls.upload, { storageId: await rec(), phone: "+7 701 555 01 47", autoLead: false });
     const fromPage = await owner.mutation(api.calls.upload, { storageId: await rec(), phone: "77015550148" });
     await t.finishAllScheduledFunctions(vi.runAllTimers);

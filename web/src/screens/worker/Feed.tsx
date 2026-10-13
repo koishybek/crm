@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { categoryById, serviceById } from "../../data/catalog";
+import { useFileQuery } from "../../data/files";
 import { useNow } from "../../data/hooks";
 import { report } from "../../data/store";
 import type { WorkerOrder } from "../../data/types";
@@ -52,7 +53,7 @@ const PAGE = 30;
 
 export function Feed() {
   const data = useQuery(api.worker.feed);
-  const extras = useQuery(api.executorApp.feedExtras);
+  const extras = useFileQuery(api.executorApp.feedExtras, {});
   const mine = useQuery(api.worker.mine);
   const now = useNow();
   const nav = useNavigate();

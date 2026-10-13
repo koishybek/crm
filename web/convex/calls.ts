@@ -10,7 +10,7 @@ import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
 import { markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
-import { dropFile } from "./lib/files";
+import { dropFile, fileSigner, takeUpload } from "./lib/files";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -28,18 +28,19 @@ export const list = query({
   handler: async (ctx) => {
     await requireRole(ctx, STAFF);
     const rows = await ctx.db.query("calls").withIndex("by_started").order("desc").take(300);
-    return Promise.all(rows.map((c) => toCall(ctx, c, false)));
+    return rows.map((c) => toCall(c, null));
   },
 });
 
+/** Карточка звонка с записью и расшифровкой. t — метка обновления подписанной ссылки на запись (src/data/files.ts). */
 export const get = query({
-  args: { id: v.id("calls") },
+  args: { id: v.id("calls"), t: v.optional(v.number()) },
   handler: async (ctx, { id }) => {
     await requireRole(ctx, STAFF);
     const c = await ctx.db.get(id);
     if (!c) return null;
     const lead = c.leadId ? await ctx.db.get(c.leadId) : null;
-    return { call: await toCall(ctx, c, true), lead: lead ? { id: lead._id, number: lead.number, orderId: lead.orderId ?? null } : null };
+    return { call: toCall(c, await fileSigner(ctx)), lead: lead ? { id: lead._id, number: lead.number, orderId: lead.orderId ?? null } : null };
   },
 });
 
@@ -58,7 +59,7 @@ export const live = query({
         const client = c.clientId ? await ctx.db.get(c.clientId) : null;
         const last = client ? await ctx.db.query("orders").withIndex("by_client", (q) => q.eq("clientId", client._id)).order("desc").first() : null;
         return {
-          call: await toCall(ctx, c, false),
+          call: toCall(c, null),
           client: client ? { id: client._id, name: client.name, city: client.city, ordersCount: client.ordersCount, activeCount: client.activeCount, tags: client.tags } : null,
           lastOrder: last ? { id: last._id, number: last.number, serviceId: last.serviceId, status: last.status } : null,
         };
@@ -70,11 +71,13 @@ export const live = query({
 /**
  * Оператор загрузил запись разговора (если АТС ещё не подключена).
  * autoLead=false — запись загружена из формы новой заявки: AI только заполняет форму, заявку сохраняет оператор.
+ * Запись — только своя подтверждённая загрузка и только аудио до 25 МБ (аудит M-10: большой файл ронял разбор).
  */
 export const upload = mutation({
   args: { storageId: v.id("_storage"), phone: v.optional(v.string()), autoLead: v.optional(v.boolean()) },
   handler: async (ctx, { storageId, phone, autoLead }): Promise<Id<"calls">> => {
     const me = await requireRole(ctx, STAFF);
+    await takeUpload(ctx, me._id, storageId, ["audio"]);
     const p = normPhone(phone);
     const client = validPhone(p) ? await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first() : null;
     const id = await ctx.db.insert("calls", {
@@ -178,6 +181,8 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
     status: "new",
     operatorId,
     createdAt: at,
+    // Адрес — не в описание (оно уходит мастерам в ленту, аудит H-3), а в служебный комментарий заявки.
+    comment: c.draft?.address ? `Адрес из звонка: ${c.draft.address.slice(0, 300)}` : undefined,
     ai: c.ai,
     callId: c._id,
   });

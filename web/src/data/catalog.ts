@@ -81,44 +81,61 @@ export interface Service {
   active?: boolean;
 }
 
-export const DEFAULT_SERVICES: Service[] = [
-  { id: "ac-install", category: "ac", label: "Установка кондиционера", icon: "airvent", price: [30000, 45000], payoutPct: 70, examples: ["Монтаж сплит-системы в квартире", "Установка сплит-системы 12 BTU, 3 этаж", "Перенос кондиционера в другую комнату"] },
-  { id: "ac-repair", category: "ac", label: "Ремонт кондиционера", icon: "snowflake", price: [20000, 35000], payoutPct: 70, examples: ["Плохо охлаждает, течёт вода с внутреннего блока", "Не включается, мигает индикатор", "Шумит внешний блок"] },
-  { id: "ac-clean", category: "ac", label: "Чистка кондиционера", icon: "snowflake", price: [10000, 16000], payoutPct: 65, examples: ["Сезонная чистка двух сплит-систем", "Неприятный запах при включении", "Профилактика перед летом"] },
-  { id: "ac-refill", category: "ac", label: "Заправка кондиционера", icon: "airvent", price: [13000, 20000], payoutPct: 65, examples: ["Дозаправка фреоном R410", "Не холодит после зимы"] },
-  { id: "wm-repair", category: "appliances", label: "Ремонт стиральной машины", icon: "washer", price: [12000, 32000], payoutPct: 70, examples: ["Не сливает воду, нужна диагностика и ремонт", "Диагностика и замена насоса", "Не крутит барабан, ошибка E21"] },
-  { id: "fridge-repair", category: "appliances", label: "Ремонт холодильника", icon: "fridge", price: [15000, 30000], payoutPct: 70, examples: ["Не охлаждает, проверить компрессор", "Течёт вода под холодильником", "Сильно шумит морозильная камера"] },
-  { id: "oven-repair", category: "appliances", label: "Ремонт духового шкафа", icon: "oven", price: [14000, 24000], payoutPct: 70, examples: ["Не греет нижний ТЭН", "Не работает конвекция"] },
-  { id: "dw-repair", category: "appliances", label: "Ремонт посудомоечной машины", icon: "dishwasher", price: [14000, 26000], payoutPct: 70, examples: ["Не набирает воду", "Плохо отмывает посуду"] },
-  { id: "leak-fix", category: "plumbing", label: "Устранение протечки", icon: "droplets", price: [10000, 18000], payoutPct: 70, examples: ["Течёт под раковиной на кухне", "Капает с потолка в ванной, срочно"] },
-  { id: "plumbing", category: "plumbing", label: "Сантехнические работы", icon: "wrench", price: [12000, 30000], payoutPct: 70, examples: ["Замена унитаза и смесителя", "Разводка труб в ванной"] },
-  { id: "faucet", category: "plumbing", label: "Установка смесителя", icon: "faucet", price: [8000, 12000], payoutPct: 70, examples: ["Установить смеситель на кухне", "Замена смесителя в ванной"] },
-  { id: "el-diag", category: "electric", label: "Диагностика электрики", icon: "zap", price: [10000, 18000], payoutPct: 70, examples: ["Выбивает автомат, найти причину", "Проверка проводки в офисе"] },
-  { id: "el-install", category: "electric", label: "Электромонтаж", icon: "plug", price: [25000, 90000], payoutPct: 72, examples: ["Электромонтаж в новой квартире 2 комнаты", "Замена щитка и автоматов"] },
-  { id: "el-sockets", category: "electric", label: "Замена розеток и выключателей", icon: "plug", price: [8000, 14000], payoutPct: 70, examples: ["Заменить 6 розеток и 3 выключателя"] },
-  { id: "boiler", category: "heating", label: "Установка бойлера", icon: "boiler", price: [18000, 28000], payoutPct: 70, examples: ["Установка бойлера на 80 литров", "Заменить старый бойлер на новый"] },
-  { id: "boiler-service", category: "heating", label: "Техобслуживание котла", icon: "flame", price: [18000, 30000], payoutPct: 68, examples: ["Ежегодное ТО газового котла", "Котёл тухнет, ошибка давления"] },
-  { id: "furniture", category: "furniture", label: "Сборка мебели", icon: "hammer", price: [12000, 25000], payoutPct: 75, examples: ["Собрать шкаф (ИКЕА), 3 секции", "Сборка кухонного гарнитура", "Собрать кровать и комод"] },
-  { id: "cleaning", category: "cleaning", label: "Генеральная уборка", icon: "sparkles", price: [20000, 45000], payoutPct: 65, examples: ["Квартира 2 комнаты, ~60 м²", "Уборка после ремонта, 3 комнаты"] },
-  { id: "sofa-clean", category: "cleaning", label: "Химчистка дивана", icon: "brush", price: [12000, 20000], payoutPct: 65, examples: ["Угловой диван, пятна от кофе", "Химчистка дивана и двух кресел"] },
-  { id: "pc-repair", category: "it", label: "Ремонт компьютеров", icon: "monitor", price: [8000, 20000], payoutPct: 70, examples: ["Ноутбук греется и выключается", "Переустановка Windows и программ"] },
-  { id: "network", category: "it", label: "Настройка сети и Wi‑Fi", icon: "wifi", price: [10000, 35000], payoutPct: 70, examples: ["Настроить Wi‑Fi в офисе на 15 человек", "Слабый сигнал в дальней комнате"] },
-  { id: "web-dev", category: "it", label: "Разработка сайта", icon: "code", price: [350000, 450000], payoutPct: 62, examples: ["Сайт-визитка для клиники, 5 страниц", "Лендинг с формой заявки и интеграцией WhatsApp"] },
-  { id: "intercom", category: "intercom", label: "Обслуживание домофона", icon: "intercom", price: [15000, 30000], payoutPct: 70, examples: ["Не открывается дверь подъезда по ключу", "Плановое обслуживание домофонов ЖК"] },
-  { id: "cctv", category: "intercom", label: "Установка видеонаблюдения", icon: "camera", price: [40000, 120000], payoutPct: 70, examples: ["4 камеры во дворе частного дома", "Видеонаблюдение для магазина"] },
-  // Запасная услуга: заявка из Telegram или звонка, где AI не узнал услугу — оператор уточнит.
-  { id: "other", category: "other", label: "Другое — уточнить", icon: "wrench", price: [0, 0], payoutPct: 70, examples: [] },
-];
+/** Услуга глазами мастера и публичной формы: без цены клиента и доли исполнителя (аудит H-2). */
+export type ServiceInfo = Omit<Service, "price" | "payoutPct">;
+
+/**
+ * Справочник по умолчанию — без денег: этот файл в публичном бандле. Типичные цены и доли живут только на сервере
+ * (convex/lib/defaultPrices.ts), сотрудники получают их вместе со справочником.
+ */
+const NO_MONEY: Pick<Service, "price" | "payoutPct"> = { price: [0, 0], payoutPct: 0 };
+
+export const DEFAULT_SERVICES: Service[] = (
+  [
+    { id: "ac-install", category: "ac", label: "Установка кондиционера", icon: "airvent", examples: ["Монтаж сплит-системы в квартире", "Установка сплит-системы 12 BTU, 3 этаж", "Перенос кондиционера в другую комнату"] },
+    { id: "ac-repair", category: "ac", label: "Ремонт кондиционера", icon: "snowflake", examples: ["Плохо охлаждает, течёт вода с внутреннего блока", "Не включается, мигает индикатор", "Шумит внешний блок"] },
+    { id: "ac-clean", category: "ac", label: "Чистка кондиционера", icon: "snowflake", examples: ["Сезонная чистка двух сплит-систем", "Неприятный запах при включении", "Профилактика перед летом"] },
+    { id: "ac-refill", category: "ac", label: "Заправка кондиционера", icon: "airvent", examples: ["Дозаправка фреоном R410", "Не холодит после зимы"] },
+    { id: "wm-repair", category: "appliances", label: "Ремонт стиральной машины", icon: "washer", examples: ["Не сливает воду, нужна диагностика и ремонт", "Диагностика и замена насоса", "Не крутит барабан, ошибка E21"] },
+    { id: "fridge-repair", category: "appliances", label: "Ремонт холодильника", icon: "fridge", examples: ["Не охлаждает, проверить компрессор", "Течёт вода под холодильником", "Сильно шумит морозильная камера"] },
+    { id: "oven-repair", category: "appliances", label: "Ремонт духового шкафа", icon: "oven", examples: ["Не греет нижний ТЭН", "Не работает конвекция"] },
+    { id: "dw-repair", category: "appliances", label: "Ремонт посудомоечной машины", icon: "dishwasher", examples: ["Не набирает воду", "Плохо отмывает посуду"] },
+    { id: "leak-fix", category: "plumbing", label: "Устранение протечки", icon: "droplets", examples: ["Течёт под раковиной на кухне", "Капает с потолка в ванной, срочно"] },
+    { id: "plumbing", category: "plumbing", label: "Сантехнические работы", icon: "wrench", examples: ["Замена унитаза и смесителя", "Разводка труб в ванной"] },
+    { id: "faucet", category: "plumbing", label: "Установка смесителя", icon: "faucet", examples: ["Установить смеситель на кухне", "Замена смесителя в ванной"] },
+    { id: "el-diag", category: "electric", label: "Диагностика электрики", icon: "zap", examples: ["Выбивает автомат, найти причину", "Проверка проводки в офисе"] },
+    { id: "el-install", category: "electric", label: "Электромонтаж", icon: "plug", examples: ["Электромонтаж в новой квартире 2 комнаты", "Замена щитка и автоматов"] },
+    { id: "el-sockets", category: "electric", label: "Замена розеток и выключателей", icon: "plug", examples: ["Заменить 6 розеток и 3 выключателя"] },
+    { id: "boiler", category: "heating", label: "Установка бойлера", icon: "boiler", examples: ["Установка бойлера на 80 литров", "Заменить старый бойлер на новый"] },
+    { id: "boiler-service", category: "heating", label: "Техобслуживание котла", icon: "flame", examples: ["Ежегодное ТО газового котла", "Котёл тухнет, ошибка давления"] },
+    { id: "furniture", category: "furniture", label: "Сборка мебели", icon: "hammer", examples: ["Собрать шкаф (ИКЕА), 3 секции", "Сборка кухонного гарнитура", "Собрать кровать и комод"] },
+    { id: "cleaning", category: "cleaning", label: "Генеральная уборка", icon: "sparkles", examples: ["Квартира 2 комнаты, ~60 м²", "Уборка после ремонта, 3 комнаты"] },
+    { id: "sofa-clean", category: "cleaning", label: "Химчистка дивана", icon: "brush", examples: ["Угловой диван, пятна от кофе", "Химчистка дивана и двух кресел"] },
+    { id: "pc-repair", category: "it", label: "Ремонт компьютеров", icon: "monitor", examples: ["Ноутбук греется и выключается", "Переустановка Windows и программ"] },
+    { id: "network", category: "it", label: "Настройка сети и Wi‑Fi", icon: "wifi", examples: ["Настроить Wi‑Fi в офисе на 15 человек", "Слабый сигнал в дальней комнате"] },
+    { id: "web-dev", category: "it", label: "Разработка сайта", icon: "code", examples: ["Сайт-визитка для клиники, 5 страниц", "Лендинг с формой заявки и интеграцией WhatsApp"] },
+    { id: "intercom", category: "intercom", label: "Обслуживание домофона", icon: "intercom", examples: ["Не открывается дверь подъезда по ключу", "Плановое обслуживание домофонов ЖК"] },
+    { id: "cctv", category: "intercom", label: "Установка видеонаблюдения", icon: "camera", examples: ["4 камеры во дворе частного дома", "Видеонаблюдение для магазина"] },
+    // Запасная услуга: заявка из Telegram или звонка, где AI не узнал услугу — оператор уточнит.
+    { id: "other", category: "other", label: "Другое — уточнить", icon: "wrench", examples: [] },
+  ] satisfies ServiceInfo[]
+).map((s) => ({ ...s, ...NO_MONEY }));
 export let SERVICES: Service[] = DEFAULT_SERVICES;
 /** Неизвестная (удалённая) услуга не роняет экран — показываем её ключ. */
 export const serviceById = (id: string): Service =>
-  SERVICES.find((s) => s.id === id) ?? DEFAULT_SERVICES.find((s) => s.id === id) ?? { id, category: "other", label: id, icon: "wrench", price: [0, 0], payoutPct: 70, examples: [] };
+  SERVICES.find((s) => s.id === id) ?? DEFAULT_SERVICES.find((s) => s.id === id) ?? { id, category: "other", label: id, icon: "wrench", ...NO_MONEY, examples: [] };
 
-/** Подменить справочник тем, что пришёл с сервера (вызывается один раз при загрузке и при изменениях). */
-export function setCatalog(categories: Category[], services: Service[]) {
+/**
+ * Подменить справочник тем, что пришёл с сервера (вызывается один раз при загрузке и при изменениях).
+ * Мастеру сервер цен и долей не присылает — у него в справочнике нули.
+ */
+export function setCatalog(categories: Category[], services: readonly (ServiceInfo & Partial<Pick<Service, "price" | "payoutPct">>)[]) {
   CATEGORIES = categories.length ? categories : DEFAULT_CATEGORIES;
-  SERVICES = services.length ? services : DEFAULT_SERVICES;
+  SERVICES = services.length ? services.map(asService) : DEFAULT_SERVICES;
 }
+
+/** Услуга из ответа catalog.list: у мастера денег нет — нули (сотрудники получают цены и долю). */
+export const asService = (s: ServiceInfo & Partial<Pick<Service, "price" | "payoutPct">>): Service => ({ ...s, price: s.price ?? NO_MONEY.price, payoutPct: s.payoutPct ?? NO_MONEY.payoutPct });
 
 export const URGENCY: Record<Urgency, { label: string; tone: Tone }> = {
   normal: { label: "Обычный", tone: "gray" },

@@ -6,6 +6,7 @@ import { CircleUserRound, ClipboardList, Search, Wallet, type LucideIcon } from 
 import { Suspense, useEffect, useMemo, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useMatch } from "react-router";
 import { api } from "../../../convex/_generated/api";
+import { useFileQuery } from "../../data/files";
 import { useNow } from "../../data/hooks";
 import type { User } from "../../data/types";
 import { countUnseen } from "../../data/workerFeed";
@@ -53,7 +54,7 @@ interface Badges {
 function useBadges(): { badges: Badges; available: boolean | undefined } {
   const now = useNow(60_000);
   const mine = useQuery(api.worker.mine);
-  const extras = useQuery(api.executorApp.feedExtras);
+  const extras = useFileQuery(api.executorApp.feedExtras, {});
   const tg = useQuery(api.telegram.status);
   const seenAt = useWorkerPrefs((s) => s.feedSeenAt);
   const available = mine?.executor.available;

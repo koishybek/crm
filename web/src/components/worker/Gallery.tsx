@@ -4,6 +4,7 @@ import { ExternalLink, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import type { WorkerPhoto } from "../../data/workerTypes";
+import { SignedImg } from "../SignedMedia";
 import { IconBtn } from "./kit";
 import { Photo } from "./parts";
 
@@ -81,7 +82,7 @@ function Viewer({ photos, start, onClose }: { photos: WorkerPhoto[]; start: numb
         {photos.map((p, i) => (
           <div key={p.id} className="flex h-full w-full shrink-0 snap-center items-center justify-center">
             {/* Оригиналы тяжёлые: соседние фото грузятся, только когда до них долистали. */}
-            <img src={p.url} alt={`Фото ${i + 1} из ${photos.length}`} loading={i === start ? "eager" : "lazy"} decoding="async" className="max-h-full max-w-full object-contain" />
+            <SignedImg src={p.url} alt={`Фото ${i + 1} из ${photos.length}`} loading={i === start ? "eager" : "lazy"} decoding="async" className="max-h-full max-w-full object-contain" />
           </div>
         ))}
       </div>

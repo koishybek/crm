@@ -5,8 +5,10 @@ import { assertScope, currentUser, inScope, requireRole, scopeOf, TEAM } from ".
 import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor } from "./lib/domain";
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
+import { cleanFileName, fileSigner, takeUpload } from "./lib/files";
 import { cleanMoney, cleanText } from "./lib/limits";
 import { suitableUsers } from "./lib/matching";
+import { hitLimit } from "./lib/rateLimit";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
@@ -14,7 +16,7 @@ import { orderNotice } from "./clientNotify";
 import { fitsOrder, isOpenForFeed, margin, payout } from "../src/data/logic";
 import { catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money, shortName } from "../src/lib/format";
-import { attachment, orderStatus, paymentMethod, urgency } from "./schema";
+import { messageChannel, orderStatus, paymentMethod, urgency } from "./schema";
 
 async function activeOrders(ctx: QueryCtx) {
   const out: Doc<"orders">[] = [];
@@ -47,8 +49,9 @@ export const active = query({
   },
 });
 
+/** Карточка заказа. t — метка обновления подписанных ссылок на файлы (src/data/files.ts). */
 export const detail = query({
-  args: { id: v.id("orders") },
+  args: { id: v.id("orders"), t: v.optional(v.number()) },
   handler: async (ctx, { id }) => {
     const scope = scopeOf(await requireRole(ctx, TEAM));
     const o = await ctx.db.get(id);
@@ -60,10 +63,13 @@ export const detail = query({
       ctx.db.query("executors").collect(),
       activeOrders(ctx),
     ]);
+    const signer = await fileSigner(ctx);
+    // Отметка «видно мастеру» у вложений переписки — по файлам заказа: их переключает «Показать мастеру».
+    const shown = new Set(o.files.filter((f) => f.forExecutor === true).map((f) => f.id));
     return {
-      order: await toOrderWithFiles(ctx, o),
+      order: toOrderWithFiles(o, signer),
       client: client ? { id: client._id, name: client.name, phone: client.phone } : null,
-      messages: await Promise.all(messages.map((m) => toMessage(ctx, m))),
+      messages: messages.map((m) => toMessage(m, signer, shown)),
       history: history.map(toHistory),
       executors: executors.filter((e) => !scope || e.categories.some((c) => scope.includes(c))).map(toExecutor),
       // Для подбора: кто чем занят (без цен — только статус и исполнитель).
@@ -355,38 +361,88 @@ export const assign = mutation({
   },
 });
 
-/** Ссылка для загрузки файла в хранилище Convex. */
+/** Ссылок на загрузку одному пользователю в час (аудит M-10): хранилище не резиновое. */
+const UPLOADS_PER_HOUR = 100;
+
+/** Ссылка для загрузки файла в хранилище Convex. Следующий шаг — files.confirmUpload: тип, размер и владелец. */
 export const uploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
-    if (!(await currentUser(ctx))) throw new ConvexError("Нужно войти");
+    const me = await currentUser(ctx);
+    if (!me) throw new ConvexError("Нужно войти");
+    if (!(await hitLimit(ctx, `upload:${me._id}`, UPLOADS_PER_HOUR, 3600_000))) throw new ConvexError("Слишком много загрузок подряд — попробуйте через час");
     return ctx.storage.generateUploadUrl();
   },
 });
 
-/** Сообщение в заказе: сотрудник — в любой заказ, исполнитель — только в свой. */
+/** Файлов у заказа — не больше (аудит M-10): документ заказа не должен расти до лимита базы. */
+export const MAX_ORDER_FILES = 100;
+const COMMENT_LOG: Record<Doc<"messages">["channel"], string> = { internal: "Внутренний комментарий", client: "Добавлен комментарий", executor: "Сообщение в переписке с мастером" };
+
+/**
+ * Сообщение в заказе. Сотрудник — в заказ своего направления и в любой канал; исполнитель — только в свой заказ и только
+ * в переписку «С мастером» (аудит M-6, L-6). Файлы — только свои подтверждённые загрузки (files.confirmUpload), тип и
+ * размер сервер берёт из хранилища, а не от клиента.
+ */
 export const addMessage = mutation({
-  args: { orderId: v.id("orders"), text: v.string(), channel: v.union(v.literal("internal"), v.literal("client")), files: v.array(attachment) },
+  args: { orderId: v.id("orders"), text: v.string(), channel: messageChannel, files: v.array(v.object({ storageId: v.id("_storage"), name: v.string() })) },
   handler: async (ctx, { orderId, text, channel, files }) => {
     const me = await currentUser(ctx);
     if (!me) throw new ConvexError("Нужно войти");
     const o = await ctx.db.get(orderId);
     if (!o) throw new ConvexError("Заказ не найден");
-    if (me.role === "executor" && o.executorId !== me.executorId) throw new ConvexError("Это не ваш заказ");
+    const executor = me.role === "executor";
+    if (executor && (!me.executorId || o.executorId !== me.executorId)) throw new ConvexError("Это не ваш заказ");
+    if (executor && channel !== "executor") throw new ConvexError("Мастер пишет только в переписку с офисом");
     if (me.role === "manager") assertScope(me, o.category);
-    if (!text.trim() && !files.length) throw new ConvexError("Пустое сообщение");
+    const body = text.trim().slice(0, 4000);
+    if (!body && !files.length) throw new ConvexError("Пустое сообщение");
     if (files.length > 10) throw new ConvexError("Не больше 10 файлов за раз");
-    const at = nowIso();
-    await ctx.db.insert("messages", { orderId, author: userActor(me._id), channel, text: text.trim().slice(0, 4000), files, at });
-    const actor = userActor(me._id);
-    if (files.length) {
-      await ctx.db.patch(orderId, { files: [...o.files, ...files] });
-      await log(ctx, orderId, "file", `Добавлено файлов: ${files.length}`, actor);
+    if (o.files.length + files.length > MAX_ORDER_FILES) throw new ConvexError(`В заказе уже ${o.files.length} файлов — больше ${MAX_ORDER_FILES} прикрепить нельзя`);
+    const attached: Doc<"orders">["files"] = [];
+    for (const f of files) {
+      const kind = await takeUpload(ctx, me._id, f.storageId);
+      // Переписка с мастером (и его фотоотчёт) видна ему сразу; остальные файлы — по «Показать мастеру».
+      attached.push({ id: uid("f"), name: cleanFileName(f.name) || "файл", kind: kind === "image" ? "image" : "file", storageId: f.storageId, ...(channel === "executor" ? { forExecutor: true } : {}) });
     }
-    if (text.trim()) await log(ctx, orderId, "comment", channel === "internal" ? "Внутренний комментарий" : "Добавлен комментарий", actor);
-    const exUser = o.executorId ? (await executorUser(ctx, o.executorId))?._id : undefined;
-    await notify(ctx, await staffIds(ctx, o.category), `Новое сообщение в заказе №${o.number}`, { link: `/orders/${orderId}`, except: me._id });
-    if (exUser) await notify(ctx, [exUser], `Новое сообщение в заказе №${o.number}`, { link: `/w/orders/${orderId}`, except: me._id });
+    const actor = userActor(me._id);
+    await ctx.db.insert("messages", { orderId, author: actor, channel, text: body, files: attached, at: nowIso() });
+    if (attached.length) {
+      await ctx.db.patch(orderId, { files: [...o.files, ...attached] });
+      await log(ctx, orderId, "file", `Добавлено файлов: ${attached.length}`, actor);
+    }
+    if (body) await log(ctx, orderId, "comment", COMMENT_LOG[channel], actor);
+    await notify(ctx, await staffIds(ctx, o.category), executor ? `Мастер написал по заказу №${o.number}` : `Новое сообщение в заказе №${o.number}`, { link: `/orders/${orderId}`, except: me._id });
+    // Мастер узнаёт только о переписке с ним: внутренние заметки и переписка по клиенту ему не видны.
+    if (channel === "executor" && !executor && o.executorId) {
+      await notify(ctx, [(await executorUser(ctx, o.executorId))?._id], `Офис написал по заказу №${o.number}${body ? `: «${body.slice(0, 120)}»` : ""}`, { link: `/w/orders/${orderId}`, except: me._id });
+    }
+  },
+});
+
+/**
+ * «Показать мастеру» у файла заказа (ТЗ п.16, аудит M-6): мастер видит только отмеченные файлы и переписку с ним.
+ * Вложения переписки с мастером он и так видит в ней — скрыть их нельзя.
+ */
+export const setFileForExecutor = mutation({
+  args: { orderId: v.id("orders"), fileId: v.string(), forExecutor: v.boolean() },
+  handler: async (ctx, { orderId, fileId, forExecutor }) => {
+    const me = await requireRole(ctx, TEAM);
+    const o = await staffOrder(ctx, orderId);
+    const file = o.files.find((f) => f.id === fileId);
+    if (!file) throw new ConvexError("Файл не найден");
+    if ((file.forExecutor === true) === forExecutor) return;
+    if (!forExecutor) {
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_order", (q) => q.eq("orderId", orderId))
+        .collect();
+      if (messages.some((m) => m.channel === "executor" && m.files.some((f) => f.id === fileId))) throw new ConvexError("Файл из переписки с мастером — он его уже видит");
+    }
+    await ctx.db.patch(orderId, { files: o.files.map((f) => (f.id === fileId ? { ...f, forExecutor } : f)) });
+    const text = forExecutor ? `Файл «${file.name}» показан исполнителю` : `Файл «${file.name}» скрыт от исполнителя`;
+    await log(ctx, orderId, "file", text, userActor(me._id));
+    await audit(ctx, me, "order.fileAccess", `Заказ №${o.number}: ${lowerFirst(text)}`, { entityId: orderId, meta: { fileId, forExecutor } });
   },
 });
 

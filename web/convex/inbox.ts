@@ -11,6 +11,7 @@ import { currentUser, requireRole, STAFF } from "./lib/access";
 import { audit, type AuditActor } from "./lib/audit";
 import { isMeaningful, isPlaceholder, PLACEHOLDER } from "./lib/chat";
 import { notify, nowIso, TENANT } from "./lib/domain";
+import { fileSigner, type FileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { intakeLead } from "./lib/intake";
 import { markChannelRead, replyBlock, replyMaxText, sendToChannel, ChannelError } from "./lib/outbound";
@@ -95,7 +96,7 @@ const toConversation = (c: Doc<"conversations">): Conversation => ({
   replyUntil: c.replyUntil,
 });
 
-async function toMessage(ctx: QueryCtx, m: Doc<"conversationMessages">): Promise<ConversationMessage> {
+function toMessage(m: Doc<"conversationMessages">, signer: FileSigner): ConversationMessage {
   return {
     id: m._id,
     conversationId: m.conversationId,
@@ -104,7 +105,7 @@ async function toMessage(ctx: QueryCtx, m: Doc<"conversationMessages">): Promise
     text: m.text,
     at: m.at,
     authorId: m.authorId,
-    fileUrl: m.fileId ? ((await ctx.storage.getUrl(m.fileId)) ?? undefined) : undefined,
+    fileUrl: signer.url(m.fileId, m.kind === "file" ? m.fileName : undefined),
     fileName: m.fileName,
     status: m.status,
     error: m.error,
@@ -572,9 +573,12 @@ export const unreadCount = query({
   },
 });
 
-/** Диалог с последними сообщениями. id — строкой: ссылка /inbox?c=… могла устареть или быть набрана руками. */
+/**
+ * Диалог с последними сообщениями. id — строкой: ссылка /inbox?c=… могла устареть или быть набрана руками.
+ * t — метка обновления подписанных ссылок на фото и голосовые (src/data/files.ts).
+ */
 export const get = query({
-  args: { id: v.string(), limit: v.optional(v.number()) },
+  args: { id: v.string(), limit: v.optional(v.number()), t: v.optional(v.number()) },
   handler: async (ctx, { id: raw, limit }): Promise<ConversationDetail | null> => {
     await requireRole(ctx, STAFF);
     const id = ctx.db.normalizeId("conversations", raw);
@@ -588,9 +592,13 @@ export const get = query({
       .take(n + 1);
     const [lead, client] = await Promise.all([c.leadId ? ctx.db.get(c.leadId) : null, c.clientId ? ctx.db.get(c.clientId) : null]);
     const meta = c.meta && typeof c.meta === "object" ? (c.meta as Record<string, unknown>) : {};
+    const signer = await fileSigner(ctx);
     return {
       conversation: toConversation(c),
-      messages: await Promise.all(rows.slice(0, n).reverse().map((m) => toMessage(ctx, m))),
+      messages: rows
+        .slice(0, n)
+        .reverse()
+        .map((m) => toMessage(m, signer)),
       hasMore: rows.length > n,
       replyBlock: (await replyBlock(ctx, c, Date.now())) ?? undefined,
       lead: lead ? { id: lead._id, number: lead.number, status: lead.status, orderId: lead.orderId } : undefined,

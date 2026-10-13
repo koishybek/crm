@@ -1,10 +1,19 @@
-import { ImageIcon, Lock, Paperclip, SendHorizontal, FileText, X } from "lucide-react";
+import { Eye, EyeOff, FileText, HardHat, ImageIcon, Lock, Paperclip, SendHorizontal, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Id } from "../../convex/_generated/dataModel";
-import { addMessage, toast, uploadFile } from "../data/store";
-import type { Actor, Attachment, Message, User } from "../data/types";
+import { setFileForExecutor } from "../data/files";
+import { addMessage, report, toast, uploadFile } from "../data/store";
+import type { Actor, Attachment, Message, MessageChannel, User } from "../data/types";
 import { cn, shortName, when } from "../lib/format";
+import { SignedImg } from "./SignedMedia";
 import { Avatar, Modal } from "./ui";
+
+const Placeholder = ({ name }: { name: string }) => (
+  <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted">
+    <ImageIcon size={20} />
+    <span className="max-w-full truncate px-1.5 text-[10.5px]">{name.replace(/\.\w+$/, "")}</span>
+  </span>
+);
 
 export function Thumb({ a, onOpen, size = 96 }: { a: Attachment; onOpen?: (a: Attachment) => void; size?: number }) {
   if (a.kind === "file") {
@@ -31,36 +40,90 @@ export function Thumb({ a, onOpen, size = 96 }: { a: Attachment; onOpen?: (a: At
       className="relative overflow-hidden rounded-[10px] border border-line bg-[linear-gradient(135deg,#f1efe9,#dfe7f1)]"
       style={{ width: size, height: Math.round(size * 0.68) }}
     >
-      {a.src ? (
-        <img src={a.src} alt={a.name} className="h-full w-full object-cover" />
-      ) : (
-        <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-muted">
-          <ImageIcon size={20} />
-          <span className="max-w-full truncate px-1.5 text-[10.5px]">{a.name.replace(/\.\w+$/, "")}</span>
-        </span>
+      <SignedImg src={a.src} alt={a.name} className="h-full w-full object-cover" fallback={<Placeholder name={a.name} />} />
+    </button>
+  );
+}
+
+/**
+ * Видно ли файл мастеру. Вложения переписки с мастером он видит в ней всегда; остальные — по «Показать мастеру».
+ * Сервер не даст скрыть файл из переписки с мастером (orders.setFileForExecutor).
+ */
+function ExecutorAccess({ orderId, file, fromThread }: { orderId: string; file: Attachment; fromThread: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const shown = fromThread || file.forExecutor === true;
+  if (fromThread)
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-medium text-blue">
+        <Eye size={12} aria-hidden /> видно мастеру
+      </span>
+    );
+  const toggle = async () => {
+    setBusy(true);
+    report(await setFileForExecutor(orderId, file.id, !shown), shown ? "Мастер больше не видит файл" : "Файл показан мастеру");
+    setBusy(false);
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void toggle()}
+      disabled={busy}
+      aria-pressed={shown}
+      title={shown ? "Скрыть файл от мастера" : "Показать файл мастеру в его приложении"}
+      className={cn(
+        "mt-1 inline-flex items-center gap-1 rounded-[6px] px-1.5 py-0.5 text-[11.5px] font-medium disabled:opacity-60",
+        shown ? "bg-blue-soft text-blue" : "text-muted hover:bg-[#f4f2ec] hover:text-ink",
       )}
+    >
+      {shown ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}
+      {shown ? "Видно мастеру" : "Показать мастеру"}
     </button>
   );
 }
 
 type Pending = Attachment & { storageId?: Id<"_storage"> };
 
+const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: string; border: string; bubble: string; placeholder: string }[] = [
+  { id: "client", label: "Переписка с клиентом", active: "bg-brand-soft text-brand-ink", border: "border-line-strong", bubble: "bg-[#f6f4ee]", placeholder: "Написать комментарий..." },
+  {
+    id: "executor",
+    label: "С мастером",
+    icon: HardHat,
+    active: "bg-blue-soft text-blue",
+    border: "border-[#b9d6ff]",
+    bubble: "bg-blue-soft",
+    placeholder: "Сообщение мастеру — он увидит его в приложении и в Telegram...",
+  },
+  {
+    id: "internal",
+    label: "Внутренний",
+    icon: Lock,
+    active: "bg-warn-bg text-warn-ink",
+    border: "border-[#f5d9a8]",
+    bubble: "bg-[#fff7e8]",
+    placeholder: "Заметка для команды — ни клиент, ни мастер её не увидят...",
+  },
+];
+const channelOf = (id: MessageChannel) => CHANNELS.find((c) => c.id === id) ?? CHANNELS[0]!;
+
 /**
- * Переписка по заказу. Сообщения приходят с сервера (реактивно), файлы сразу грузятся в хранилище
- * и уходят вместе с сообщением. nameOf — как подписать автора.
+ * Переписка по заказу для сотрудников. Сообщения приходят с сервера (реактивно), файлы сразу грузятся в хранилище
+ * и уходят вместе с сообщением. Мастер видит только вкладку «С мастером» и файлы, отмеченные «Показать мастеру»
+ * (аудит M-6). nameOf — как подписать автора; executorName — кто сейчас назначен (подсказка во вкладке мастера).
  */
-export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId: string; messages: Message[]; me: User; nameOf: (a: Actor) => string; compact?: boolean }) {
+export function OrderChat({ orderId, messages, me, nameOf, compact, executorName }: { orderId: string; messages: Message[]; me: User; nameOf: (a: Actor) => string; compact?: boolean; executorName?: string }) {
   const [text, setText] = useState("");
-  const [channel, setChannel] = useState<"client" | "internal">("client");
+  const [channel, setChannel] = useState<MessageChannel>("client");
   const [files, setFiles] = useState<Pending[]>([]);
   const [uploading, setUploading] = useState(0);
   const [sending, setSending] = useState(false);
-  const [preview, setPreview] = useState<Attachment | null>(null);
+  // Просмотр фото — по id: ссылка берётся из свежих данных, а не та, что была при клике.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const preview = previewId ? (messages.flatMap((m) => m.files).find((f) => f.id === previewId) ?? null) : null;
   const fileRef = useRef<HTMLInputElement>(null);
   // Локальные превью выбранных картинок до отправки.
   useEffect(() => () => files.forEach((f) => f.src?.startsWith("blob:") && URL.revokeObjectURL(f.src)), [files]);
-
-  const who = (m: Message) => ({ name: nameOf(m.author) });
+  const current = channelOf(channel);
 
   const attach = async (list: File[]) => {
     setUploading((n) => n + list.length);
@@ -78,7 +141,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
   const send = async () => {
     if (uploading) return toast("Дождитесь загрузки файлов", "info");
     setSending(true);
-    const r = await addMessage(orderId, text, channel, files.map(({ src: _src, ...f }) => (void _src, f)));
+    const r = await addMessage(orderId, text, channel, files);
     setSending(false);
     if (!r.ok) return toast(r.error, "bad");
     setText("");
@@ -89,23 +152,27 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
     <div>
       <div className="flex items-start gap-3">
         {!compact && <Avatar name={me.name} size={42} variant="person" className="mt-0.5 hidden sm:inline-flex" />}
-        <div className={cn("min-w-0 flex-1 rounded-[12px] border bg-white transition-colors", channel === "internal" ? "border-[#f5d9a8]" : "border-line-strong")}>
-          <div className="flex items-center gap-2 px-2 pt-2">
-            {(["client", "internal"] as const).map((c) => (
+        <div className={cn("min-w-0 flex-1 rounded-[12px] border bg-white transition-colors", current.border)}>
+          <div className="flex flex-wrap items-center gap-2 px-2 pt-2" role="tablist" aria-label="Кому сообщение">
+            {CHANNELS.map((c) => (
               <button
-                key={c}
+                key={c.id}
                 type="button"
-                onClick={() => setChannel(c)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-1 text-[12.5px] font-semibold",
-                  channel === c ? (c === "internal" ? "bg-warn-bg text-warn-ink" : "bg-brand-soft text-brand-ink") : "text-muted hover:bg-[#f4f2ec]",
-                )}
+                role="tab"
+                aria-selected={channel === c.id}
+                onClick={() => setChannel(c.id)}
+                className={cn("inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-1 text-[12.5px] font-semibold", channel === c.id ? c.active : "text-muted hover:bg-[#f4f2ec]")}
               >
-                {c === "internal" && <Lock size={12} />}
-                {c === "client" ? "Переписка с клиентом" : "Внутренний"}
+                {c.icon && <c.icon size={12} aria-hidden />}
+                {c.label}
               </button>
             ))}
           </div>
+          {channel === "executor" && (
+            <p className="px-3 pt-1.5 text-[12.5px] text-muted">
+              {executorName ? `Увидит ${executorName}: в приложении мастера и в Telegram. Файлы отсюда мастеру видны сразу.` : "Мастер ещё не назначен — сообщение увидит тот, кто возьмёт заказ."}
+            </p>
+          )}
           <div className="flex items-end gap-2 p-2 pl-3">
             <textarea
               value={text}
@@ -117,7 +184,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
                   void send();
                 }
               }}
-              placeholder={channel === "internal" ? "Заметка для команды — клиент её не увидит..." : "Написать комментарий..."}
+              placeholder={current.placeholder}
               aria-label="Сообщение"
               className="max-h-32 min-h-[38px] flex-1 resize-none bg-transparent py-2 text-[14.5px] text-ink placeholder:text-faint focus:outline-none"
             />
@@ -125,7 +192,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
               ref={fileRef}
               type="file"
               multiple
-              accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+              accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
               className="hidden"
               onChange={(e) => {
                 const list = [...(e.target.files ?? [])].slice(0, 6);
@@ -145,7 +212,11 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
             <div className="flex flex-wrap gap-2 px-3 pb-3">
               {files.map((f) => (
                 <span key={f.id} className="relative">
-                  <Thumb a={f} size={72} />
+                  {f.kind === "image" && f.src ? (
+                    <img src={f.src} alt={f.name} className="h-[49px] w-[72px] rounded-[10px] border border-line object-cover" />
+                  ) : (
+                    <Thumb a={f} size={72} />
+                  )}
                   <button onClick={() => setFiles(files.filter((x) => x.id !== f.id))} aria-label="Убрать файл" className="absolute -top-1.5 -right-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-ink text-white">
                     <X size={12} />
                   </button>
@@ -161,27 +232,35 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
       ) : (
         <ol className="relative mt-5 space-y-4 pl-6 before:absolute before:top-2 before:bottom-2 before:left-[5px] before:w-px before:bg-line-strong">
           {messages.map((m, i) => {
-            const w = who(m);
+            const c = channelOf(m.channel);
             return (
               <li key={m.id} className="relative">
                 <span className={cn("absolute top-3 -left-6 h-[11px] w-[11px] rounded-full border-2 border-white", i === 0 ? "bg-[#ffc629]" : "bg-[#d9d4c8]")} />
                 <div className="flex items-start gap-3">
-                  <Avatar name={w.name} size={40} variant={m.author.type === "client" ? "client" : "person"} />
+                  <Avatar name={nameOf(m.author)} size={40} variant={m.author.type === "client" ? "client" : "person"} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline gap-x-2.5">
-                      <span className="text-[14px] font-semibold text-ink">{shortName(w.name)}</span>
+                      <span className="text-[14px] font-semibold text-ink">{shortName(nameOf(m.author))}</span>
                       <span className="text-[12.5px] text-muted">{when(m.at)}</span>
                       {m.channel === "internal" && (
                         <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-warn-ink">
                           <Lock size={11} /> внутренний
                         </span>
                       )}
+                      {m.channel === "executor" && (
+                        <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-blue">
+                          <HardHat size={11} /> с мастером
+                        </span>
+                      )}
                     </div>
-                    {m.text && <div className={cn("mt-1.5 inline-block max-w-full rounded-[12px] px-3.5 py-2 text-[14px] leading-snug text-ink-2", m.channel === "internal" ? "bg-[#fff7e8]" : "bg-[#f6f4ee]")}>{m.text}</div>}
+                    {m.text && <div className={cn("mt-1.5 inline-block max-w-full rounded-[12px] px-3.5 py-2 text-[14px] leading-snug whitespace-pre-line text-ink-2", c.bubble)}>{m.text}</div>}
                     {m.files.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {m.files.map((f) => (
-                          <Thumb key={f.id} a={f} onOpen={setPreview} />
+                          <span key={f.id} className="inline-flex flex-col items-start">
+                            <Thumb a={f} onOpen={(a) => setPreviewId(a.id)} />
+                            <ExecutorAccess orderId={orderId} file={f} fromThread={m.channel === "executor"} />
+                          </span>
                         ))}
                       </div>
                     )}
@@ -193,8 +272,8 @@ export function OrderChat({ orderId, messages, me, nameOf, compact }: { orderId:
         </ol>
       )}
 
-      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.name ?? ""} width={760}>
-        {preview?.src ? <img src={preview.src} alt={preview.name} className="w-full rounded-[12px]" /> : <div className="py-10 text-center text-muted">У этого файла из демо-данных нет оригинала.</div>}
+      <Modal open={!!preview} onClose={() => setPreviewId(null)} title={preview?.name ?? ""} width={760}>
+        <SignedImg src={preview?.src} alt={preview?.name ?? ""} className="w-full rounded-[12px]" fallback={<div className="py-10 text-center text-muted">У этого файла нет оригинала или он ещё загружается.</div>} />
       </Modal>
     </div>
   );

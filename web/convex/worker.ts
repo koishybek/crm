@@ -4,14 +4,15 @@ import { internalMutation, internalQuery, mutation, query, type MutationCtx, typ
 import { EXECUTOR, requireRole } from "./lib/access";
 import { audit, lowerFirst } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
-import { toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
+import { describeForExecutor, executorThread, toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
+import { fileSigner } from "./lib/files";
 import { openOrdersFor, suitableUsers } from "./lib/matching";
 import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { availabilityNote } from "./executors";
 import { orderNotice } from "./clientNotify";
-import { fitsOrder, payout } from "../src/data/logic";
+import { contactsOpen, fitsOrder, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { money, shortName } from "../src/lib/format";
 
@@ -32,7 +33,7 @@ export const feed = query({
     const { ex } = await myExecutor(ctx);
     return {
       executor: toExecutor(ex),
-      feed: await Promise.all((await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(ctx, o, { contacts: false, files: false }))),
+      feed: (await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(o, { contacts: false })),
     };
   },
 });
@@ -45,27 +46,29 @@ export const mine = query({
     const rows = await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", ex._id)).collect();
     return {
       executor: toExecutor(ex),
-      orders: await Promise.all(rows.map((o) => toWorkerOrder(ctx, o, { contacts: o.status !== "assigned", files: false }))),
+      orders: rows.map((o) => toWorkerOrder(o, { contacts: contactsOpen(o) })),
     };
   },
 });
 
+/** Свой заказ: только переписка «С мастером» и файлы, видимые мастеру. t — метка обновления ссылок на файлы (src/data/files.ts). */
 export const order = query({
-  args: { id: v.id("orders") },
+  args: { id: v.id("orders"), t: v.optional(v.number()) },
   handler: async (ctx, { id }) => {
     const { me, ex } = await myExecutor(ctx);
     const o = await ctx.db.get(id);
     if (!o || o.executorId !== ex._id) return null;
-    const messages = await ctx.db.query("messages").withIndex("by_order", (q) => q.eq("orderId", id)).collect();
+    const signer = await fileSigner(ctx);
+    const messages = await executorThread(ctx, id, me._id);
     return {
-      order: await toWorkerOrder(ctx, o, { contacts: o.status !== "assigned", files: true }),
-      messages: await Promise.all(messages.map((m) => toMessage(ctx, m))),
+      order: toWorkerOrder(o, { contacts: contactsOpen(o), signer }),
+      messages: messages.map((m) => toMessage(m, signer)),
       me: me._id,
     };
   },
 });
 
-/** Данные карточки для Telegram. Контакты — только если заказ уже принят этим мастером. */
+/** Данные карточки для Telegram. Контакты — только пока заказ у мастера в работе (contactsOpen). */
 export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean): Promise<CardData> {
   const cat = await loadCatalog(ctx);
   return {
@@ -75,7 +78,7 @@ export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean)
     city: o.city,
     deadline: o.deadline,
     payout: payout(o),
-    description: o.description,
+    description: describeForExecutor(o.description, contacts),
     status: o.status,
     urgent: o.priority === "urgent",
     ...(contacts ? { address: o.address || undefined, clientName: o.clientName, clientPhone: o.clientPhone } : {}),
@@ -220,7 +223,8 @@ export const takeFromTelegram = internalMutation({
     const id = ctx.db.normalizeId("orders", orderId);
     if (!id) return { ok: false, error: "Заказ не найден" };
     try {
-      return { ok: true, card: await cardOf(ctx, await takeFor(ctx, u._id, id), true) };
+      const o = await takeFor(ctx, u._id, id);
+      return { ok: true, card: await cardOf(ctx, o, contactsOpen(o)) };
     } catch (e) {
       return { ok: false, error: errText(e) };
     }
@@ -236,7 +240,7 @@ export const actFromTelegram = internalMutation({
     if (!id) return { ok: false, error: "Заказ не найден" };
     try {
       const o = await actFor(ctx, u._id, id, action);
-      return { ok: true, card: await cardOf(ctx, o, o.status !== "awaiting_executor") };
+      return { ok: true, card: await cardOf(ctx, o, contactsOpen(o)) };
     } catch (e) {
       return { ok: false, error: errText(e) };
     }
@@ -264,7 +268,7 @@ export const _forChat = internalQuery({
       role: u.role,
       name: u.name ?? "",
       available: ex.available,
-      cards: await Promise.all(rows.slice(0, 8).map((o) => cardOf(ctx, o, what === "orders" && o.status !== "assigned"))),
+      cards: await Promise.all(rows.slice(0, 8).map((o) => cardOf(ctx, o, what === "orders" && contactsOpen(o)))),
     };
   },
 });

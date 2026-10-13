@@ -33,8 +33,10 @@ import { api } from "../../convex/_generated/api";
 import { isPlaceholder, REPLY_BLOCK, whatsappWindowClosed } from "../../convex/lib/chat";
 import { OLX_MAX_TEXT } from "../../convex/lib/olx";
 import { SourceIcon } from "../components/icons";
+import { SignedAudio, SignedImg, SignedVideo } from "../components/SignedMedia";
 import { Avatar, Badge, Button, EmptyState, IconButton, Input, Loading, Menu, MenuItem, Modal, PageHeader } from "../components/ui";
 import { LEAD_STATUS } from "../data/catalog";
+import { useFileQuery } from "../data/files";
 import { useMe, useNow, useTeam, useUi } from "../data/hooks";
 import { assignConversation, channelLabel, closeConversation, linkConversationClient, markConversationRead, reopenConversation, replyDraft, resendReply, sendReply } from "../data/inbox";
 import { report, type Result } from "../data/store";
@@ -209,7 +211,7 @@ const PAGE = 100;
 
 function ChatPane({ id, onBack }: { id: string; onBack: () => void }) {
   const [limit, setLimit] = useState(PAGE);
-  const data = useQuery(api.inbox.get, { id, limit });
+  const data = useFileQuery(api.inbox.get, { id, limit });
   const unread = data?.conversation.unread ?? 0;
 
   // Открытый диалог прочитан — но только когда вкладка на экране, а не в фоне.
@@ -468,8 +470,10 @@ function MessageList({ detail, onMore }: { detail: ConversationDetail; onMore: (
   const atBottom = useRef(true);
   /** Высота до подгрузки ранних сообщений — чтобы лента не прыгнула. */
   const restore = useRef<number | null>(null);
-  const [preview, setPreview] = useState<ConversationMessage | null>(null);
+  // Просмотр фото — по id: ссылка (живёт 15 минут) берётся из свежих данных, а не та, что была при клике.
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const msgs = detail.messages;
+  const preview = previewId ? (msgs.find((m) => m.id === previewId) ?? null) : null;
   const last = msgs.at(-1);
 
   useLayoutEffect(() => {
@@ -527,11 +531,11 @@ function MessageList({ detail, onMore }: { detail: ConversationDetail; onMore: (
               <span className="rounded-full bg-white px-3 py-1 text-[12px] font-medium text-muted shadow-[0_1px_2px_rgba(0,0,0,0.05)]">{dayLabel(m.at, now)}</span>
             </div>
           )}
-          <Bubble m={m} author={m.authorId ? shortName(team.userName(m.authorId) || "Сотрудник") : ""} onPreview={setPreview} />
+          <Bubble m={m} author={m.authorId ? shortName(team.userName(m.authorId) || "Сотрудник") : ""} onPreview={(x) => setPreviewId(x.id)} />
         </div>
       ))}
-      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.fileName ?? "Фото"} width={820}>
-        {preview?.fileUrl && <img src={preview.fileUrl} alt={preview.fileName ?? "Фото клиента"} className="w-full rounded-[12px]" />}
+      <Modal open={!!preview} onClose={() => setPreviewId(null)} title={preview?.fileName ?? "Фото"} width={820}>
+        <SignedImg src={preview?.fileUrl} alt={preview?.fileName ?? "Фото клиента"} className="w-full rounded-[12px]" />
       </Modal>
     </div>
   );
@@ -611,19 +615,25 @@ function Media({ m, onPreview }: { m: ConversationMessage; onPreview: (m: Conver
   if (m.kind === "image") {
     return (
       <button type="button" onClick={() => onPreview(m)} className="mb-1 block overflow-hidden rounded-[10px]" aria-label="Открыть фото">
-        <img src={m.fileUrl} alt={m.fileName ?? "Фото клиента"} loading="lazy" className="max-h-[300px] max-w-full object-cover" />
+        <SignedImg
+          src={m.fileUrl}
+          alt={m.fileName ?? "Фото клиента"}
+          loading="lazy"
+          className="max-h-[300px] max-w-full object-cover"
+          fallback={<span className="block px-3 py-6 text-[12.5px] text-muted">Фото не загрузилось</span>}
+        />
       </button>
     );
   }
   if (m.kind === "audio") {
     return (
-      <audio controls preload="none" src={m.fileUrl} className="mb-1 h-10 w-[260px] max-w-full">
+      <SignedAudio controls preload="none" src={m.fileUrl} className="mb-1 h-10 w-[260px] max-w-full">
         <a href={m.fileUrl}>Скачать голосовое</a>
-      </audio>
+      </SignedAudio>
     );
   }
   if (VIDEO.test(m.fileName ?? "")) {
-    return <video controls preload="metadata" src={m.fileUrl} className="mb-1 max-h-[300px] max-w-full rounded-[10px]" />;
+    return <SignedVideo controls preload="metadata" src={m.fileUrl} className="mb-1 max-h-[300px] max-w-full rounded-[10px]" />;
   }
   return (
     <a href={m.fileUrl} target="_blank" rel="noopener noreferrer" className="mb-1 inline-flex max-w-full items-center gap-2 rounded-[10px] border border-line bg-white px-3 py-2 text-[13px] text-ink-2 hover:border-brand-line">

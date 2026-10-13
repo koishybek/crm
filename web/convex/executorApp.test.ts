@@ -23,6 +23,9 @@ afterEach(() => {
 type OrderDoc = Omit<Doc<"orders">, "_id" | "_creationTime">;
 
 async function setup() {
+  // Ссылки на файлы подписываются ключом и адресом Convex (convex/lib/files.ts).
+  vi.stubEnv("FILES_SIGNING_KEY", "test-files-key");
+  vi.stubEnv("CONVEX_SITE_URL", "https://test.convex.site");
   const t = convexTest(schema, modules);
   const at = new Date().toISOString();
   const ids = await t.run(async (ctx) => {
@@ -68,7 +71,8 @@ async function setup() {
       createdBy: owner,
       files: [],
     };
-    const clientFile = { id: "f-photo", name: "кондиционер.jpg", kind: "image" as const, storageId: photo };
+    // Фото от клиента офис показал мастеру («Показать мастеру»); счёт и договор — только команде.
+    const clientFile = { id: "f-photo", name: "кондиционер.jpg", kind: "image" as const, storageId: photo, forExecutor: true };
     const invoiceFile = { id: "f-invoice", name: "счёт 45000.jpg", kind: "image" as const, storageId: invoice };
     const pdfFile = { id: "f-pdf", name: "договор.pdf", kind: "file" as const, storageId: pdf };
 
@@ -86,9 +90,9 @@ async function setup() {
     const astana = await ctx.db.insert("orders", { ...base, number: 1004, city: "Астана" });
     const takenByB = await ctx.db.insert("orders", { ...base, number: 1005, status: "accepted", executorId: b.ex, assignedAt: at });
     const assignedToA = await ctx.db.insert("orders", { ...base, number: 1006, status: "assigned", executorId: a.ex, assignedAt: at, files: [clientFile, invoiceFile] });
-    await ctx.db.patch(assignedToA, { files: [clientFile, invoiceFile, { id: "f-own", name: "готово.jpg", kind: "image", storageId: ownPhoto }] });
+    await ctx.db.patch(assignedToA, { files: [clientFile, invoiceFile, { id: "f-own", name: "готово.jpg", kind: "image", storageId: ownPhoto, forExecutor: true }] });
     await ctx.db.insert("messages", { orderId: assignedToA, author: { type: "user", id: operator }, channel: "internal", text: "Маржа 24 000, не говорить мастеру", files: [invoiceFile], at: "2026-10-03T05:00:00.000Z" });
-    await ctx.db.insert("messages", { orderId: assignedToA, author: { type: "user", id: a.user }, channel: "internal", text: "Буду через 15 минут", files: [{ id: "f-own", name: "готово.jpg", kind: "image", storageId: ownPhoto }], at: "2026-10-03T06:00:00.000Z" });
+    await ctx.db.insert("messages", { orderId: assignedToA, author: { type: "user", id: a.user }, channel: "executor", text: "Буду через 15 минут", files: [{ id: "f-own", name: "готово.jpg", kind: "image", storageId: ownPhoto, forExecutor: true }], at: "2026-10-03T06:00:00.000Z" });
     return { owner, operator, a, b, c, orphan, client, feed, skilled, plumbing, astana, takenByB, assignedToA };
   });
   const as = (userId: Id<"users">) => t.withIdentity({ subject: `${userId}|test-session` });

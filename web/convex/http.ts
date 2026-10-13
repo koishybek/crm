@@ -5,7 +5,9 @@ import { auth } from "./auth";
 import { olxCallback } from "./channels/olx";
 import { whatsappVerify, whatsappWebhook, WEBHOOK_PATH as WHATSAPP_WEBHOOK } from "./channels/whatsapp";
 import { env } from "./env";
+import { serveFile } from "./files";
 import { safeEqual } from "./lib/crypto";
+import { FILES_PATH } from "./lib/files";
 import { OLX_CALLBACK_PATH } from "./lib/olxApi";
 import { createLeadHttp, getLeadHttp } from "./publicApi";
 import { leadOptions, leadPost } from "./site";
@@ -115,5 +117,10 @@ http.route({ path: "/public/lead", method: "OPTIONS", handler: leadOptions });
 http.route({ path: "/public/lead", method: "POST", handler: leadPost });
 http.route({ path: "/api/v1/leads", method: "POST", handler: createLeadHttp });
 http.route({ pathPrefix: "/api/v1/leads/", method: "GET", handler: getLeadHttp });
+
+// ── Файлы по подписанной ссылке ─────────────────────────────────────────────
+// GET /files/<storageId>?exp=…&sig=… — фото, документы, записи звонков и копии; ссылку выдаёт запрос с проверкой доступа,
+// живёт она 15 минут (convex/files.ts). Поддерживает Range — перемотка аудио и видео.
+http.route({ pathPrefix: FILES_PATH, method: "GET", handler: serveFile });
 
 export default http;

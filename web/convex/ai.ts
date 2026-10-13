@@ -298,9 +298,9 @@ export function toSummary(x: Extraction, serviceLabel: (id: string) => string): 
     x.budget && { label: "Бюджет", value: money(x.budget) },
     x.clientName && { label: "Имя", value: x.clientName },
   ].filter((e): e is { label: string; value: string } => !!e);
-  const description = [x.summary, x.address ? `Адрес: ${x.address}.` : "", x.when ? `Когда: ${x.when}.` : "", x.budget ? `Бюджет клиента: ${money(x.budget)}.` : ""]
-    .filter(Boolean)
-    .join(" ");
+  // Описание уходит в заявку, а из неё — в заказ, ленту и Telegram мастерам (аудит H-3): только суть обращения.
+  // Адрес — в draft.address (мастеру — после подтверждения), бюджет и удобное время — только в AI-блоке сотрудников.
+  const description = x.summary;
   return {
     ai: { summary: x.summary || "AI не смог кратко пересказать обращение", extracted, questions: x.questions },
     draft: {

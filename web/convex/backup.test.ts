@@ -18,6 +18,7 @@ const SECRETS = ["olx-access-SECRET", "olx-refresh-SECRET", "pbx-SECRET-value", 
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 async function setup() {
@@ -149,6 +150,7 @@ describe("копия вручную и список копий — только 
 
   test("владелец запускает копию; повторно — не раньше чем через 10 минут", async () => {
     vi.useFakeTimers();
+    vi.stubEnv("CONVEX_SITE_URL", "https://test.convex.site");
     const { t, ids, as } = await setup();
     await as(ids.owner).mutation(api.backup.runNow, {});
     await expect(as(ids.owner).mutation(api.backup.runNow, {})).rejects.toThrow("меньше 10 минут назад");
@@ -158,7 +160,8 @@ describe("копия вручную и список копий — только 
     expect(list.items).toHaveLength(1);
     expect(list.items[0]).toMatchObject({ manual: true });
     expect(list.items[0]!.docs).toBeGreaterThan(0);
-    expect(list.items[0]!.url).toBeTruthy();
+    // Скачивание — по подписанной ссылке на 15 минут, с понятным именем файла (convex/files.ts).
+    expect(list.items[0]!.url).toMatch(/^https:\/\/test\.convex\.site\/files\/\w+\?exp=\d+&name=homemax-backup-[\d-]+\.json&sig=[0-9a-f]{64}$/);
 
     vi.advanceTimersByTime(10 * 60_000 + 1);
     await as(ids.owner).mutation(api.backup.runNow, {});

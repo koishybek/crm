@@ -43,7 +43,14 @@ export const attachment = v.object({
   name: v.string(),
   kind: v.union(v.literal("image"), v.literal("file")),
   storageId: v.optional(v.id("_storage")),
+  /** Файл заказа виден мастеру (ТЗ п.16, аудит M-6): из переписки с мастером и его фотоотчёт — сразу, остальное — по «Показать мастеру». */
+  forExecutor: v.optional(v.boolean()),
 });
+/**
+ * Аудитория сообщения заказа: internal — только сотрудники, client — переписка по клиенту (мастеру не видна),
+ * executor — команда ↔ назначенный мастер (единственный канал, который видит и куда пишет мастер).
+ */
+export const messageChannel = v.union(v.literal("internal"), v.literal("client"), v.literal("executor"));
 export const historyKind = v.union(
   v.literal("created"),
   v.literal("status"),
@@ -230,7 +237,7 @@ export default defineSchema({
   messages: defineTable({
     orderId: v.id("orders"),
     author: actor,
-    channel: v.union(v.literal("internal"), v.literal("client")),
+    channel: messageChannel,
     text: v.string(),
     files: v.array(attachment),
     at: v.string(),
@@ -512,4 +519,12 @@ export default defineSchema({
 
   /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
   backups: defineTable({ at: v.string(), fileId: v.id("_storage"), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) }).index("by_at", ["at"]),
+
+  /**
+   * Кто загрузил файл (аудит M-10): прикрепить к заказу или звонку можно только свою подтверждённую загрузку и один раз.
+   * usedAt — когда прикрепили; неприкреплённые старше суток уборка удаляет вместе с файлом.
+   */
+  uploads: defineTable({ storageId: v.id("_storage"), userId: v.id("users"), at: v.string(), usedAt: v.optional(v.string()) })
+    .index("by_storage", ["storageId"])
+    .index("by_used", ["usedAt", "at"]),
 });

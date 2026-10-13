@@ -8,7 +8,7 @@ import { almatyDayStart, esc, whenAlmaty } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { ACTIVE_STATUSES, APP_NAME, FINISHED_STATUSES, SOURCES } from "../src/data/catalog";
-import { margin, payout } from "../src/data/logic";
+import { contactsOpen, margin, payout } from "../src/data/logic";
 import { money } from "../src/lib/format";
 
 async function activeOrders(ctx: QueryCtx) {
@@ -78,7 +78,8 @@ export const run = internalMutation({
         );
         if (!mine.length) continue;
         mine.sort((a, b) => a.deadline.localeCompare(b.deadline));
-        const list = mine.map((o) => `• №${o.number} — ${esc(whenAlmaty(o.deadline, now))}, ${esc(o.city)}${o.address ? `, ${esc(o.address)}` : ""} · ${esc(money(payout(o)))}`);
+        // Адрес — по тому же правилу, что в кабинете: у ещё не подтверждённого заказа его нет (аудит L-5).
+        const list = mine.map((o) => `• №${o.number} — ${esc(whenAlmaty(o.deadline, now))}, ${esc(o.city)}${o.address && contactsOpen(o) ? `, ${esc(o.address)}` : ""} · ${esc(money(payout(o)))}`);
         const html = [`<b>☀️ Доброе утро! Заказы на сегодня: ${mine.length}</b>`, "", ...list, "", "Кнопки по каждому — команда /orders"].join("\n");
         await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId!, text: "", html, buttons: appUrl ? [[{ text: "Мои заказы", url: `${appUrl.replace(/\/$/, "")}/w/my` }]] : undefined });
         continue;

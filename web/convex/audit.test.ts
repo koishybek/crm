@@ -13,6 +13,8 @@ const modules = Object.fromEntries(
 const T = "t-test";
 const at = new Date().toISOString();
 const AI = { summary: "Не холодит кондиционер", extracted: [], questions: [] };
+/** convex-test не хранит тип загрузки (Convex берёт его из Content-Type) — проставляем, как сделал бы сервер. */
+type RawDb = { patch: (id: string, value: Record<string, unknown>) => Promise<void> };
 
 afterEach(() => {
   vi.useRealTimers();
@@ -319,7 +321,13 @@ describe("журнал: каждое ключевое действие — ро�
     expect(secret).toHaveLength(40);
     expect(JSON.stringify(key)).not.toContain(secret);
 
-    const storageId = await t.run((ctx) => ctx.storage.store(new Blob(["fake audio"], { type: "audio/mpeg" })));
+    const storageId = await t.run(async (ctx) => {
+      const id = await ctx.storage.store(new Blob(["fake audio"], { type: "audio/mpeg" }));
+      await (ctx.db as unknown as RawDb).patch(id, { contentType: "audio/mpeg" });
+      return id;
+    });
+    // Запись сначала подтверждается (files.confirmUpload): прикрепить можно только свою проверенную загрузку.
+    await as(ids.operator).mutation(api.files.confirmUpload, { storageId });
     let callId: Id<"calls"> | undefined;
     const uploaded = await one(async () => {
       callId = await as(ids.operator).mutation(api.calls.upload, { storageId, phone: "77071234567" });

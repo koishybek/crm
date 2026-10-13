@@ -4,8 +4,9 @@ import { ConvexHttpClient } from "convex/browser";
 import { readFileSync } from "node:fs";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { withDefaultPrices } from "../convex/lib/defaultPrices";
 import { buildSeed } from "../src/data/seed";
-import { ACTIVE_STATUSES, serviceById } from "../src/data/catalog";
+import { ACTIVE_STATUSES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, serviceById, setCatalog } from "../src/data/catalog";
 import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
 
@@ -70,11 +71,13 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "uploads", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await client.mutation(api.seed.wipe, { secret: secret!, table: t })) > 0);
     }
     while ((await client.mutation(api.seed.wipeFiles, { secret: secret! })) > 0);
   }
+  // Цены справочника по умолчанию живут только на сервере (convex/lib/defaultPrices.ts) — генератору демо-данных они нужны.
+  setCatalog(DEFAULT_CATEGORIES, withDefaultPrices(DEFAULT_SERVICES));
   const db = buildSeed(new Date());
   console.log("Заливаю демо-данные…");
 
@@ -129,6 +132,13 @@ async function main() {
   );
   const leadMap = new Map(db.leads.map((l, i) => [l.id, leadIds[i]!]));
 
+  // Мастер видит только переписку «С мастером» и файлы, отмеченные для него: демо-сообщения мастеров — в этом канале,
+  // фото от клиента «показаны мастеру».
+  const executorUsers = new Set(db.users.filter((u) => u.role === "executor").map((u) => u.id));
+  const byExecutor = (a: Actor) => a.type === "user" && executorUsers.has(a.id);
+  const shownToExecutor = new Set(db.messages.filter((m) => m.author.type === "client" || byExecutor(m.author)).flatMap((m) => m.files.map((f) => f.id)));
+  const fileRow = (f: { id: string; name: string; kind: "image" | "file" }) => ({ id: f.id, name: f.name, kind: f.kind, ...(shownToExecutor.has(f.id) ? { forExecutor: true } : {}) });
+
   const orderIds = await insert(
     "orders",
     db.orders.map((o) => ({
@@ -137,7 +147,7 @@ async function main() {
       leadId: o.leadId ? leadMap.get(o.leadId) : undefined,
       executorId: o.executorId ? exMap.get(o.executorId) : undefined,
       createdBy: userMap.get(o.createdBy),
-      files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })),
+      files: o.files.map(fileRow),
     })),
   );
   const orderMap = new Map(db.orders.map((o, i) => [o.id, orderIds[i]!]));
@@ -146,7 +156,10 @@ async function main() {
   for (let i = 0; i < patches.length; i += 200) await client.mutation(api.seed.patchMany, { secret: secret!, table: "leads", patches: patches.slice(i, i + 200) });
 
   const actor = (a: Actor): Actor => (a.type === "user" ? { type: "user", id: userMap.get(a.id)! } : a.type === "client" ? { type: "client", id: clientMap.get(a.id)! } : a);
-  await insert("messages", db.messages.map((m) => ({ ...strip(m), orderId: orderMap.get(m.orderId), author: actor(m.author), files: m.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind })) })));
+  await insert(
+    "messages",
+    db.messages.map((m) => ({ ...strip(m), orderId: orderMap.get(m.orderId), author: actor(m.author), channel: byExecutor(m.author) ? "executor" : m.channel, files: m.files.map(fileRow) })),
+  );
   await insert("history", db.history.map((h) => ({ ...strip(h), orderId: orderMap.get(h.orderId), actor: actor(h.actor) })));
   await insert("interactions", db.interactions.map((x) => ({ ...strip(x), clientId: clientMap.get(x.clientId), leadId: x.leadId ? leadMap.get(x.leadId) : undefined })));
   await insert("clientNotes", db.clientNotes.map((n) => ({ ...strip(n), clientId: clientMap.get(n.clientId), authorId: userMap.get(n.authorId) })));

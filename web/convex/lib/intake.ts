@@ -106,7 +106,9 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     operatorId,
     createdAt: at,
     ai: a.ai,
-    comment: a.comment?.trim().slice(0, 2000) || undefined,
+    // Адрес из обращения — в служебный комментарий (в заказ он не копируется и мастерам не уходит, аудит H-3):
+    // у нового клиента он есть и в карточке, у знакомого — не потеряется.
+    comment: [a.comment?.trim(), a.address?.trim() ? `Адрес из обращения: ${a.address.trim().slice(0, 300)}` : ""].filter(Boolean).join("\n").slice(0, 2000) || undefined,
   });
   if (a.message) {
     await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: a.source, title: a.message.title, text: a.message.text.slice(0, 1000), at });

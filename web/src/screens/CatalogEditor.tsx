@@ -2,7 +2,7 @@ import { useQuery } from "convex/react";
 import { Layers, Pencil, Plus } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../convex/_generated/api";
-import type { Category, Service, ServiceIcon, Tone } from "../data/catalog";
+import { asService, type Category, type Service, type ServiceIcon, type Tone } from "../data/catalog";
 import { convex, run } from "../data/convex";
 import { report, toast } from "../data/store";
 import { SERVICE_ICON_NAMES, ServiceTile, TONE_SOFT } from "../components/icons";
@@ -47,7 +47,7 @@ export function CatalogEditor() {
       </p>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {data.categories.map((c) => {
-          const list = data.services.filter((s) => s.category === c.id);
+          const list = data.services.map(asService).filter((s) => s.category === c.id);
           return (
             <section key={c.id} className={cn("rounded-[14px] border border-line p-3", c.active === false && "opacity-60")}>
               <header className="flex items-center gap-2 px-1 pb-2">

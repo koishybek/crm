@@ -18,8 +18,10 @@ import { useNavigate, useSearchParams } from "react-router";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AiCard } from "../components/AiCard";
+import { SignedAudio } from "../components/SignedMedia";
 import { Avatar, Badge, Button, Drawer, EmptyState, KpiCard, Loading, PageHeader, Pagination, Tabs } from "../components/ui";
 import type { Tone } from "../data/catalog";
+import { useFileQuery } from "../data/files";
 import { useNow, useTeam, useUi } from "../data/hooks";
 import { reprocessCall, report, toast, uploadCall } from "../data/store";
 import type { AiStatus, Call } from "../data/types";
@@ -260,7 +262,7 @@ export default function Calls() {
 // ── Карточка звонка ──────────────────────────────────────────────────────────
 
 function CallDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
-  const data = useQuery(api.calls.get, id ? { id: id as Id<"calls"> } : "skip");
+  const data = useFileQuery(api.calls.get, id ? { id: id as Id<"calls"> } : "skip");
   const call = data?.call;
   return (
     <Drawer open={!!id} onClose={onClose} title={call ? callTitle(call) : "Звонок"} footer={null} width={520}>
@@ -328,9 +330,9 @@ function CallView({ call, lead, onClose }: { call: Call; lead: { id: string; num
       {call.recordingSrc && (
         <div>
           <div className="mb-2 text-[14px] font-semibold text-ink">Запись разговора</div>
-          <audio controls preload="none" src={call.recordingSrc} className="w-full">
+          <SignedAudio controls preload="none" src={call.recordingSrc} className="w-full">
             <a href={call.recordingSrc}>Скачать запись</a>
-          </audio>
+          </SignedAudio>
         </div>
       )}
 

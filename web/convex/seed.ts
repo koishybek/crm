@@ -15,7 +15,7 @@ function guard(secret: string) {
 const SEED_TABLES = ["executors", "users", "clients", "leads", "orders", "messages", "history", "interactions", "clientNotes", "notifications", "counters", "calls", "conversations", "conversationMessages", "audit", "reviews", "adSpend"] as const;
 // settings (секрет АТС) не трогаем: это настройка, а не демо-данные.
 // settings и integrations не трогаем: это настройки и подключения, а не демо-данные.
-const WIPE_TABLES = [...SEED_TABLES, "botChats", "clientNotices", "apiKeys", "apiLeads", "reviewRequests", "rateLimits", "systemStatus", "backups", "oauthStates", "categories", "services", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const;
+const WIPE_TABLES = [...SEED_TABLES, "botChats", "clientNotices", "apiKeys", "apiLeads", "reviewRequests", "rateLimits", "systemStatus", "backups", "oauthStates", "uploads", "categories", "services", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const;
 const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));
 
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
