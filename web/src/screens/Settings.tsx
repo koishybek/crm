@@ -11,7 +11,7 @@ import { phone } from "../lib/format";
 import type { User } from "../data/types";
 import { AccessModal } from "../components/AccessModal";
 import { CatalogEditor } from "./CatalogEditor";
-import { ApiAndSiteCard, WhatsAppCard } from "./ChannelCards";
+import { ApiAndSiteCard, OlxCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
@@ -244,6 +244,10 @@ export default function Settings() {
 
       <div className="mt-4">
         <WhatsAppCard />
+      </div>
+
+      <div className="mt-4">
+        <OlxCard />
       </div>
 
       <div className="mt-4">

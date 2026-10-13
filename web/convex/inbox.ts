@@ -13,7 +13,7 @@ import { isMeaningful, isPlaceholder, PLACEHOLDER } from "./lib/chat";
 import { notify, nowIso, TENANT } from "./lib/domain";
 import { markError, markOk } from "./lib/health";
 import { intakeLead } from "./lib/intake";
-import { replyBlock, sendToChannel, ChannelError } from "./lib/outbound";
+import { markChannelRead, replyBlock, replyMaxText, sendToChannel, ChannelError } from "./lib/outbound";
 import { contactPhone, findKzPhone, isClientPhone } from "./lib/phone";
 import { hitLimit } from "./lib/rateLimit";
 import { canExtract, extract, toSummary, type CatalogHint } from "./ai";
@@ -134,6 +134,11 @@ export interface IngestInput {
    * ложится в ленту как отправленное, без «непрочитанных», уведомлений и авто-заявки. По умолчанию — in.
    */
   direction?: "in" | "out";
+  /**
+   * История канала (первая загрузка OLX после подключения): входящее ложится в ленту без «непрочитанных»,
+   * уведомлений и авто-заявки — старые переписки не должны засыпать команду и плодить заявки.
+   */
+  history?: boolean;
   /** false — канал уведомит команду сам (бот — о заявке, сайт — о новой заявке). */
   notify?: boolean;
   /** false — заявку создаёт сам канал (бот Telegram, форма сайта). */
@@ -147,7 +152,8 @@ export interface IngestResult {
   created: boolean;
 }
 
-const externalKey = (ch: Channel, id: string) => `${ch}:${id.slice(0, 200)}`;
+/** Ключ сообщения канала в conversationMessages.externalId: индекс общий для всех каналов — с префиксом канала. */
+export const externalKey = (ch: Channel, id: string): string => `${ch}:${id.slice(0, 200)}`;
 
 async function byExternal(ctx: QueryCtx, ch: Channel, externalId: string): Promise<Doc<"conversations"> | null> {
   return ctx.db
@@ -178,6 +184,8 @@ export async function ingestMessage(ctx: MutationCtx, a: IngestInput): Promise<I
   const externalId = clip(a.externalId, 200);
   if (!externalId) throw new ConvexError("Пустой id собеседника");
   const inbound = a.direction !== "out";
+  // «Живое» входящее: считается непрочитанным, уведомляет команду и может стать заявкой.
+  const live = inbound && !a.history;
   const at = messageAt(a.at, now);
   const text = clip(a.text, MAX_TEXT) || PLACEHOLDER.attachment;
   const name = clip(a.contactName, 120) || undefined;
@@ -204,14 +212,14 @@ export async function ingestMessage(ctx: MutationCtx, a: IngestInput): Promise<I
       lastMessageAt: at,
       lastText: preview(text),
       lastDirection: inbound ? "in" : "out",
-      unread: inbound ? 1 : 0,
+      unread: live ? 1 : 0,
       status: "open",
       replyUntil,
       meta: mergeMeta(undefined, a.meta),
     });
     conv = (await ctx.db.get(id))!;
   } else {
-    const patch: Partial<Doc<"conversations">> = { unread: inbound ? conv.unread + 1 : conv.unread, status: "open" };
+    const patch: Partial<Doc<"conversations">> = { unread: live ? conv.unread + 1 : conv.unread, status: "open" };
     // Вебхуки приходят не по порядку: превью — по самому позднему сообщению.
     if (at >= conv.lastMessageAt) Object.assign(patch, { lastMessageAt: at, lastText: preview(text), lastDirection: inbound ? "in" : "out" });
     if (name) patch.contactName = name;
@@ -239,8 +247,8 @@ export async function ingestMessage(ctx: MutationCtx, a: IngestInput): Promise<I
     fileName: clip(a.fileName, 200) || undefined,
     status: inbound ? undefined : "sent",
   });
-  if (inbound && a.notify !== false) await notifyNewMessage(ctx, conv, text);
-  if (inbound && a.autoLead !== false) await scheduleAutoLead(ctx, conv, messageId, text, now);
+  if (live && a.notify !== false) await notifyNewMessage(ctx, conv, text);
+  if (live && a.autoLead !== false) await scheduleAutoLead(ctx, conv, messageId, text, now);
   return { conversationId: conv._id, messageId, duplicate: false, created };
 }
 
@@ -260,6 +268,7 @@ export const ingest = internalMutation({
     subjectUrl: v.optional(v.string()),
     meta: v.optional(v.record(v.string(), v.any())),
     direction: v.optional(v.union(v.literal("in"), v.literal("out"))),
+    history: v.optional(v.boolean()),
     notify: v.optional(v.boolean()),
     autoLead: v.optional(v.boolean()),
   },
@@ -583,7 +592,7 @@ export const get = query({
       conversation: toConversation(c),
       messages: await Promise.all(rows.slice(0, n).reverse().map((m) => toMessage(ctx, m))),
       hasMore: rows.length > n,
-      replyBlock: replyBlock(c, Date.now()) ?? undefined,
+      replyBlock: (await replyBlock(ctx, c, Date.now())) ?? undefined,
       lead: lead ? { id: lead._id, number: lead.number, status: lead.status, orderId: lead.orderId } : undefined,
       client: client ? { id: client._id, name: client.name, phone: client.phone, city: client.city } : undefined,
       telegramUsername: c.channel === "telegram" && typeof meta.username === "string" ? meta.username : undefined,
@@ -619,7 +628,10 @@ export const markRead = mutation({
   handler: async (ctx, { id }): Promise<void> => {
     await requireRole(ctx, STAFF);
     const c = await mustGet(ctx, id);
-    if (c.unread) await ctx.db.patch(id, { unread: 0 });
+    if (!c.unread) return;
+    await ctx.db.patch(id, { unread: 0 });
+    // И в самом канале, если он это умеет (OLX: «прочитано» в треде) — фоном.
+    await markChannelRead(ctx, c);
   },
 });
 
@@ -630,9 +642,10 @@ export const reply = mutation({
     const me = await requireRole(ctx, STAFF);
     const body = text.replace(/\u0000/g, "").trim();
     if (!body) throw new ConvexError("Напишите сообщение");
-    if (body.length > MAX_TEXT) throw new ConvexError(`Слишком длинное сообщение — не больше ${MAX_TEXT} символов`);
     const c = await mustGet(ctx, conversationId);
-    const block = replyBlock(c, Date.now());
+    const max = replyMaxText(c.channel, MAX_TEXT);
+    if (body.length > max) throw new ConvexError(`Слишком длинное сообщение — не больше ${max} символов`);
+    const block = await replyBlock(ctx, c, Date.now());
     if (block) throw new ConvexError(block);
     const at = nowIso();
     const messageId = await ctx.db.insert("conversationMessages", { conversationId, direction: "out", kind: "text", text: body, at, authorId: me._id, status: "sending" });
@@ -651,7 +664,7 @@ export const resend = mutation({
     const m = await ctx.db.get(messageId);
     if (!m || m.direction !== "out" || m.kind === "system" || m.status !== "failed") throw new ConvexError("Это сообщение нельзя отправить повторно");
     const c = await mustGet(ctx, m.conversationId);
-    const block = replyBlock(c, Date.now());
+    const block = await replyBlock(ctx, c, Date.now());
     if (block) throw new ConvexError(block);
     await ctx.db.patch(messageId, { status: "sending", error: undefined });
     await ctx.scheduler.runAfter(0, internal.inbox._deliver, { messageId });
@@ -746,7 +759,7 @@ export const _deliver = internalAction({
     const job = await ctx.runQuery(internal.inbox._outboxItem, { messageId });
     if (!job) return;
     try {
-      const res = await sendToChannel(job.target, job.text);
+      const res = await sendToChannel(ctx, job.target, job.text);
       await ctx.runMutation(internal.inbox._delivered, { messageId, ok: true, externalId: res.externalId });
     } catch (e) {
       const known = e instanceof ChannelError;
@@ -777,10 +790,21 @@ export const _delivered = internalMutation({
     if (!m) return;
     const c = await ctx.db.get(m.conversationId);
     if (a.ok) {
-      await ctx.db.patch(m._id, { status: "sent", error: undefined, ...(a.externalId && c ? { externalId: externalKey(c.channel, a.externalId) } : {}) });
+      const key = a.externalId && c ? externalKey(c.channel, a.externalId) : undefined;
+      if (key) {
+        // Опрос канала (OLX) успел записать этот же ответ отдельной строкой — остаётся ответ оператора, копия уходит.
+        const echo = await ctx.db
+          .query("conversationMessages")
+          .withIndex("by_external", (q) => q.eq("externalId", key))
+          .first();
+        if (echo && echo._id !== m._id && echo.direction === "out" && !echo.authorId) await ctx.db.delete(echo._id);
+      }
+      await ctx.db.patch(m._id, { status: "sent", error: undefined, ...(key ? { externalId: key } : {}) });
       if (c && c.channel !== "site") await markOk(ctx, c.channel, "Ответ клиенту доставлен");
       return;
     }
+    // Канал уже подтвердил это сообщение (опрос OLX нашёл его в треде) — «не отправлено» было бы неправдой.
+    if (m.externalId && m.status === "sent") return;
     await ctx.db.patch(m._id, { status: "failed", error: (a.error ?? "Не удалось отправить сообщение").slice(0, 300) });
     if (c && a.closeWindow) await closeReplyWindow(ctx, c._id);
     if (c && c.channel !== "site" && a.systemic) await markError(ctx, c.channel, a.error ?? "Ответ клиенту не отправлен");

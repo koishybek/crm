@@ -1,0 +1,42 @@
+{
+  "data": {
+    "id": 118765432,
+    "status": "active",
+    "url": "https://www.olx.kz/d/obyavlenie/remont-i-obsluzhivanie-konditsionerov-almaty-IDfx7Kq2.html",
+    "created_at": "2026-09-01 09:12:44",
+    "activated_at": "2026-09-01 09:13:02",
+    "valid_to": "2026-10-31 09:13:02",
+    "title": "Ремонт и обслуживание кондиционеров в Алматы, выезд в день обращения",
+    "description": "Чистка, заправка фреоном, ремонт и установка кондиционеров любых марок. Выезд мастера по Алматы и пригороду в день обращения. Гарантия на работы.",
+    "category_id": 1532,
+    "advertiser_type": "business",
+    "external_id": null,
+    "external_url": null,
+    "contact": {
+      "name": "Home Max Service",
+      "phone": "77000000000"
+    },
+    "location": {
+      "city_id": 3,
+      "district_id": 17,
+      "latitude": 43.238,
+      "longitude": 76.945
+    },
+    "images": [
+      {
+        "url": "https://frankfurt.apollo.olxcdn.com:443/v1/files/fixture-advert-0001-KZ/image"
+      }
+    ],
+    "price": {
+      "value": 8000,
+      "currency": "KZT",
+      "negotiable": true,
+      "trade": false,
+      "budget": false
+    },
+    "salary": null,
+    "attributes": [],
+    "courier": null,
+    "auto_extend_enabled": true
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "data": [
+    {
+      "id": 9811000001,
+      "uuid": "6344cb38-9b8d-464e-b5ad-903dd06fb695",
+      "thread_id": 2290112233,
+      "thread_uuid": "0f8b1c2e-6a1d-4c39-9d1e-2b7f5a9c3e10",
+      "created_at": "2026-10-12 14:03:11",
+      "type": "received",
+      "text": "Здравствуйте! Кондиционер Samsung не охлаждает, из внутреннего блока капает вода. Сможете приехать сегодня? Самал-2.",
+      "is_read": true,
+      "attachments": null
+    },
+    {
+      "id": 9811000002,
+      "uuid": "ab10ed8d-f94b-48db-9aa5-a43e402ac5c3",
+      "thread_id": 2290112233,
+      "thread_uuid": "0f8b1c2e-6a1d-4c39-9d1e-2b7f5a9c3e10",
+      "created_at": "2026-10-12 14:05:40",
+      "type": "sent",
+      "text": "Здравствуйте! Да, мастер может подъехать сегодня после 18:00. Пришлите, пожалуйста, фото наружного блока и номер телефона для связи.",
+      "is_read": true,
+      "attachments": null
+    },
+    {
+      "id": 9811000003,
+      "uuid": "2c536b76-2304-4f74-ae13-822e95977397",
+      "thread_id": 2290112233,
+      "thread_uuid": "0f8b1c2e-6a1d-4c39-9d1e-2b7f5a9c3e10",
+      "created_at": "2026-10-12 14:10:55",
+      "type": "received",
+      "text": "",
+      "is_read": false,
+      "attachments": [
+        {
+          "name": "IMG_20261012_141055.jpg",
+          "url": "https://frankfurt.apollo.olxcdn.com:443/v1/files/fixture-attachment-0001-KZ/image"
+        }
+      ]
+    },
+    {
+      "id": 9811000004,
+      "uuid": "80e00e6c-5b4d-47b3-8a08-94b3f2fe2d61",
+      "thread_id": 2290112233,
+      "thread_uuid": "0f8b1c2e-6a1d-4c39-9d1e-2b7f5a9c3e10",
+      "created_at": "2026-10-12 14:12:09",
+      "type": "received",
+      "text": "Вот фото. Мой номер +7 700 000 12 34, Айгерим.",
+      "is_read": false,
+      "attachments": null
+    }
+  ]
+}

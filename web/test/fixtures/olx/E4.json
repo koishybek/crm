@@ -1,0 +1,5 @@
+{
+  "error": "invalid_client",
+  "error_description": "Client is not active",
+  "error_human_title": "Невозможно идентифицировать и / или авторизовать приложение."
+}

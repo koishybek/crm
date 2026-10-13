@@ -2,9 +2,11 @@ import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { auth } from "./auth";
+import { olxCallback } from "./channels/olx";
 import { whatsappVerify, whatsappWebhook, WEBHOOK_PATH as WHATSAPP_WEBHOOK } from "./channels/whatsapp";
 import { env } from "./env";
 import { safeEqual } from "./lib/crypto";
+import { OLX_CALLBACK_PATH } from "./lib/olxApi";
 import { createLeadHttp, getLeadHttp } from "./publicApi";
 import { leadOptions, leadPost } from "./site";
 
@@ -91,6 +93,10 @@ http.route({
 // Callback URL в Meta: https://<deployment>.convex.site/whatsapp/webhook. GET — проверка адреса, POST — события (подпись App Secret).
 http.route({ path: WHATSAPP_WEBHOOK, method: "GET", handler: whatsappVerify });
 http.route({ path: WHATSAPP_WEBHOOK, method: "POST", handler: whatsappWebhook });
+
+// ── OLX.kz (Partner API) ─────────────────────────────────────────────────────
+// Адрес возврата после входа в OLX — зарегистрирован в приложении developer.olx.kz: https://<deployment>.convex.site/olx/callback.
+http.route({ path: OLX_CALLBACK_PATH, method: "GET", handler: olxCallback });
 
 // ── Заявки с сайта и публичный API ───────────────────────────────────────────
 // CORS — только у формы сайта: её зовут браузеры с /zayavka и с сайтов компании. API — для серверов, по ключу.
