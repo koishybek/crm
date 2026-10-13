@@ -80,7 +80,8 @@ function Viewer({ photos, start, onClose }: { photos: WorkerPhoto[]; start: numb
       <div ref={strip} className="flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {photos.map((p, i) => (
           <div key={p.id} className="flex h-full w-full shrink-0 snap-center items-center justify-center">
-            <img src={p.url} alt={`Фото ${i + 1} из ${photos.length}`} className="max-h-full max-w-full object-contain" />
+            {/* Оригиналы тяжёлые: соседние фото грузятся, только когда до них долистали. */}
+            <img src={p.url} alt={`Фото ${i + 1} из ${photos.length}`} loading={i === start ? "eager" : "lazy"} decoding="async" className="max-h-full max-w-full object-contain" />
           </div>
         ))}
       </div>

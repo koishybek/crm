@@ -28,7 +28,7 @@ export function WorkerToasts({ raised }: { raised: boolean }) {
           >
             <Icon size={20} className={cn("mt-0.5 shrink-0", t.tone === "ok" ? "text-[#4ade9b]" : t.tone === "bad" ? "text-[#ff8197]" : "text-[#8ec0ff]")} aria-hidden />
             <span className="min-w-0 flex-1 py-0.5">{t.text}</span>
-            <button onClick={() => drop(t.id)} aria-label="Закрыть уведомление" className="-my-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/70 hover:text-white">
+            <button type="button" onClick={() => drop(t.id)} aria-label="Закрыть уведомление" className="-my-2.5 inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white/70 hover:text-white">
               <X size={18} aria-hidden />
             </button>
           </div>

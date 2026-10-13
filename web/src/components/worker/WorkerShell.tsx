@@ -3,12 +3,13 @@
 // («назад» + номер) и панель действий вместо вкладок.
 import { useQuery } from "convex/react";
 import { CircleUserRound, ClipboardList, Search, Wallet, type LucideIcon } from "lucide-react";
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useMatch } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { useNow } from "../../data/hooks";
 import type { User } from "../../data/types";
 import { countUnseen } from "../../data/workerFeed";
+import { listenForInstall } from "../../data/workerInstall";
 import { useWorkerPrefs } from "../../data/workerPrefs";
 import { needsAction } from "../../data/workerStatus";
 import { cn } from "../../lib/format";
@@ -19,6 +20,10 @@ import { WorkerBell } from "./Bell";
 import { ListSkeleton } from "./kit";
 import { NetWatcher, OfflineBanner } from "./net";
 import { WorkerToasts } from "./Toasts";
+
+// Предложение установки (beforeinstallprompt) браузер присылает сразу после загрузки — раньше, чем
+// подгрузятся экраны мастера. Каркас входит в основной бандл, поэтому начинаем слушать здесь.
+listenForInstall();
 
 type BadgeKey = "feed" | "my" | "profile";
 
@@ -52,15 +57,13 @@ function useBadges(): { badges: Badges; available: boolean | undefined } {
   const tg = useQuery(api.telegram.status);
   const seenAt = useWorkerPrefs((s) => s.feedSeenAt);
   const available = mine?.executor.available;
-  return {
-    available,
-    badges: {
-      // С выключенным приёмом заказы взять нельзя — не зовём в ленту счётчиком.
-      feed: extras && available ? countUnseen(extras, seenAt, now) : 0,
-      my: mine ? needsAction(mine.orders, now) : 0,
-      profile: !!tg?.enabled && !tg.linked,
-    },
-  };
+  const orders = mine?.orders;
+  // С выключенным приёмом заказы взять нельзя — не зовём в ленту счётчиком.
+  const feed = useMemo(() => (extras && available ? countUnseen(extras, seenAt, now) : 0), [extras, available, seenAt, now]);
+  const my = useMemo(() => (orders ? needsAction(orders, now) : 0), [orders, now]);
+  const profile = !!tg?.enabled && !tg.linked;
+  const badges = useMemo(() => ({ feed, my, profile }), [feed, my, profile]);
+  return { available, badges };
 }
 
 function badgeLabel(tab: Tab, b: Badges): string {
@@ -146,6 +149,9 @@ function SideBar({ me, badges }: { me: User; badges: Badges }) {
 export function WorkerShell({ me, children }: { me: User; children?: ReactNode }) {
   const orderRoute = useMatch("/w/orders/:id") !== null;
   const { badges, available } = useBadges();
+  const countVisit = useWorkerPrefs((s) => s.countVisit);
+  // Открытия кабинета: подсказку об установке на телефон показываем не с первого захода.
+  useEffect(() => countVisit(), [countVisit]);
 
   return (
     <div className="min-h-dvh bg-page">

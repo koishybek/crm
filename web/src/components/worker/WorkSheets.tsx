@@ -13,7 +13,8 @@ import { Sheet } from "./Sheet";
 
 type SheetOrder = Pick<WorkerOrder, "id" | "number" | "status" | "payout">;
 
-const FIELD = "w-full rounded-[12px] border border-[#cfc9bc] bg-white px-3.5 py-3 text-[16px] text-ink placeholder:text-[#8a857b] focus:border-[#e9b400] focus:shadow-[0_0_0_3px_rgb(255_198_41/0.28)] focus:outline-none";
+// Подсказка в пустом поле — тем же цветом, что и прочий вторичный текст (5,6:1): на солнце бледная не читается.
+const FIELD = "w-full rounded-[12px] border border-[#cfc9bc] bg-white px-3.5 py-3 text-[16px] text-ink placeholder:text-[#6b675f] focus:border-[#e9b400] focus:shadow-[0_0_0_3px_rgb(255_198_41/0.28)] focus:outline-none";
 
 /** Ответ сервера «статус уже изменился / заказ не ваш» — закрываем шторку и говорим об этом. */
 function staleRefusal(error: string): boolean {
@@ -152,7 +153,7 @@ export function PauseSheet({ order, onClose }: { order: SheetOrder; onClose: () 
         </>
       }
     >
-      <p className="text-[15.5px] text-ink-2">Оператор увидит, почему работа стоит. Продолжить можно в любой момент.</p>
+      <p className="text-[15.5px] text-ink-2">Оператор увидит, почему работа стоит. Снять паузу можно в любой момент.</p>
       <div className="mt-4 flex flex-wrap gap-2">
         {PAUSE_REASONS.map((r) => (
           <button

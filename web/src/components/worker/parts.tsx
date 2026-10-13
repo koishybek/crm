@@ -88,12 +88,15 @@ export function Stars({ rating, size = 20 }: { rating: number; size?: number }) 
   );
 }
 
-/** Шаги заказа «Принят → В работе → Сдан → Выплачено» с текущим шагом. */
+/**
+ * Шаги заказа «Принят → В работе → Сдан → Выплачено» с текущим шагом. Галочка у пройденного шага — только
+ * если шаг шире 88 px: на экранах 320–360 px иначе «Выплачено» обрезалось бы; пройденность видна и по полосе.
+ */
 export function StatusStepper({ steps }: { steps: Step[] }) {
   return (
-    <ol aria-label="Этапы заказа" className="grid grid-cols-4 gap-1.5">
+    <ol aria-label="Этапы заказа" className="grid grid-cols-4 gap-1">
       {steps.map((s, i) => (
-        <li key={i} aria-current={s.state === "current" ? "step" : undefined} className="min-w-0">
+        <li key={i} aria-current={s.state === "current" ? "step" : undefined} className="@container min-w-0">
           <span className={cn("block h-1.5 rounded-full transition-[background-color] duration-300", s.state === "done" ? "bg-ink" : s.state === "current" ? "bg-brand" : "bg-line-strong")} aria-hidden />
           <span
             className={cn(
@@ -101,7 +104,7 @@ export function StatusStepper({ steps }: { steps: Step[] }) {
               s.state === "done" ? "text-ink-2" : s.state === "current" ? "font-semibold text-ink" : "text-[#6b675f]",
             )}
           >
-            {s.state === "done" && <CircleCheck size={14} className="shrink-0 text-[#067a46]" aria-hidden />}
+            {s.state === "done" && <CircleCheck size={14} className="hidden shrink-0 text-[#067a46] @min-[88px]:block" aria-hidden />}
             {s.state === "current" && s.label === "Пауза" && <Pause size={13} className="shrink-0" aria-hidden />}
             <span className="min-w-0 truncate">{s.label}</span>
             {s.state === "done" && <span className="sr-only"> — пройден</span>}

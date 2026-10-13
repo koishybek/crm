@@ -26,6 +26,7 @@ import {
   TriangleAlert,
   Undo2,
   UserRound,
+  Wallet,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -40,9 +41,10 @@ import { isFresh } from "../../data/workerFeed";
 import { SUPPORT_PHONE, SUPPORT_TEL, telHref } from "../../data/workerLinks";
 import { hasSkill } from "../../data/workerMatch";
 import { clientShortName } from "../../data/workerNames";
+import type { OrderChange } from "../../data/workerSeen";
 import { isActiveWork, isEarning } from "../../data/workerStats";
 import { contactsLocked, isOverdueWork, statusView, stepsOf } from "../../data/workerStatus";
-import { durationLabel, whenLabel } from "../../data/workerTime";
+import { dueLabel, durationLabel, whenLabel } from "../../data/workerTime";
 import type { WorkerNote, WorkerPhoto } from "../../data/workerTypes";
 import { cn, money, phone } from "../../lib/format";
 import { ServiceGlyph, ServiceTile } from "../../components/icons";
@@ -53,6 +55,7 @@ import { OfflineBanner, useNet } from "../../components/worker/net";
 import { DueText, PayoutChipBadge, Photo, StatusBadge, StatusStepper } from "../../components/worker/parts";
 import { Sheet } from "../../components/worker/Sheet";
 import { TakeSheet } from "../../components/worker/TakeSheet";
+import { useOrderChange } from "../../components/worker/useOrderChange";
 import { useStep } from "../../components/worker/useStep";
 import { DeclineSheet, DoneSheet, MessageSheet, PauseSheet } from "../../components/worker/WorkSheets";
 
@@ -182,6 +185,7 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
   const route = useRoute(o.city, o.address);
   const s = serviceById(o.serviceId);
   const mineMode = mode === "mine";
+  const changed = useOrderChange(o, mineMode);
   const contacts = mineMode && !contactsLocked(o) && !!o.address;
   const active = mineMode && isActiveWork(o);
   const overdue = mineMode && isOverdueWork(o, now);
@@ -194,7 +198,9 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
   const office: Act = { key: "office", short: "Офис", long: "Позвонить в офис", icon: Headset, href: SUPPORT_TEL };
   const decline: Act = { key: "decline", short: "Отказ", long: "Отказаться от заказа", icon: Undo2, onClick: () => setSheet("decline"), danger: true };
   const pause: Act = { key: "pause", short: "Жду клиента", long: "Жду клиента — пауза", icon: Pause, onClick: () => setSheet("pause") };
-  const resume: Act = { key: "resume", short: "Продолжить", long: "Продолжить работу", icon: Play, onClick: () => void step(o.id, "resume") };
+  // «Снять паузу», а не «Продолжить»: два коротких слова помещаются в квадрат 64 px и на экране 320 px.
+  // Подпись та же и на компьютере — подсказка под шагами ссылается на неё (workerStatus.ts).
+  const resume: Act = { key: "resume", short: "Снять паузу", long: "Снять паузу", icon: Play, onClick: () => void step(o.id, "resume") };
 
   let primary: { label: string; busyText: string; onClick: () => void; soft?: boolean; icon?: LucideIcon } | null = null;
   let secondary: (Act | null)[] = [];
@@ -253,7 +259,7 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
       softDisabled={primary.soft}
       disabled={offline}
       onClick={primary.onClick}
-      aria-label={primary.soft ? `${primary.label}. Сначала включите приём заказов` : undefined}
+      aria-label={primary.soft && !offline ? `${primary.label}. Сначала включите приём заказов` : undefined}
     >
       {offline ? "Нет связи" : primary.label}
     </WButton>
@@ -274,8 +280,10 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
       <button type="button" onClick={onBack} className={cn("mb-3 hidden min-h-12 items-center gap-2 text-[15px] lg:inline-flex", MUTED)}>
         <ArrowLeft size={18} aria-hidden /> {mineMode ? "Мои заказы" : "Заказы"}
       </button>
+      {/* На компьютере шапки экрана заказа нет — заголовок для диктора. */}
+      <h1 className="sr-only hidden lg:block">Заказ №{o.number}</h1>
 
-      <StateBanner order={o} mode={mode} now={now} overdue={overdue} onWrite={() => setSheet("message")} />
+      <StateBanner order={o} mode={mode} now={now} overdue={overdue} change={changed.change} onAck={changed.ack} onWrite={() => setSheet("message")} />
 
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
         <div className="min-w-0">
@@ -390,27 +398,31 @@ function OrderView({ mode, order: o, photos, notes, publishedAt, skills, availab
   );
 }
 
-/** Квадратная вторичная кнопка панели: иконка + короткая подпись. */
+/**
+ * Квадратная вторичная кнопка панели: иконка + короткая подпись. Диктору — полная подпись, но видимое
+ * слово («Звонок») остаётся в имени кнопки: голосовое управление находит кнопку по тому, что на ней написано.
+ */
 function SquareAct({ act, tall }: { act: Act; tall?: boolean }) {
   const cls = cn(
-    "inline-flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-[12px] border border-[#cfc9bc] bg-white px-1 text-center text-[12px] leading-[13px] font-semibold active:bg-[#f4f2ec]",
-    tall ? "min-h-14 w-full" : "min-h-14 w-[68px]",
+    "inline-flex shrink-0 flex-col items-center justify-center gap-0.5 rounded-[12px] border border-[#cfc9bc] bg-white px-0.5 text-center text-[11.5px] leading-[13px] font-semibold active:bg-[#f4f2ec]",
+    tall ? "min-h-14 w-full" : "min-h-14 w-16",
     act.danger ? "text-[#c41d3a]" : "text-ink",
   );
   const inner = (
     <>
       <act.icon size={22} strokeWidth={1.9} aria-hidden />
       {act.short}
+      {act.long !== act.short && <span className="sr-only"> — {act.long}</span>}
     </>
   );
   if (act.href)
     return (
-      <a href={act.href} className={cls} aria-label={act.long} {...(act.key === "route" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
+      <a href={act.href} className={cls} {...(act.key === "route" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
         {inner}
       </a>
     );
   return (
-    <button type="button" onClick={act.onClick} className={cls} aria-label={act.long}>
+    <button type="button" onClick={act.onClick} className={cls}>
       {inner}
     </button>
   );
@@ -438,8 +450,27 @@ function MenuRow({ icon: Icon, label, hint, onClick, href, danger }: { icon: Luc
   );
 }
 
-/** Плашка состояния под шапкой: отмена, возврат, просрочка. */
-function StateBanner({ order: o, mode, now, overdue, onWrite }: { order: WorkerOrder; mode: Mode; now: number; overdue: boolean; onWrite: () => void }) {
+interface StateBannerProps {
+  order: WorkerOrder;
+  mode: Mode;
+  now: number;
+  overdue: boolean;
+  /** Оператор поменял выплату, срок или адрес с прошлого просмотра. */
+  change: OrderChange | null;
+  onAck: () => void;
+  onWrite: () => void;
+}
+
+const CHANGE_ICON: Record<OrderChange["kind"], LucideIcon> = { payout: Wallet, deadline: Clock, address: MapPin };
+
+function changeText(c: OrderChange, now: number): string {
+  if (c.kind === "payout") return `Оплата изменилась: было ${money(c.before)}, стало ${money(c.after)}`;
+  if (c.kind === "deadline") return `Срок изменён: ${dueLabel(c.after, now)}`;
+  return "Адрес изменён — проверьте его ниже";
+}
+
+/** Плашка состояния под шапкой (одна за раз): отмена, возврат, просрочка, изменения оператора. */
+function StateBanner({ order: o, mode, now, overdue, change, onAck, onWrite }: StateBannerProps) {
   if (mode !== "mine") return null;
   if (o.status === "cancelled") {
     const reason = o.cancelReason && o.cancelReason !== "Без причины" ? o.cancelReason : null;
@@ -461,12 +492,20 @@ function StateBanner({ order: o, mode, now, overdue, onWrite }: { order: WorkerO
         Срок прошёл {durationLabel(now - Date.parse(o.deadline))} назад. Напишите оператору, если задерживаетесь
       </Banner>
     );
+  if (change)
+    return (
+      <Banner tone="warn" icon={CHANGE_ICON[change.kind]} action={{ label: "Понятно", onClick: onAck }}>
+        {changeText(change, now)}
+      </Banner>
+    );
   return null;
 }
 
-function Banner({ tone, icon: Icon, children, action }: { tone: "slate" | "bad"; icon: LucideIcon; children: ReactNode; action?: { label: string; onClick: () => void } }) {
+const BANNER_TONE = { slate: "bg-slate-bg text-[#4f4b44]", bad: "bg-bad-bg text-[#c41d3a]", warn: "bg-warn-bg text-[#9a5b00]" } as const;
+
+function Banner({ tone, icon: Icon, children, action }: { tone: keyof typeof BANNER_TONE; icon: LucideIcon; children: ReactNode; action?: { label: string; onClick: () => void } }) {
   return (
-    <div role="status" className={cn("flex items-center gap-3 px-4 py-2.5 text-[15px] font-medium lg:mb-4 lg:rounded-[14px]", tone === "bad" ? "bg-bad-bg text-[#c41d3a]" : "bg-slate-bg text-[#4f4b44]")}>
+    <div role="status" className={cn("flex items-center gap-3 px-4 py-2.5 text-[15px] font-medium lg:mb-4 lg:rounded-[14px]", BANNER_TONE[tone])}>
       <Icon size={20} className="shrink-0" aria-hidden />
       <span className="min-w-0 flex-1">{children}</span>
       {action && (
@@ -547,7 +586,7 @@ function InfoRows({ order: o, mode, now, skills, contacts }: { order: WorkerOrde
             {o.requiredSkills.map((k) => {
               const own = hasSkill({ skills }, k);
               return (
-                <li key={k} className="inline-flex min-h-8 items-center gap-1 rounded-[8px] bg-slate-bg px-2.5 text-[14px] text-ink">
+                <li key={k} className="inline-flex min-h-8 max-w-full items-center gap-1 rounded-[8px] bg-slate-bg px-2.5 text-[14px] text-ink wrap-anywhere">
                   {own && <Check size={14} className="text-[#067a46]" aria-hidden />}
                   {k}
                   {own && <span className="sr-only"> — есть у вас</span>}
@@ -564,14 +603,15 @@ function InfoRows({ order: o, mode, now, skills, contacts }: { order: WorkerOrde
   );
 }
 
+/** Строка списка: в dl — только пары dt/dd (иконка — внутри dt), иначе диктор теряет связь подписи и значения. */
 function Row({ icon: Icon, label, children }: { icon: LucideIcon; label: string; children: ReactNode }) {
   return (
-    <div className="flex gap-3 py-3">
-      <Icon size={20} className="mt-0.5 shrink-0 text-ink-2" aria-hidden />
-      <div className="min-w-0 flex-1">
-        <dt className={cn("text-[13px]", MUTED)}>{label}</dt>
-        <dd className="mt-0.5">{children}</dd>
-      </div>
+    <div className="relative min-w-0 py-3 pl-8">
+      <dt className={cn("text-[13px]", MUTED)}>
+        <Icon size={20} className="absolute top-3.5 left-0 text-ink-2" aria-hidden />
+        {label}
+      </dt>
+      <dd className="mt-0.5">{children}</dd>
     </div>
   );
 }
@@ -594,8 +634,19 @@ function Notes({ notes, now, onWrite }: { notes: WorkerNote[]; now: number; onWr
                 <div className="mt-2 flex flex-wrap gap-2">
                   {n.files.map((f) =>
                     f.url ? (
-                      <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" className="block h-16 w-16 overflow-hidden rounded-[10px]" aria-label={`Открыть фото ${f.name}`}>
-                        {f.kind === "image" ? <Photo url={f.url} alt={f.name} className="h-full w-full" /> : <span className="flex h-full items-center justify-center bg-white text-[11px]">{f.name}</span>}
+                      <a
+                        key={f.id}
+                        href={f.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block h-16 w-16 overflow-hidden rounded-[10px]"
+                        aria-label={`${f.kind === "image" ? "Открыть фото" : "Открыть файл"} ${f.name}`}
+                      >
+                        {f.kind === "image" ? (
+                          <Photo url={f.url} alt={f.name} className="h-full w-full" />
+                        ) : (
+                          <span className="flex h-full items-center justify-center bg-white p-1 text-center text-[12px] leading-tight break-all">{f.name}</span>
+                        )}
                       </a>
                     ) : null,
                   )}
@@ -623,11 +674,12 @@ function Notice({ icon, title, text, actions, onBack }: { icon: LucideIcon; titl
         </header>
         <OfflineBanner />
       </div>
+      <h1 className="sr-only hidden lg:block">Заказ</h1>
       <div className="px-4 pt-4 lg:px-0">
         <Empty icon={icon} title={title} text={text} action={actions} />
         <p className={cn("mt-4 text-center text-[14px]", MUTED)}>
           Вопросы — в офис:{" "}
-          <a href={SUPPORT_TEL} className="font-semibold text-[#855600] underline">
+          <a href={SUPPORT_TEL} className="inline-flex min-h-12 items-center font-semibold whitespace-nowrap text-[#855600] underline underline-offset-2">
             {SUPPORT_PHONE}
           </a>
         </p>

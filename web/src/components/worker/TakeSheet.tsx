@@ -170,7 +170,7 @@ export function TakeSheet({ order, gone, available, onClose, onTaken }: TakeShee
           <dt className={MUTED}>Где</dt>
           <dd className="text-ink">{order.city}</dd>
           <dt className={MUTED}>Вы получите</dt>
-          <dd className="text-[24px] font-bold text-ink tabular-nums">{money(order.payout)}</dd>
+          <dd className="text-[24px] font-bold whitespace-nowrap text-ink tabular-nums">{money(order.payout)}</dd>
         </dl>
       </div>
       {order.payout !== firstPayout && (

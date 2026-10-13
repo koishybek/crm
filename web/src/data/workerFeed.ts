@@ -135,3 +135,23 @@ export function freshIds(ids: readonly string[], visible: readonly { id: string 
   const shown = new Set(ids);
   return visible.filter((o) => !shown.has(o.id)).map((o) => o.id);
 }
+
+/** Подсказки над лентой, по важности: подключить Telegram, «Как брать заказы», установить приложение. */
+export type FeedHintKind = "telegram" | "howto" | "install";
+export type FeedHintFlags = Record<FeedHintKind, boolean>;
+
+const HINT_ORDER: readonly FeedHintKind[] = ["telegram", "howto", "install"];
+
+/** Какую подсказку показать при открытии ленты: не больше одной, самую важную из нужных. */
+export function pickFeedHint(flags: FeedHintFlags): FeedHintKind | null {
+  return HINT_ORDER.find((k) => flags[k]) ?? null;
+}
+
+/**
+ * Что видно сейчас: выбранная при открытии подсказка — пока она нужна. Скрыли её или подключили Telegram —
+ * исчезает, но другая на её место до следующего открытия ленты не встаёт, и запоздавшая (предложение
+ * установки от браузера приходит через секунды) не появляется: список под пальцем не прыгает.
+ */
+export function shownFeedHint(chosen: FeedHintKind | null, flags: FeedHintFlags): FeedHintKind | null {
+  return chosen !== null && flags[chosen] ? chosen : null;
+}

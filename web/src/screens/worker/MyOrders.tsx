@@ -1,7 +1,7 @@
 // «Мои заказы»: активные (первым — тёмная карточка «Следующий заказ» с главной кнопкой) и завершённые по месяцам.
 import { useQuery } from "convex/react";
 import { CircleCheck, ClipboardList, MapPin, Navigation, Phone } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { serviceById } from "../../data/catalog";
@@ -29,10 +29,11 @@ export function MyOrders() {
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") === "done" ? "done" : "active";
   const [limit, setLimit] = useState(PAGE);
+  const orders = data?.orders;
+  const active = useMemo(() => sortActive((orders ?? []).filter(isActiveWork), now), [orders, now]);
+  const closed = useMemo(() => (orders ?? []).filter(isClosedForWorker), [orders]);
 
   if (data === undefined) return <ListSkeleton />;
-  const active = sortActive(data.orders.filter(isActiveWork), now);
-  const closed = data.orders.filter(isClosedForWorker);
 
   return (
     <div className="mx-auto max-w-[760px]">
@@ -142,9 +143,10 @@ function MyOrderCard({ order: o, now }: { order: WorkerOrder; now: number }) {
   const contacts = !contactsLocked(o) && !!o.address;
   return (
     <Link to={`/w/orders/${o.id}`} className="card block min-h-24 p-4 active:bg-[#faf8f3]">
-      <div className="flex items-center justify-between gap-3">
+      {/* Длинный бейдж и большая сумма на 320 px не помещаются в строку — сумма уходит вниз. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <StatusBadge order={o} now={now} />
-        <span className="text-[18px] font-bold text-ink tabular-nums">{money(o.payout)}</span>
+        <span className="ml-auto text-[18px] font-bold whitespace-nowrap text-ink tabular-nums">{money(o.payout)}</span>
       </div>
       <div className="mt-1.5 line-clamp-2 text-[16px] leading-snug font-semibold text-ink">{serviceById(o.serviceId).label}</div>
       <DueText deadline={o.deadline} now={now} className="mt-1.5 text-[15px]" />
@@ -158,19 +160,22 @@ function MyOrderCard({ order: o, now }: { order: WorkerOrder; now: number }) {
 
 /** «Завершённые»: группы по месяцам (Алматы) с суммой без отмен и возвратов. */
 function DoneList({ orders, now, limit, onMore }: { orders: WorkerOrder[]; now: number; limit: number; onMore: () => void }) {
+  // Первые `limit` заказов, сгруппированные по месяцам (сумма месяца — по всем его заказам).
+  const groups = useMemo(() => {
+    let left = limit;
+    return groupByMonth(orders).flatMap((g) => {
+      if (left <= 0) return [];
+      const shown = g.orders.slice(0, left);
+      left -= shown.length;
+      return [{ ...g, orders: shown }];
+    });
+  }, [orders, limit]);
   if (!orders.length)
     return (
       <div className="mt-4">
         <Empty icon={CircleCheck} title="Здесь будут выполненные заказы" text="Сданные, отменённые и возвращённые заказы появятся в этом списке." />
       </div>
     );
-  let left = limit;
-  const groups = groupByMonth(orders).flatMap((g) => {
-    if (left <= 0) return [];
-    const shown = g.orders.slice(0, left);
-    left -= shown.length;
-    return [{ ...g, orders: shown }];
-  });
   return (
     <div className="mt-4 flex flex-col gap-4">
       {groups.map((g) => (

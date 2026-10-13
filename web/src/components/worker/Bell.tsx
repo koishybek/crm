@@ -2,7 +2,7 @@
 // не помещается на экране телефона.
 import { useQuery } from "convex/react";
 import { Bell } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { useNow } from "../../data/hooks";
@@ -21,7 +21,8 @@ export function WorkerBell() {
   const data = useQuery(api.notifications.mine, { now: Math.floor(now / 60_000) * 60_000 });
   const items = data?.items ?? [];
   const alerts = data?.alerts ?? [];
-  const unread = items.filter((n) => !n.read).length + alerts.length;
+  const unreadItems = useMemo(() => (data ? data.items.filter((n) => !n.read).length : 0), [data]);
+  const unread = unreadItems + alerts.length;
 
   const go = (link?: string) => {
     setOpen(false);
@@ -48,7 +49,7 @@ export function WorkerBell() {
         onClose={() => setOpen(false)}
         title="Уведомления"
         footer={
-          items.some((n) => !n.read) ? (
+          unreadItems > 0 ? (
             <WButton variant="secondary" full onClick={() => void markAllRead()}>
               Отметить все прочитанными
             </WButton>
