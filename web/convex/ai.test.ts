@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api } from "./_generated/api";
 import schema from "./schema";
-import { extractionPrompt, parseJsonObject } from "./ai";
+import { audioExt, extractionPrompt, parseJsonObject } from "./ai";
 
 const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
@@ -140,5 +140,15 @@ describe("промпт и разбор ответа", () => {
     expect(parseJsonObject('ответ: ```json\n{"a":2}\n``` готово')).toEqual({ a: 2 });
     expect(parseJsonObject("[1,2]")).toBeNull();
     expect(parseJsonObject("не json")).toBeNull();
+  });
+});
+
+describe("расшифровка через OpenAI-совместимый API", () => {
+  test("имя файла — по формату записи: голосовые OGG не выдаются за WAV", () => {
+    expect(audioExt("audio/ogg; codecs=opus")).toBe("ogg");
+    expect(audioExt("audio/mpeg")).toBe("mp3");
+    expect(audioExt("audio/mp4")).toBe("m4a");
+    expect(audioExt("audio/wav")).toBe("wav");
+    expect(audioExt("")).toBe("mp3");
   });
 });

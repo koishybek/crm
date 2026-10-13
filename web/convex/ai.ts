@@ -143,11 +143,24 @@ export const cleanTranscript = (t: string) => PHANTOMS.reduce((s, re) => s.repla
 
 const STT_TIMEOUT_MS = 120_000;
 
+const AUDIO_EXT: [RegExp, string][] = [
+  [/ogg|opus/i, "ogg"],
+  [/mpeg|mp3/i, "mp3"],
+  [/mp4|m4a|aac/i, "m4a"],
+  [/webm/i, "webm"],
+  [/wav/i, "wav"],
+  [/flac/i, "flac"],
+  [/amr/i, "amr"],
+];
+/** Расширение файла по MIME-типу записи; неизвестный — mp3 (самый частый у АТС). */
+export const audioExt = (mime: string): string => AUDIO_EXT.find(([re]) => re.test(mime))?.[1] ?? "mp3";
+
 export async function transcribe(audio: Blob): Promise<{ text: string; language: string | null; seconds: number | null }> {
   const stt = sttCfg();
   if (stt) {
     const form = new FormData();
-    form.append("file", audio, "call.wav");
+    // Формат API определяет по расширению: голосовые Telegram/WhatsApp — OGG, записи АТС — чаще MP3.
+    form.append("file", audio, `audio.${audioExt(audio.type)}`);
     form.append("model", stt.model);
     const res = await call(`${stt.base}/audio/transcriptions`, { method: "POST", headers: { Authorization: `Bearer ${stt.key}` }, body: form }, STT_TIMEOUT_MS);
     if (!res.ok) await fail(res, "stt");
