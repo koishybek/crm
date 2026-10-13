@@ -1,9 +1,9 @@
 // «Профиль»: главный переключатель «Принимаю заказы», рейтинг и отзывы, услуги и навыки (меняет оператор),
-// Telegram, карты для маршрута, поддержка и выход.
+// Telegram, карты для маршрута, поддержка, установка приложения на телефон и выход.
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
-import { Check, ChevronRight, CircleCheck, Headset, LogOut, MapPinned, Send, type LucideIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Check, ChevronRight, CircleCheck, Download, Headset, LogOut, MapPinned, Send, type LucideIcon } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import type { Tone } from "../../data/catalog";
@@ -18,6 +18,7 @@ import { cn, phone, plural } from "../../lib/format";
 import { Avatar } from "../../components/ui";
 import { AvailabilitySwitch } from "../../components/worker/Availability";
 import { ConfirmSheet } from "../../components/worker/ConfirmSheet";
+import { useInstallOffer } from "../../components/worker/Install";
 import { ListSkeleton, MUTED, ScreenTitle, Section, WButton, WLinkButton } from "../../components/worker/kit";
 import { Stars } from "../../components/worker/parts";
 import { Sheet } from "../../components/worker/Sheet";
@@ -47,12 +48,14 @@ export function Profile() {
   const nav = useNavigate();
   const { signOut } = useAuthActions();
   const mapApp = useWorkerPrefs((s) => s.mapApp);
+  const install = useInstallOffer();
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [maps, setMaps] = useState(false);
   const [allReviews, setAllReviews] = useState(false);
+  const allList = p?.reviews;
+  const reviews = useMemo(() => (allList ? (allReviews ? allList : allList.slice(0, REVIEWS_SHOWN)) : []), [allList, allReviews]);
 
   if (p === undefined) return <ListSkeleton count={2} />;
-  const reviews = allReviews ? p.reviews : p.reviews.slice(0, REVIEWS_SHOWN);
 
   return (
     <div className="mx-auto flex max-w-[760px] flex-col gap-3">
@@ -61,7 +64,7 @@ export function Profile() {
       <section className="card flex items-center gap-4 p-4">
         <Avatar name={p.name} size={64} variant="person" />
         <div className="min-w-0">
-          <h2 className="text-[20px] leading-tight font-bold text-ink">{p.name}</h2>
+          <h2 className="text-[20px] leading-tight font-bold text-ink wrap-anywhere">{p.name}</h2>
           <div className="mt-0.5 text-[15px] text-ink-2 tabular-nums">{phone(p.phone)}</div>
           <div className={cn("text-[14px]", MUTED)}>
             {p.city} · Мастер с {monthYearGenitive(p.joinedAt)}
@@ -84,7 +87,7 @@ export function Profile() {
         ) : (
           <p className="text-[16px] text-ink-2">Пока нет оценок. Они появятся после первых заказов.</p>
         )}
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        <div className="mt-4 grid grid-cols-3 gap-1.5 text-center">
           <Stat label="Выполнено" value={p.stats.completed} />
           <Stat label="В работе" value={p.stats.active} />
           <Stat label="Отменено" value={p.stats.cancelled} />
@@ -110,7 +113,7 @@ export function Profile() {
         {p.categories.length ? (
           <ul className="flex flex-wrap gap-1.5">
             {p.categories.map((c) => (
-              <li key={c.id} className={cn("inline-flex min-h-8 items-center rounded-[8px] px-2.5 text-[14px] font-semibold", CATEGORY_TONE[c.tone])}>
+              <li key={c.id} className={cn("inline-flex min-h-8 max-w-full items-center rounded-[8px] px-2.5 text-[14px] font-semibold wrap-anywhere", CATEGORY_TONE[c.tone])}>
                 {c.label}
               </li>
             ))}
@@ -122,7 +125,7 @@ export function Profile() {
         {p.skills.length ? (
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
             {p.skills.map((s) => (
-              <li key={s} className="inline-flex min-h-8 items-center rounded-[8px] bg-slate-bg px-2.5 text-[14px] text-ink">
+              <li key={s} className="inline-flex min-h-8 max-w-full items-center rounded-[8px] bg-slate-bg px-2.5 text-[14px] text-ink wrap-anywhere">
                 {s}
               </li>
             ))}
@@ -167,9 +170,12 @@ export function Profile() {
         )}
         <RowButton icon={MapPinned} title={`Карты для маршрута: ${mapApp ? MAP_APPS[mapApp].label : "спрашивать"}`} onClick={() => setMaps(true)} />
         <RowLink icon={Headset} title="Позвонить в поддержку" hint={SUPPORT_PHONE} href={SUPPORT_TEL} />
+        {/* Нет, если кабинет открыт с иконки на экране (уже установлен) или браузер компьютера не умеет ставить приложения. */}
+        {install.way && <RowButton icon={Download} title="Установить приложение" hint="Иконка на экране — открывать в один тап" onClick={install.open} />}
         <RowButton icon={LogOut} title="Выйти" danger onClick={() => setConfirm("logout")} />
       </section>
 
+      {install.sheet}
       {maps && <MapsSheet value={mapApp} onClose={() => setMaps(false)} />}
       {confirm === "logout" && (
         <ConfirmSheet
@@ -199,11 +205,12 @@ export function Profile() {
   );
 }
 
+/** Плитка показателя. Узкие поля: на экране 320 px «Выполнено» помещается одной строкой. */
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-[12px] bg-[#faf8f3] px-2 py-2.5">
+    <div className="min-w-0 rounded-[12px] bg-[#faf8f3] px-1 py-2.5">
       <div className="text-[22px] leading-tight font-bold text-ink tabular-nums">{value}</div>
-      <div className={cn("text-[13px]", MUTED)}>{label}</div>
+      <div className={cn("text-[12.5px] leading-tight", MUTED)}>{label}</div>
     </div>
   );
 }
@@ -261,14 +268,18 @@ function RowLink({ icon, title, hint, href }: { icon: LucideIcon; title: string;
   );
 }
 
+const MAP_OPTIONS: { value: MapApp | null; label: string }[] = [
+  ...(Object.keys(MAP_APPS) as MapApp[]).map((k) => ({ value: k, label: MAP_APPS[k].label })),
+  { value: null, label: "Спрашивать каждый раз" },
+];
+
 /** Какие карты открывать по кнопке «Маршрут». */
 function MapsSheet({ value, onClose }: { value: MapApp | null; onClose: () => void }) {
   const setMapApp = useWorkerPrefs((s) => s.setMapApp);
-  const options: { value: MapApp | null; label: string }[] = [...(Object.keys(MAP_APPS) as MapApp[]).map((k) => ({ value: k, label: MAP_APPS[k].label })), { value: null, label: "Спрашивать каждый раз" }];
   return (
     <Sheet open onClose={onClose} title="Карты для маршрута">
       <div className="flex flex-col gap-1" role="radiogroup" aria-label="Карты для маршрута">
-        {options.map((o) => (
+        {MAP_OPTIONS.map((o) => (
           <button
             key={o.label}
             type="button"

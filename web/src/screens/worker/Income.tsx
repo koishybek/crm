@@ -2,12 +2,13 @@
 // клиента, разбивка по неделям (пн–вс по Алматы) и список сданных заказов месяца.
 import { useQuery } from "convex/react";
 import { Phone, Wallet } from "lucide-react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { useNow } from "../../data/hooks";
 import { SUPPORT_PHONE, SUPPORT_TEL } from "../../data/workerLinks";
 import { earnedAt, isEarning, monthIncome, payoutBalance, weeklyIncome, type WeekIncome } from "../../data/workerStats";
-import { dayMonthShort, monthKeyAlmaty, monthPrepositional, shiftMonth, weekRangeLabel } from "../../data/workerTime";
+import { dayMonthShort, monthKeyAlmaty, monthPrepositional, shiftMonth, weekRangeLabel, weekStartAlmaty } from "../../data/workerTime";
 import { cn, money, moneyShort, plural } from "../../lib/format";
 import { Segmented } from "../../components/ui";
 import { Empty, ListSkeleton, MUTED, ScreenTitle } from "../../components/worker/kit";
@@ -20,13 +21,18 @@ export function Income() {
   const which = params.get("m") === "prev" ? "prev" : "cur";
   const current = monthKeyAlmaty(now);
   const month = which === "cur" ? current : shiftMonth(current, -1);
+  // Пересчёт — когда меняются заказы, месяц или неделя, а не на каждый тик часов.
+  const week = weekStartAlmaty(now);
+  const orders = data?.orders;
+  const income = useMemo(() => monthIncome(orders ?? [], month), [orders, month]);
+  const balance = useMemo(() => payoutBalance(orders ?? []), [orders]);
+  const weeks = useMemo(() => weeklyIncome(orders ?? [], week, 6), [orders, week]);
+  const list = useMemo(
+    () => (orders ?? []).filter((o) => isEarning(o) && monthKeyAlmaty(earnedAt(o)) === month).sort((a, b) => earnedAt(b).localeCompare(earnedAt(a))),
+    [orders, month],
+  );
 
   if (data === undefined) return <ListSkeleton count={2} />;
-  const orders = data.orders;
-  const income = monthIncome(orders, month);
-  const balance = payoutBalance(orders);
-  const weeks = weeklyIncome(orders, now, 6);
-  const list = orders.filter((o) => isEarning(o) && monthKeyAlmaty(earnedAt(o)) === month).sort((a, b) => earnedAt(b).localeCompare(earnedAt(a)));
 
   return (
     <div className="mx-auto max-w-[760px] lg:max-w-[1000px]">
@@ -84,11 +90,12 @@ export function Income() {
   );
 }
 
+/** Плитка суммы. Шрифт суммы сжимается на узких экранах: «1 315 500 ₸» в половине экрана 320 px — одной строкой. */
 function Tile({ title, value, caption }: { title: string; value: number; caption: string }) {
   return (
     <section className="card min-w-0 p-4">
       <h2 className="text-[14.5px] leading-snug text-ink-2">{title}</h2>
-      <div className="mt-1 text-[20px] font-bold text-ink tabular-nums">{money(value)}</div>
+      <div className="mt-1 text-[length:clamp(16px,5.2vw,20px)] font-bold whitespace-nowrap text-ink tabular-nums">{money(value)}</div>
       <div className={cn("text-[13px]", MUTED)}>{caption}</div>
     </section>
   );

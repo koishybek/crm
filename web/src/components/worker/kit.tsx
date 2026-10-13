@@ -72,8 +72,9 @@ export function WButton({ variant = "primary", size = "md", icon: Icon, full, bu
       aria-disabled={softDisabled || undefined}
       aria-busy={busy || undefined}
       className={cn(
-        "inline-flex min-w-0 items-center justify-center gap-2 rounded-[12px] border px-4 text-center font-semibold leading-tight text-balance transition-[transform,background-color] active:scale-[0.98] motion-reduce:active:scale-100 disabled:cursor-not-allowed",
-        size === "lg" ? "min-h-14 py-2 text-[16px]" : "min-h-12 py-1.5 text-[15px]",
+        "inline-flex min-w-0 items-center justify-center gap-2 rounded-[12px] border text-center font-semibold leading-tight text-balance transition-[transform,background-color] active:scale-[0.98] motion-reduce:active:scale-100 disabled:cursor-not-allowed",
+        // У большой кнопки поля уже: на 320 px рядом с двумя квадратами «Подтвердить» должно помещаться целиком.
+        size === "lg" ? "min-h-14 px-3 py-2 text-[16px]" : "min-h-12 px-4 py-1.5 text-[15px]",
         off ? DISABLED_LOOK : VARIANT[variant],
         full && "w-full",
         className,

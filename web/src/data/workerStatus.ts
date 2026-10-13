@@ -25,7 +25,7 @@ const VIEW: Record<OrderStatus, (o: StatusOrder) => StatusView> = {
   assigned: () => ({ label: "Ждёт подтверждения", tone: "warn", hint: "Оператор назначил вам заказ. Подтвердите — откроются адрес и телефон клиента." }),
   accepted: () => ({ label: "Принят", tone: "sky", hint: "Позвоните клиенту и приезжайте к сроку. На месте нажмите «Начать работу»." }),
   in_progress: () => ({ label: "В работе", tone: "warn", hint: "Закончите — нажмите «Работа выполнена» и приложите фото." }),
-  awaiting_client: () => ({ label: "На паузе", tone: "orange", hint: "Работа на паузе. Вернулись к работе — «Продолжить». Закончили — «Работа выполнена»." }),
+  awaiting_client: () => ({ label: "На паузе", tone: "orange", hint: "Работа на паузе. Вернулись к работе — «Снять паузу». Закончили — «Работа выполнена»." }),
   done: () => ({ label: "Сдан", tone: "ok", hint: "Работа сдана. Ждём оплату от клиента — потом выплата вам." }),
   awaiting_payment: () => ({ label: "Ждём оплату", tone: "warn", hint: "Клиент ещё не оплатил. Выплата — после оплаты." }),
   paid: (o) => (o.payoutPaid ? { label: "Выплачено", tone: "ok", hint: paidHint(o) } : { label: "Клиент оплатил", tone: "ok", hint: paidHint(o) }),

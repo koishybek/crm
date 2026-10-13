@@ -2,7 +2,7 @@
 // Живые данные не сдвигают список под пальцем: новые заказы ждут за пилюлей «Показать новые заказы (N)»,
 // пропавшие превращаются в «надгробия» на своём месте.
 import { useQuery } from "convex/react";
-import { ArrowUp, ArrowUpDown, Check, ChevronRight, Flame, Inbox, Phone, Send, SlidersHorizontal, Wrench, X } from "lucide-react";
+import { ArrowUp, ArrowUpDown, Check, ChevronRight, Flame, Inbox, Phone, Send, SlidersHorizontal, Wrench } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
@@ -29,13 +29,14 @@ import {
 } from "../../data/workerFeed";
 import { SUPPORT_TEL } from "../../data/workerLinks";
 import { missingSkills } from "../../data/workerMatch";
-import { TG_BANNER_PAUSE_MS, useWorkerPrefs } from "../../data/workerPrefs";
+import { useWorkerPrefs } from "../../data/workerPrefs";
 import { isActiveWork } from "../../data/workerStats";
 import { isOverdueWork, sortActive } from "../../data/workerStatus";
 import { dueLabel } from "../../data/workerTime";
 import { cn, plural } from "../../lib/format";
 import { OffShiftCard } from "../../components/worker/Availability";
-import { Chip, Empty, IconBtn, ListSkeleton, MUTED, ScreenTitle, WButton, WLinkButton } from "../../components/worker/kit";
+import { FeedHint } from "../../components/worker/FeedHints";
+import { Chip, Empty, ListSkeleton, MUTED, ScreenTitle, WButton, WLinkButton } from "../../components/worker/kit";
 import { useNet } from "../../components/worker/net";
 import { GoneCard, OrderCard, type TakeMode } from "../../components/worker/OrderCard";
 import { Sheet } from "../../components/worker/Sheet";
@@ -44,6 +45,10 @@ import { TakeSheet } from "../../components/worker/TakeSheet";
 type Snapshot = { key: string; rows: { id: string; number: number }[] };
 
 const snapshotOf = (key: string, items: readonly FeedItem[]): Snapshot => ({ key, rows: items.map((o) => ({ id: o.id, number: o.number })) });
+
+/** Длинную ленту (больше 100 заказов) рисуем по 30 карточек: слабому телефону сотни карточек сразу ни к чему. */
+const PAGED_FROM = 100;
+const PAGE = 30;
 
 export function Feed() {
   const data = useQuery(api.worker.feed);
@@ -74,10 +79,26 @@ export function Feed() {
   if (data !== undefined && (snap === null || snap.key !== key || (snap.rows.length === 0 && visible.length > 0))) {
     setSnap(snapshotOf(key, visible));
   }
-  const rows = snap && snap.key === key ? snap.rows : snapshotOf(key, visible).rows;
-  const ids = rows.map((r) => r.id);
-  const fresh = freshIds(ids, visible);
-  const list = feedRows(ids, allById, new Map(rows.map((r) => [r.id, r.number] as const)));
+  const rows = useMemo(() => (snap && snap.key === key ? snap.rows : snapshotOf(key, visible).rows), [snap, key, visible]);
+  const fresh = useMemo(() => freshIds(rows.map((r) => r.id), visible), [rows, visible]);
+  const list = useMemo(
+    () =>
+      feedRows(
+        rows.map((r) => r.id),
+        allById,
+        new Map(rows.map((r) => [r.id, r.number] as const)),
+      ),
+    [rows, allById],
+  );
+  // Сколько карточек длинной ленты показано; другой фильтр или сортировка — снова с первой страницы.
+  const [limit, setLimit] = useState(PAGE);
+  const [limitKey, setLimitKey] = useState(key);
+  if (limitKey !== key) {
+    setLimitKey(key);
+    setLimit(PAGE);
+  }
+  const paged = list.length > PAGED_FROM;
+  const shown = useMemo(() => (paged ? list.slice(0, limit) : list), [list, paged, limit]);
 
   // Лента просмотрена: через 2 секунды на экране и при уходе — гасит счётчик на вкладке.
   useEffect(() => {
@@ -98,8 +119,11 @@ export function Feed() {
   }, [highlight]);
 
   const showFresh = () => {
+    const first = fresh[0] ?? null;
     setSnap(snapshotOf(key, visible));
-    setHighlight(fresh[0] ?? null);
+    // Первый новый заказ может оказаться ниже показанной части длинной ленты — показываем до него.
+    if (first) setLimit((n) => Math.max(n, visible.findIndex((o) => o.id === first) + 1));
+    setHighlight(first);
     markSeen(Date.now());
   };
 
@@ -128,8 +152,8 @@ export function Feed() {
       <div className="flex flex-col gap-3">
         {!ex.available && <OffShiftCard />}
         <ActiveStrip orders={mine?.orders} now={now} />
-        {/* Пустая лента сама предлагает подключить Telegram — баннер не дублируем. */}
-        {ex.available && items.length > 0 && <TelegramBanner now={now} />}
+        {/* Подсказки (Telegram, «Как брать заказы», установка) — одна за раз и не поверх карточки «приём выключен». */}
+        {ex.available && <FeedHint hasOrders={items.length > 0} ownOrders={mine?.orders.length} now={now} />}
       </div>
 
       {items.length > 0 && (
@@ -180,8 +204,13 @@ export function Feed() {
       )}
 
       <div className="mt-2 flex flex-col gap-3">
-        {list.map((r) => (r.kind === "order" ? <OrderCard key={r.item.id} item={r.item} now={now} mode={mode} highlighted={highlight === r.item.id} onTake={onTake} /> : <GoneCard key={r.id} number={r.number} />))}
+        {shown.map((r) => (r.kind === "order" ? <OrderCard key={r.item.id} item={r.item} now={now} mode={mode} highlighted={highlight === r.item.id} onTake={onTake} /> : <GoneCard key={r.id} number={r.number} />))}
       </div>
+      {shown.length < list.length && (
+        <WButton variant="secondary" full className="mt-3" onClick={() => setLimit((n) => n + PAGE)}>
+          Показать ещё {Math.min(PAGE, list.length - shown.length)}
+        </WButton>
+      )}
 
       {list.length === 0 && <FeedEmpty hasOrders={items.length > 0} available={ex.available} city={ex.city} noServices={cats.length === 0} onReset={() => setFilter(NO_FILTER)} />}
 
@@ -213,7 +242,7 @@ export function Feed() {
 
 /** Полоса «активный заказ» над лентой — чтобы не забыть про взятый заказ. */
 function ActiveStrip({ orders, now }: { orders: WorkerOrder[] | undefined; now: number }) {
-  const first = sortActive((orders ?? []).filter(isActiveWork), now)[0];
+  const first = useMemo(() => sortActive((orders ?? []).filter(isActiveWork), now)[0], [orders, now]);
   if (!first) return null;
   const service = serviceById(first.serviceId).label;
   const label =
@@ -232,28 +261,6 @@ function ActiveStrip({ orders, now }: { orders: WorkerOrder[] | undefined; now: 
       <span className="min-w-0 flex-1 text-[15px] leading-snug font-semibold text-ink">{label}</span>
       <ChevronRight size={20} className="shrink-0 text-ink-2" aria-hidden />
     </Link>
-  );
-}
-
-/** Баннер «Подключите Telegram» — новые заказы будут приходить сразу. Скрывается на неделю. */
-function TelegramBanner({ now }: { now: number }) {
-  const tg = useQuery(api.telegram.status);
-  const hiddenAt = useWorkerPrefs((s) => s.tgBannerHiddenAt);
-  const hide = useWorkerPrefs((s) => s.hideTgBanner);
-  if (!tg?.enabled || tg.linked || (hiddenAt !== null && now - hiddenAt < TG_BANNER_PAUSE_MS)) return null;
-  return (
-    <div className="card py-2 pr-1 pl-4">
-      <div className="flex items-start gap-3">
-        <Send size={22} className="mt-2.5 shrink-0 text-[#1767c2]" aria-hidden />
-        <p className="min-w-0 flex-1 pt-2 text-[15px] leading-snug text-ink">Подключите Telegram — новые заказы будут приходить сразу</p>
-        <IconBtn icon={X} label="Скрыть на неделю" onClick={() => hide(Date.now())} />
-      </div>
-      <div className="mt-1 pr-3 pb-1 pl-[34px]">
-        <WButton variant="secondary" onClick={async () => void report(await connectTelegram())}>
-          Подключить Telegram
-        </WButton>
-      </div>
-    </div>
   );
 }
 

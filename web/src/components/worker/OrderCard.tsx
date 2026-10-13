@@ -31,9 +31,10 @@ export const OrderCard = memo(function OrderCard({ item, now, mode, highlighted,
         <div className="flex gap-3">
           <OrderThumb serviceId={item.serviceId} url={item.thumbUrl} />
           <div className="min-w-0 flex-1">
-            <div className="text-[24px] leading-tight font-bold text-ink tabular-nums">
+            {/* Сумма не рвётся («₸» не уходит на новую строку); на 320 px шрифт чуть меньше, чтобы «Вам 1 250 000 ₸» шло одной строкой. */}
+            <div className="text-[length:clamp(20px,6.6vw,24px)] leading-tight font-bold text-ink tabular-nums">
               <span className="text-[17px]">Вам </span>
-              {money(item.payout)}
+              <span className="whitespace-nowrap">{money(item.payout)}</span>
             </div>
             <div className="mt-1 flex flex-wrap gap-1.5">
               {item.priority === "urgent" && (
@@ -72,7 +73,7 @@ export const OrderCard = memo(function OrderCard({ item, now, mode, highlighted,
           softDisabled={mode === "off_shift"}
           disabled={mode === "offline"}
           onClick={() => onTake(item)}
-          aria-label={mode === "off_shift" ? `Взять заказ №${item.number}. Сначала включите приём заказов` : `Взять заказ №${item.number}`}
+          aria-label={mode === "offline" ? undefined : mode === "off_shift" ? `Взять заказ №${item.number}. Сначала включите приём заказов` : `Взять заказ №${item.number}`}
         >
           {mode === "offline" ? "Нет связи" : "Взять заказ"}
         </WButton>
