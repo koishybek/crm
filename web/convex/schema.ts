@@ -426,6 +426,12 @@ export default defineSchema({
     lastError: v.optional(v.string()),
     connectedBy: v.optional(v.id("users")),
     connectedAt: v.optional(v.string()),
+    /** OLX: до какого момента запросы на паузе (403 CloudFront — 30 минут, 429 и сбои — по нарастающей); backoffStep — сколько раз подряд. */
+    backoffUntil: v.optional(v.string()),
+    backoffStep: v.optional(v.number()),
+    /** OLX: аренды (мс) — один проход синхронизации и одно обновление токена одновременно. */
+    syncLeaseUntil: v.optional(v.number()),
+    refreshLeaseUntil: v.optional(v.number()),
   }).index("by_provider", ["provider"]),
 
   /** Одноразовые state для OAuth (защита от CSRF при подключении OLX). */

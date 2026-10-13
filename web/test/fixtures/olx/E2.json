@@ -1,0 +1,5 @@
+{
+  "error": "invalid_token",
+  "error_description": "Token is not present or passed in wrong way",
+  "error_human_title": "Неверный токен."
+}

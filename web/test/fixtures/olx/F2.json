@@ -1,0 +1,14 @@
+{
+  "data": {
+    "id": 870012345,
+    "email": "homemax.service@example.com",
+    "status": "confirmed",
+    "name": "Home Max Service",
+    "phone": "77000000000",
+    "phone_login": "77000000000",
+    "created_at": "2023-04-17 10:22:31",
+    "last_login_at": "2026-10-12 08:15:02",
+    "avatar": null,
+    "is_business": true
+  }
+}

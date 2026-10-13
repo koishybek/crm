@@ -31,6 +31,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { api } from "../../convex/_generated/api";
 import { isPlaceholder, REPLY_BLOCK, whatsappWindowClosed } from "../../convex/lib/chat";
+import { OLX_MAX_TEXT } from "../../convex/lib/olx";
 import { SourceIcon } from "../components/icons";
 import { Avatar, Badge, Button, EmptyState, IconButton, Input, Loading, Menu, MenuItem, Modal, PageHeader } from "../components/ui";
 import { LEAD_STATUS } from "../data/catalog";
@@ -726,7 +727,7 @@ function ReplyBox({ c }: { c: Conversation }) {
           ref={ref}
           rows={1}
           value={text}
-          maxLength={MAX_REPLY}
+          maxLength={c.channel === "olx" ? OLX_MAX_TEXT : MAX_REPLY}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !touchKeyboard()) {

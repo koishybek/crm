@@ -1,0 +1,14 @@
+{
+  "error": {
+    "status": 400,
+    "title": "Invalid request",
+    "detail": "Data validation error occurred",
+    "validation": [
+      {
+        "field": "text",
+        "title": "This value should not be blank.",
+        "detail": "This value should not be blank."
+      }
+    ]
+  }
+}

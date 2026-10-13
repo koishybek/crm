@@ -1,0 +1,9 @@
+{
+  "data": {
+    "error": {
+      "status": 400,
+      "title": "Bad Request",
+      "detail": "Missing required 'Version' header!"
+    }
+  }
+}

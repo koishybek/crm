@@ -428,3 +428,24 @@ export interface WhatsAppSettings {
   lastWebhookAt?: string;
   health?: { okAt?: string; okNote?: string; errorAt?: string; error?: string };
 }
+
+/** Карточка «OLX» владельца: настройка, подключение аккаунта, синхронизация. Токены сюда не попадают. */
+export interface OlxSettings {
+  /** Заданы OLX_CLIENT_ID и OLX_CLIENT_SECRET — можно подключать. */
+  configured: boolean;
+  /** Переменные окружения Convex, которые не заданы. */
+  missing: string[];
+  /** Адрес возврата, зарегистрированный в приложении OLX: …convex.site/olx/callback. */
+  callbackUrl: string | null;
+  /** error — доступ истёк или отозван, нужно подключить заново. */
+  status: "disconnected" | "connected" | "error";
+  accountId?: string;
+  /** Имя и email аккаунта OLX — сверить, что подключён аккаунт компании. */
+  accountName?: string;
+  connectedAt?: string;
+  connectedBy?: string;
+  lastSyncAt?: string;
+  lastError?: string;
+  /** OLX ограничил запросы — синхронизация на паузе до этого времени. */
+  pausedUntil?: string;
+}

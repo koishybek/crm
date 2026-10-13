@@ -1,15 +1,18 @@
 // «API и сайт» в настройках владельца (ТЗ п.6 «Сайт», п.26 «API-first»): форма заявки для сайта (ссылка и iframe),
 // сайты компании, которым можно слать заявки напрямую, и ключи публичного API с примерами запросов.
 // «WhatsApp» — официальный WhatsApp Cloud API: что настроено, доходят ли вебхуки, как подключить.
+// «OLX» — Partner API OLX.kz: ключи приложения, подключение аккаунта компании, синхронизация чатов.
 import { useQuery } from "convex/react";
-import { Ban, Code2, Copy, ExternalLink, Globe, KeyRound, MessageCircle, Plus, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Ban, Code2, Copy, ExternalLink, Globe, KeyRound, LogIn, MessageCircle, Plus, RefreshCw, Store, TriangleAlert, Unplug } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
 import { api } from "../../convex/_generated/api";
 import { Badge, Button, Card, FormRow, Input, Loading, Modal, Textarea } from "../components/ui";
 import { useNow } from "../data/hooks";
+import { disconnectOlx, olxReturnMessage, startOlxConnect, syncOlxNow } from "../data/olx";
 import { createApiKey, revokeApiKey, saveSiteOrigins, siteUrl } from "../data/publicApi";
-import { report } from "../data/store";
-import type { ApiKeyInfo, WhatsAppSettings } from "../data/types";
+import { report, toast } from "../data/store";
+import type { ApiKeyInfo, OlxSettings, WhatsAppSettings } from "../data/types";
 import { dateTime, phone } from "../lib/format";
 import { copy, CopyRow } from "./Integrations";
 
@@ -408,6 +411,186 @@ export function WhatsAppCard() {
           </div>
           <a href={WA_DOCS} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[13.5px] font-semibold text-brand-ink hover:underline">
             Документация WhatsApp Cloud API <ExternalLink size={14} aria-hidden />
+          </a>
+        </section>
+      </div>
+    </Card>
+  );
+}
+
+// ── OLX ──────────────────────────────────────────────────────────────────────
+
+const OLX_DEV = "https://developer.olx.kz";
+
+const OLX_NOTES = [
+  "Каждую минуту забираем новые сообщения покупателей по объявлениям компании — они появляются в «Сообщениях» с названием объявления, оттуда же отвечаем.",
+  "Телефон покупателя OLX не показывает: заявка создаётся сама, только если клиент написал номер в сообщении. Иначе — «Создать заявку» прямо в чате.",
+  "Написать покупателю первым через OLX нельзя — только ответить в его диалоге.",
+];
+
+function olxBadge(s: OlxSettings): { tone: "green" | "amber" | "red" | "gray"; label: string } {
+  if (!s.configured) return { tone: "gray", label: "Ждём ключи OLX" };
+  if (s.status === "error") return { tone: "red", label: "Нужно подключить заново" };
+  if (s.status !== "connected") return { tone: "gray", label: "Не подключён" };
+  if (s.pausedUntil || s.lastError) return { tone: "amber", label: "Есть ошибка" };
+  return s.lastSyncAt ? { tone: "green", label: "Работает" } : { tone: "amber", label: "Первая синхронизация" };
+}
+
+/** Возврат с OLX (/settings?olx=connected|error&reason=…) — тост с итогом и чистый адрес. */
+function useOlxReturn() {
+  const [params, setParams] = useSearchParams();
+  const result = params.get("olx");
+  const reason = params.get("reason");
+  const shown = useRef(false);
+  useEffect(() => {
+    if (!result || shown.current) return;
+    shown.current = true;
+    const msg = olxReturnMessage(result, reason);
+    if (msg) toast(msg.text, msg.tone);
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("olx");
+        next.delete("reason");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [result, reason, setParams]);
+}
+
+function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }) {
+  return (
+    <div className={tone === "bad" ? "flex items-start gap-2 rounded-[10px] bg-bad-bg px-3 py-2.5 text-[13px] text-bad-ink" : "flex items-start gap-2 rounded-[10px] bg-warn-bg px-3 py-2.5 text-[13px] text-warn-ink"}>
+      <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+export function OlxCard() {
+  const s = useQuery(api.channels.olx.settings);
+  useOlxReturn();
+  const [busy, setBusy] = useState<"connect" | "sync" | "disconnect" | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => {
+    if (!confirm) return;
+    const t = setTimeout(() => setConfirm(false), 5000);
+    return () => clearTimeout(t);
+  }, [confirm]);
+
+  if (s === undefined) {
+    return (
+      <Card icon={Store} title="OLX">
+        <Loading className="py-6" />
+      </Card>
+    );
+  }
+
+  const connect = async () => {
+    setBusy("connect");
+    // Успех — браузер уходит на страницу входа OLX.
+    if (!report(await startOlxConnect())) setBusy(null);
+  };
+  const sync = async () => {
+    setBusy("sync");
+    report(await syncOlxNow(), "Синхронизация запущена — новые сообщения появятся в течение минуты");
+    setBusy(null);
+  };
+  const disconnect = async () => {
+    if (!confirm) return setConfirm(true);
+    setConfirm(false);
+    setBusy("disconnect");
+    report(await disconnectOlx(), "OLX отключён");
+    setBusy(null);
+  };
+  const badge = olxBadge(s);
+
+  return (
+    <Card icon={Store} title="OLX">
+      <p className="text-[13.5px] text-muted">Чаты покупателей OLX.kz по объявлениям компании — в «Сообщениях»: новые сообщения приходят сами, отвечаем отсюда же.</p>
+
+      <div className="mt-4 grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <section className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={badge.tone}>{badge.label}</Badge>
+            {s.status === "connected" && s.accountName && <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{s.accountName}</span>}
+          </div>
+
+          {!s.configured ? (
+            <>
+              <p className="text-[13.5px] text-ink-2">
+                Ключи придут с developer.olx.kz после одобрения заявки. Адрес возврата уже указан: <code className="break-all">{s.callbackUrl ?? "…/olx/callback"}</code>
+              </p>
+              {s.missing.length > 0 && (
+                <Notice tone="warn">
+                  Когда ключи придут, задайте переменные окружения Convex: <code>{s.missing.join(", ")}</code>.
+                </Notice>
+              )}
+            </>
+          ) : s.status === "connected" ? (
+            <>
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[13.5px]">
+                <dt className="text-muted">Аккаунт OLX</dt>
+                <dd className="min-w-0 font-medium break-words text-ink">
+                  {s.accountName ?? "—"}
+                  {s.accountId ? ` · ID ${s.accountId}` : ""}
+                </dd>
+                <dt className="text-muted">Подключил</dt>
+                <dd className="text-ink-2">
+                  {s.connectedBy ?? "—"}
+                  {s.connectedAt ? ` · ${dateTime(s.connectedAt)}` : ""}
+                </dd>
+                <dt className="text-muted">Синхронизация</dt>
+                <dd className="font-medium text-ink">{s.lastSyncAt ? dateTime(s.lastSyncAt) : "ещё не было"}</dd>
+              </dl>
+              {s.pausedUntil && <Notice tone="warn">Запросы к OLX на паузе до {dateTime(s.pausedUntil)} — синхронизация продолжится сама.</Notice>}
+              {s.lastError && <Notice tone="bad">{s.lastError}</Notice>}
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" icon={RefreshCw} disabled={busy !== null || !!s.pausedUntil} onClick={() => void sync()}>
+                  {busy === "sync" ? "Запускаем…" : "Синхронизировать сейчас"}
+                </Button>
+                <Button size="sm" variant={confirm ? "danger" : "ghost"} icon={Unplug} disabled={busy !== null} onClick={() => void disconnect()}>
+                  {confirm ? "Точно отключить?" : "Отключить"}
+                </Button>
+              </div>
+              <p className="text-[12.5px] text-muted">
+                Проверьте, что подключён аккаунт компании, а не личный. «Отключить» стирает доступ здесь; отозвать его и на стороне OLX можно в настройках аккаунта OLX.
+              </p>
+            </>
+          ) : (
+            <>
+              {s.status === "error" && (
+                <Notice tone="bad">{s.lastError ?? "Нужно заново подключить OLX"}: доступ к аккаунту истёк или отозван. Пока OLX не подключён заново, сообщения с OLX не приходят.</Notice>
+              )}
+              <p className="text-[13px] text-ink-2">
+                Откроется OLX: войдите в аккаунт компании и нажмите «Разрешить». Если в браузере открыт личный аккаунт OLX, сначала выйдите из него — иначе подключится он.
+              </p>
+              <div>
+                <Button icon={LogIn} disabled={busy !== null} onClick={() => void connect()}>
+                  {busy === "connect" ? "Открываем OLX…" : s.status === "error" ? "Подключить заново" : "Подключить OLX"}
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+
+        <section className="min-w-0 space-y-3">
+          <div className="rounded-[12px] bg-[#f8f6f1] px-3.5 py-3 text-[13px] text-ink-2">
+            <div className="mb-1 font-semibold text-ink">Как это работает</div>
+            <ul className="list-disc space-y-1 pl-4">
+              {OLX_NOTES.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          </div>
+          {s.callbackUrl ? (
+            <CopyRow label="Адрес возврата (Redirect URI) в приложении OLX" value={s.callbackUrl} />
+          ) : (
+            <p className="text-[13.5px] text-bad-ink">Адрес сервера не определён — проверьте настройки деплоя Convex.</p>
+          )}
+          <a href={OLX_DEV} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[13.5px] font-semibold text-brand-ink hover:underline">
+            Кабинет разработчика OLX <ExternalLink size={14} aria-hidden />
           </a>
         </section>
       </div>

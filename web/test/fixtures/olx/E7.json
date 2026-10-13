@@ -1,0 +1,7 @@
+{
+  "error": {
+    "status": 404,
+    "title": "Not Found",
+    "detail": "Advert not found"
+  }
+}

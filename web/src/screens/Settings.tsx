@@ -9,7 +9,7 @@ import { createStaff, report, resetPassword, setUserActive, toast } from "../dat
 import { Avatar, Badge, Button, Card, FormRow, Input, Loading, Menu, MenuItem, Modal, PageHeader, Segmented } from "../components/ui";
 import { phone } from "../lib/format";
 import { CatalogEditor } from "./CatalogEditor";
-import { ApiAndSiteCard, WhatsAppCard } from "./ChannelCards";
+import { ApiAndSiteCard, OlxCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
@@ -238,6 +238,10 @@ export default function Settings() {
 
       <div className="mt-4">
         <WhatsAppCard />
+      </div>
+
+      <div className="mt-4">
+        <OlxCard />
       </div>
 
       <div className="mt-4">
