@@ -38,6 +38,7 @@ import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui
 import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
+import { WorkerShell } from "./worker/WorkerShell";
 
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
 
@@ -364,6 +365,12 @@ function PrimaryAction({ me }: { me: User }) {
 }
 
 export function Shell({ me, children }: { me: User; children?: ReactNode }) {
+  // Кабинет мастера — своя раскладка под телефон: шапка с приёмом заказов и вкладки внизу.
+  if (me.role === "executor") return <WorkerShell me={me}>{children}</WorkerShell>;
+  return <TeamShell me={me}>{children}</TeamShell>;
+}
+
+function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
   const items = navFor(me);
   const ui = useUi();
   const unread = useInboxUnread(me);
@@ -443,18 +450,6 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
         >
           <Plus size={26} />
         </button>
-      )}
-
-      {/* Нижняя навигация исполнителя */}
-      {isExec && (
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden" aria-label="Разделы">
-          {items.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => cn("flex flex-col items-center gap-1 py-2.5 text-[11.5px] font-medium", isActive ? "text-brand-ink" : "text-muted")}>
-              <n.icon size={22} strokeWidth={1.8} aria-hidden />
-              {n.label}
-            </NavLink>
-          ))}
-        </nav>
       )}
 
       {/* Звонки от АТС видят те, кто их принимает: владелец и операторы. */}

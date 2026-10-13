@@ -21,6 +21,7 @@ import type * as clients from "../clients.js";
 import type * as crons from "../crons.js";
 import type * as digest from "../digest.js";
 import type * as env from "../env.js";
+import type * as executorApp from "../executorApp.js";
 import type * as executors from "../executors.js";
 import type * as health from "../health.js";
 import type * as http from "../http.js";
@@ -76,6 +77,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   digest: typeof digest;
   env: typeof env;
+  executorApp: typeof executorApp;
   executors: typeof executors;
   health: typeof health;
   http: typeof http;
