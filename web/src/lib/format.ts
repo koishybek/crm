@@ -108,7 +108,7 @@ export const initials = (name: string) =>
 
 /** «Айсулу Нурланова» → «Айсулу Н.»; компании не сокращаем. */
 export const shortName = (name: string) => {
-  if (/^(ТОО|ИП|АО|ЖК|ОСИ|КСК)\b/.test(name)) return name;
+  if (/^(ТОО|ИП|АО|ЖК|ОСИ|КСК)(?=[\s«"']|$)/.test(name)) return name;
   const [first, last] = name.split(/\s+/);
   return last ? `${first} ${last[0]}.` : first!;
 };

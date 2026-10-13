@@ -67,17 +67,26 @@ function Guard({ roles }: { roles: Role[] }) {
   const catalog = useQuery(api.catalog.list, me ? {} : "skip");
   useMemo(() => catalog && setCatalog(catalog.categories, catalog.services), [catalog]);
   if (isLoading || (isAuthenticated && me === undefined) || (me && catalog === undefined)) return <Splash />;
-  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: loc.pathname }} />;
+  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
   if (!me) return <Blocked />;
   if (!roles.includes(me.role)) return <Navigate to={me.role === "executor" ? "/w" : "/"} replace />;
   return <Shell me={me} />;
 }
 
+/** Куда вернуть после входа: путь из ссылки (Telegram, закладка), если он из раздела этой роли. */
+function afterLogin(role: Role, from: unknown): string {
+  const home = role === "executor" ? "/w" : "/";
+  if (typeof from !== "string" || !from.startsWith("/") || from.startsWith("//") || from.startsWith("/login")) return home;
+  const executorArea = from === "/w" || from.startsWith("/w/") || from.startsWith("/w?");
+  return (role === "executor") === executorArea ? from : home;
+}
+
 function LoginRoute() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useMe();
+  const loc = useLocation();
   if (isLoading || (isAuthenticated && me === undefined)) return <Splash />;
-  if (isAuthenticated && me) return <Navigate to={me.role === "executor" ? "/w" : "/"} replace />;
+  if (isAuthenticated && me) return <Navigate to={afterLogin(me.role, (loc.state as { from?: unknown } | null)?.from)} replace />;
   return <Login />;
 }
 

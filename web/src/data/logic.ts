@@ -133,9 +133,13 @@ export function fitsOrder(e: FitExecutor, o: FitOrder): Fit {
 /** Заказ лежит в ленте и его ещё никто не взял. */
 export const isOpenForFeed = (o: Pick<Order, "status" | "executorId">) => o.status === "awaiting_executor" && !o.executorId;
 
-/** Лента исполнителя: свободные заказы, которые ему подходят (ТЗ п.11). */
+/**
+ * Лента исполнителя: свободные заказы, которые ему подходят (ТЗ п.11) по городу, направлению и навыкам.
+ * Выходной ленту не скрывает: мастер видит, что есть работа, но взять заказ и получить «Новый заказ»
+ * может только с включённым приёмом (это проверяют «Взять заказ» и рассылка — через fitsOrder целиком).
+ */
 export const feedFor = <O extends FitOrder & Pick<Order, "status" | "executorId">>(e: FitExecutor, orders: O[]): O[] =>
-  orders.filter((o) => isOpenForFeed(o) && fitsOrder(e, o).fits);
+  orders.filter((o) => isOpenForFeed(o) && fitsOrder({ ...e, available: true }, o).fits);
 
 const STATE_RANK: Record<ExecState, number> = { free: 0, busy: 1, onsite: 2, off: 3 };
 

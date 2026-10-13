@@ -90,7 +90,7 @@ export async function announceOrder(ctx: MutationCtx, o: Doc<"orders">, users: I
   const service = (await loadCatalog(ctx)).label(o.serviceId);
   const title = opts.again ? `Снова свободен заказ №${o.number}` : `Новый заказ №${o.number}`;
   await notify(ctx, users, `${title}: ${service}, ${o.city}. Оплата исполнителю ${money(payout(o))}`, {
-    link: "/w",
+    link: `/w/orders/${o._id}`,
     html: cardHtml(await cardOf(ctx, o, false), `${opts.again ? "🔁" : "🆕"} ${title}`),
     buttons: workerButtons("awaiting_executor", o._id),
   });

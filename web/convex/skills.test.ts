@@ -102,11 +102,11 @@ describe("лента и «Новый заказ» с учётом навыков
     expect(await inbox(ids.astana.user)).toEqual([]);
   });
 
-  test("мастер на выходном не получает уведомление, его лента пуста, взять заказ нельзя", async () => {
+  test("мастер на выходном не получает уведомление и не может взять заказ, но ленту видит", async () => {
     const { ids, as, inbox, publish, order } = await setup();
     await publish();
     expect(await inbox(ids.off.user)).toEqual([]);
-    expect((await as(ids.off.user).query(api.worker.feed, {})).feed).toHaveLength(0);
+    expect((await as(ids.off.user).query(api.worker.feed, {})).feed.map((o) => o.id)).toEqual([ids.order]);
     await expect(as(ids.off.user).mutation(api.worker.take, { id: ids.order })).rejects.toThrow("Сначала включите приём заказов в профиле");
     expect((await order()).executorId).toBeUndefined();
   });
@@ -126,8 +126,8 @@ describe("лента и «Новый заказ» с учётом навыков
     const plain = await t.query(internal.worker._forChat, { chatId: "501", what: "feed" });
     expect(plain.cards).toHaveLength(0);
     const off = await t.query(internal.worker._forChat, { chatId: "503", what: "feed" });
-    expect(off.available).toBe(false);
-    expect(off.cards).toHaveLength(0);
+    expect(off.available).toBe(false); // бот ответит «Вы на выходном — включите приём», карточки не шлёт
+    expect(off.cards.map((c) => c.number)).toEqual([1001]); // лента та же, что в кабинете: подходящие заказы видны
   });
 
   test("после снятия требования к навыку заказ из ленты приходит тем, кому он стал подходить, — и только им", async () => {
