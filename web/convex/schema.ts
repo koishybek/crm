@@ -413,6 +413,15 @@ export default defineSchema({
     .index("by_conversation", ["conversationId", "at"])
     .index("by_external", ["externalId"]),
 
+  /** Автоматические сообщения клиенту (clientNotify.ts): ключ события («order:<id>:done») — чтобы оно не ушло второй раз. */
+  clientNotices: defineTable({
+    key: v.string(),
+    clientId: v.id("clients"),
+    conversationId: v.id("conversations"),
+    messageId: v.id("conversationMessages"),
+    at: v.string(),
+  }).index("by_key", ["key"]),
+
   /** Подключённые внешние аккаунты (OLX, WhatsApp, email). Токены отдаются только внутренним функциям. */
   integrations: defineTable({
     provider: v.union(v.literal("olx"), v.literal("whatsapp"), v.literal("email")),

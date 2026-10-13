@@ -31,7 +31,7 @@ export async function tg(method: string, body: Record<string, unknown>): Promise
   }
 }
 
-const inline = (rows: TgButton[][]): Markup | undefined => {
+export const inline = (rows: TgButton[][]): Markup | undefined => {
   const kb = rows.filter((r) => r.length).map((r) => r.map((b) => (b.data ? { text: b.text, callback_data: b.data } : { text: b.text, url: b.url! })));
   return kb.length ? { inline_keyboard: kb } : undefined;
 };
@@ -354,9 +354,18 @@ async function finishLead(ctx: ActionCtx, chatId: string, conv: Id<"conversation
   );
 }
 
+/** Звезда под «Заказ выполнен» (rv:<заказ>:<1–5>): спасибо и убрать звёзды. Повторное нажатие отзыв не меняет. */
+async function rateCallback(ctx: ActionCtx, cb: NonNullable<TgUpdate["callback_query"]>, chatId: string, data: string) {
+  const [, orderId = "", stars = ""] = data.split(":");
+  const r = await ctx.runMutation(internal.clientNotify._rateFromTelegram, { chatId, orderId, rating: Number(stars) });
+  await tg("answerCallbackQuery", { callback_query_id: cb.id, text: r.ok ? "Спасибо за оценку!" : r.error });
+  if (cb.message && (r.ok || r.rated)) await tg("editMessageReplyMarkup", { chat_id: chatId, message_id: cb.message.message_id, reply_markup: { inline_keyboard: [] } });
+}
+
 async function callback(ctx: ActionCtx, cb: NonNullable<TgUpdate["callback_query"]>) {
   const chatId = String(cb.message?.chat.id ?? cb.from.id);
   const data = cb.data ?? "";
+  if (data.startsWith("rv:")) return void (await rateCallback(ctx, cb, chatId, data));
   let res: { ok: true; card: CardData } | { ok: false; error: string } | null = null;
   let header = "";
   if (data.startsWith("take:")) {

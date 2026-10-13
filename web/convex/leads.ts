@@ -125,7 +125,7 @@ export const create = mutation({
       entityId: id,
       meta: { source: a.source, serviceId: a.serviceId, city, urgency: a.urgency, clientId, newClient: isNewClient, callId: call?._id, ai: !!a.ai },
     });
-    await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number}: ${svc.label}`, { link: `/leads?open=${id}`, except: me._id });
+    await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number}: ${svc.label}`, { link: `/leads?open=${id}`, except: me._id, email: { kind: "lead_new" } });
     return { id, number };
   },
 });

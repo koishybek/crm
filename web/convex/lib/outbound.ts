@@ -8,11 +8,11 @@ import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
 import type { Channel } from "../../src/data/types";
 import { canSend as whatsappCanSend, sendWhatsApp } from "../channels/whatsapp";
 import { env } from "../env";
-import { tg } from "../telegram";
+import { inline, tg } from "../telegram";
 import { REPLY_BLOCK, whatsappWindowClosed } from "./chat";
 import { OLX_MAX_TEXT } from "./olx";
 import { olxReplyBlock, scheduleOlxRead, sendOlx } from "./olxApi";
-import { esc } from "./tg";
+import { esc, type TgButton } from "./tg";
 
 export type ReplyTarget = Pick<Doc<"conversations">, "channel" | "externalId" | "contactPhone" | "replyUntil">;
 
@@ -33,8 +33,11 @@ export class ChannelError extends ConvexError<string> {
 interface ChannelAdapter {
   /** Почему ответить нельзя; null — можно. */
   block(ctx: QueryCtx, c: ReplyTarget): string | null | Promise<string | null>;
-  /** Отправить текст. externalId — id сообщения, уникальный в пределах канала (для статусов доставки и от дублей). */
-  send(ctx: ActionCtx, c: ReplyTarget, text: string): Promise<{ externalId?: string }>;
+  /**
+   * Отправить текст. externalId — id сообщения, уникальный в пределах канала (для статусов доставки и от дублей).
+   * buttons — кнопки под сообщением (оценка звёздами); их умеет только Telegram, остальные каналы шлют один текст.
+   */
+  send(ctx: ActionCtx, c: ReplyTarget, text: string, buttons?: TgButton[][]): Promise<{ externalId?: string }>;
   /** Оператор прочитал диалог — отметить прочитанным и в самом канале (если канал это умеет). */
   read?(ctx: MutationCtx, conversationId: Id<"conversations">): Promise<void>;
   /** Предел длины ответа в канале; по умолчанию — общий предел чата. */
@@ -55,8 +58,8 @@ function telegramError(description: string | undefined): ChannelError {
 
 const telegram: ChannelAdapter = {
   block: () => (env("TELEGRAM_BOT_TOKEN") ? null : "Telegram-бот не подключён"),
-  async send(_ctx, c, text) {
-    const res = await tg("sendMessage", { chat_id: c.externalId, text: esc(text), parse_mode: "HTML", disable_web_page_preview: true });
+  async send(_ctx, c, text, buttons) {
+    const res = await tg("sendMessage", { chat_id: c.externalId, text: esc(text), parse_mode: "HTML", disable_web_page_preview: true, reply_markup: buttons && inline(buttons) });
     if (!res) throw new ChannelError("Telegram не ответил — попробуйте ещё раз", true);
     if (!res.ok) throw telegramError(res.description);
     // id сообщения в Telegram уникален только внутри чата — ключ «чат:сообщение», как у входящих.
@@ -103,8 +106,13 @@ export async function replyBlock(ctx: QueryCtx, c: ReplyTarget, now: number): Pr
   return null;
 }
 
-export function sendToChannel(ctx: ActionCtx, c: ReplyTarget, text: string): Promise<{ externalId?: string }> {
-  return ADAPTERS[c.channel].send(ctx, c, text);
+export function sendToChannel(ctx: ActionCtx, c: ReplyTarget, text: string, buttons?: TgButton[][]): Promise<{ externalId?: string }> {
+  return ADAPTERS[c.channel].send(ctx, c, text, buttons);
+}
+
+/** Подключён ли канал для исходящих вообще — без конкретного диалога и окна WhatsApp (карточки «Настроек»). */
+export async function channelReady(ctx: QueryCtx, ch: Channel): Promise<boolean> {
+  return !(await ADAPTERS[ch].block(ctx, { channel: ch, externalId: "", contactPhone: undefined, replyUntil: undefined }));
 }
 
 /** Предел длины ответа в канале диалога. */

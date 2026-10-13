@@ -3,12 +3,13 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./_generated/server";
-import { currentUser, OWNER, requireRole } from "./lib/access";
+import { currentUser, OWNER, requireRole, TEAM } from "./lib/access";
 import { audit, listDiff, listDiffText } from "./lib/audit";
 import { notify, TENANT } from "./lib/domain";
 import { toExecutor, toUser } from "./lib/dto";
 import { cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
+import { loginEmail } from "./lib/mail";
 import { loadCatalog } from "./catalog";
 import { role } from "./schema";
 import { ROLE_LABEL } from "../src/data/catalog";
@@ -149,6 +150,21 @@ export const setActive = mutation({
     if ((u.active !== false) === active) return;
     await ctx.db.patch(userId, { active });
     await audit(ctx, me, "user.access", `${active ? "Включён" : "Отключён"} доступ: ${whoIs(u)}`, { entityId: userId, meta: { active, role: u.role } });
+  },
+});
+
+/**
+ * Сотрудник сам включает копии важных уведомлений на email (ТЗ п.18) — только себе и только если логин — email.
+ * Мастера входят по телефону, им переключатель не показываем.
+ */
+export const setNotifyEmail = mutation({
+  args: { on: v.boolean() },
+  handler: async (ctx, { on }) => {
+    const me = await requireRole(ctx, TEAM);
+    if (on && !loginEmail(me)) throw new ConvexError("Письма приходят на email из логина, а вы входите по телефону");
+    if ((me.notifyEmail === true) === on) return;
+    await ctx.db.patch(me._id, { notifyEmail: on });
+    await audit(ctx, me, "user.notifyEmail", `${whoIs(me)}: копии важных уведомлений на email ${on ? "включены" : "выключены"}`, { entityId: me._id, meta: { notifyEmail: on } });
   },
 });
 
