@@ -1,9 +1,11 @@
 import {
   Bell,
+  Box,
   Briefcase,
   Building2,
   ChartNoAxesColumn,
   ChevronDown,
+  ClipboardList,
   FileText,
   House,
   LogOut,
@@ -15,6 +17,7 @@ import {
   Settings as SettingsIcon,
   UserRound,
   Users,
+  Wallet,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -46,9 +49,15 @@ const STAFF_NAV: NavItem[] = [
   { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn },
   { to: "/settings", label: "Настройки", icon: SettingsIcon },
 ];
+const EXEC_NAV: NavItem[] = [
+  { to: "/w", label: "Доступные заказы", icon: Box, end: true },
+  { to: "/w/my", label: "Мои заказы", icon: ClipboardList },
+  { to: "/w/income", label: "Доход", icon: Wallet },
+];
+
 const navFor = (u: User) =>
   u.role === "executor"
-    ? [] // у мастера свой каркас с вкладками — components/worker/WorkerShell
+    ? EXEC_NAV
     : u.role === "owner"
       ? STAFF_NAV
       : STAFF_NAV.filter((n) => n.to !== "/analytics" && n.to !== "/settings" && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls")));
