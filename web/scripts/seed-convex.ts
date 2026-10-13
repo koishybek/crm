@@ -6,6 +6,7 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { buildSeed } from "../src/data/seed";
 import { ACTIVE_STATUSES, serviceById } from "../src/data/catalog";
+import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
 
 const envLocal = Object.fromEntries(
@@ -308,6 +309,56 @@ async function main() {
     convs.flatMap((c, i) =>
       c.msgs.map((m) => ({ conversationId: convIds[i], direction: m.direction, kind: "text", text: m.text, at: iso(m.at), authorId: m.authorId, status: m.direction === "out" ? "read" : undefined })),
     ),
+  );
+
+  // ── Отзывы клиентов по выполненным заказам и рейтинг мастеров по той же формуле, что на сервере ──
+  const DONE = new Set(["done", "awaiting_payment", "paid", "closed"]);
+  const COMMENTS: Record<number, string[]> = {
+    5: ["Всё сделал быстро и аккуратно, спасибо!", "Мастер пришёл вовремя, объяснил, что сломалось", "Рекомендую, работает чисто", "Отлично, кондиционер снова холодит"],
+    4: ["Хорошо, но приехал на полчаса позже", "Сделал всё, но пришлось подождать запчасть", "Нормально, без замечаний"],
+    3: ["Работу сделал, но мусор оставил", "Долго ждали мастера"],
+    2: ["Пришлось вызывать повторно"],
+  };
+  const reviewRows: Record<string, unknown>[] = [];
+  const ratingsByExecutor = new Map<string, number[]>();
+  for (const o of db.orders) {
+    if (!o.executorId || !o.doneAt || !DONE.has(o.status) || frac(o.number + 3) > 0.55) continue;
+    const roll = frac(o.number + 7);
+    const rating = roll < 0.7 ? 5 : roll < 0.9 ? 4 : roll < 0.97 ? 3 : 2;
+    const pool = COMMENTS[rating]!;
+    const viaLink = frac(o.number + 11) < 0.6;
+    reviewRows.push({
+      tenantId,
+      orderId: orderMap.get(o.id),
+      executorId: exMap.get(o.executorId),
+      clientId: clientMap.get(o.clientId),
+      rating,
+      text: frac(o.number + 13) < 0.4 ? pool[o.number % pool.length] : undefined,
+      via: viaLink ? "link" : "operator",
+      at: iso(Date.parse(o.doneAt) + (2 + Math.floor(frac(o.number + 17) * 28)) * 3600_000),
+      authorId: viaLink ? undefined : userMap.get("u-madina"),
+    });
+    ratingsByExecutor.set(o.executorId, [...(ratingsByExecutor.get(o.executorId) ?? []), rating]);
+  }
+  await insert("reviews", reviewRows);
+  await client.mutation(api.seed.patchMany, {
+    secret: secret!,
+    table: "executors",
+    patches: [...ratingsByExecutor.entries()].map(([id, list]) => ({ id: exMap.get(id)!, fields: { rating: bayesianRating(list), reviews: list.length } })),
+  });
+
+  // ── Расходы на рекламу за три месяца — для стоимости заявки и заказа в аналитике ──
+  const monthKey = (ms: number) => new Date(ms + 5 * 3600_000).toISOString().slice(0, 7);
+  const months = [0, 1, 2].map((k) => {
+    const d = new Date(now + 5 * 3600_000);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - k);
+    return monthKey(d.getTime() - 5 * 3600_000);
+  });
+  const SPEND: [string, number][] = [["olx", 150_000], ["instagram", 120_000], ["site", 90_000]];
+  await insert(
+    "adSpend",
+    months.flatMap((month, i) => SPEND.map(([source, amount]) => ({ month, source, amount: Math.round(amount * (1 - i * 0.08)), updatedAt: iso(now), updatedBy: userMap.get("u-owner") }))),
   );
 
   // ── Журнал действий за две недели — из событий демо-заявок и заказов, чтобы журнал не был пустым ──
