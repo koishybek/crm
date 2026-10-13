@@ -317,7 +317,7 @@ describe("Telegram → «Сообщения»", () => {
     expect(detail.replyBlock).toBeUndefined();
     // Журнал: заявку создал «Telegram».
     const journal = await s.t.run((ctx) => ctx.db.query("audit").collect());
-    expect(journal.find((x) => x.action === "lead.create")).toMatchObject({ actorName: "Telegram", entityId: lead!._id });
+    expect(journal.find((x) => x.action === "lead.created")).toMatchObject({ actorName: "Telegram", entityId: lead!._id });
   });
 
   test("повтор вебхука не дублирует ни сообщение, ни ответ бота", async () => {
@@ -389,7 +389,7 @@ describe("заявка из переписки", () => {
     const c = (await s.t.run((ctx) => ctx.db.get(last.conversationId)))!;
     expect(c.leadId).toBe(all[0]!._id);
     const journal = await s.t.run((ctx) => ctx.db.query("audit").collect());
-    expect(journal.find((x) => x.action === "lead.create")).toMatchObject({ actorName: "WhatsApp", entityId: all[0]!._id });
+    expect(journal.find((x) => x.action === "lead.created")).toMatchObject({ actorName: "WhatsApp", entityId: all[0]!._id });
     // Следующие сообщения — к той же заявке, вторая не создаётся.
     await s.t.mutation(internal.inbox.ingest, wa("77019998877", "Ещё нужно поменять смеситель"));
     await s.t.finishAllScheduledFunctions(vi.runAllTimers);

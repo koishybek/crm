@@ -11,6 +11,7 @@
 import type * as ai from "../ai.js";
 import type * as aiCheck from "../aiCheck.js";
 import type * as apiKeys from "../apiKeys.js";
+import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as bot from "../bot.js";
 import type * as calls from "../calls.js";
@@ -34,6 +35,7 @@ import type * as lib_dto from "../lib/dto.js";
 import type * as lib_health from "../lib/health.js";
 import type * as lib_httpUtil from "../lib/httpUtil.js";
 import type * as lib_intake from "../lib/intake.js";
+import type * as lib_limits from "../lib/limits.js";
 import type * as lib_login from "../lib/login.js";
 import type * as lib_matching from "../lib/matching.js";
 import type * as lib_outbound from "../lib/outbound.js";
@@ -62,6 +64,7 @@ declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   aiCheck: typeof aiCheck;
   apiKeys: typeof apiKeys;
+  audit: typeof audit;
   auth: typeof auth;
   bot: typeof bot;
   calls: typeof calls;
@@ -85,6 +88,7 @@ declare const fullApi: ApiFromModules<{
   "lib/health": typeof lib_health;
   "lib/httpUtil": typeof lib_httpUtil;
   "lib/intake": typeof lib_intake;
+  "lib/limits": typeof lib_limits;
   "lib/login": typeof lib_login;
   "lib/matching": typeof lib_matching;
   "lib/outbound": typeof lib_outbound;

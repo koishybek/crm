@@ -2,12 +2,13 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { EXECUTOR, requireRole } from "./lib/access";
-import { audit } from "./lib/audit";
+import { audit, lowerFirst } from "./lib/audit";
 import { log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
 import { toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
 import { openOrdersFor, suitableUsers } from "./lib/matching";
 import { cardHtml, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
+import { availabilityNote } from "./executors";
 import { fitsOrder, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { money, shortName } from "../src/lib/format";
@@ -150,12 +151,12 @@ export async function actFor(ctx: MutationCtx, userId: Id<"users">, id: Id<"orde
   if (!(step.from as readonly string[]).includes(o.status)) throw new ConvexError("Статус уже изменился — обновите заказ");
   const extra: Partial<Doc<"orders">> = action === "decline" ? { executorId: undefined, assignedAt: undefined } : {};
   await setStatus(ctx, o, step.to, userActor(me._id), step.text, extra);
-  await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${step.text.toLowerCase()} (${shortName(ex.name)})`, {
+  await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})`, {
     entityId: id,
     meta: { from: o.status, to: step.to },
   });
   const tone = action === "decline" ? "warn" : action === "done" ? "ok" : "info";
-  await notify(ctx, await staffIds(ctx, o.category), `Заказ №${o.number}: ${step.text.toLowerCase()} (${shortName(ex.name)})`, { link: `/orders/${id}`, tone });
+  await notify(ctx, await staffIds(ctx, o.category), `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})`, { link: `/orders/${id}`, tone });
   const fresh = (await ctx.db.get(id))!;
   // Отказ вернул заказ в ленту — остальные подходящие мастера должны узнать, что он снова свободен.
   if (action === "decline") await announceOrder(ctx, fresh, (await suitableUsers(ctx, fresh)).filter((u) => u !== me._id), { again: true });
@@ -173,8 +174,10 @@ export const act = mutation({
 export const setAvailable = mutation({
   args: { available: v.boolean() },
   handler: async (ctx, { available }) => {
-    const { ex } = await myExecutor(ctx);
+    const { me, ex } = await myExecutor(ctx);
+    if (ex.available === available) return;
     await ctx.db.patch(ex._id, { available });
+    await audit(ctx, me, "executor.availability", availabilityNote(ex.name, available), { entityId: ex._id, meta: { available, by: "executor" } });
   },
 });
 

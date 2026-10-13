@@ -24,6 +24,7 @@ import Settings from "./screens/Settings";
 import { Feed, Income, MyOrders, WorkerOrder } from "./screens/worker/Worker";
 
 const Analytics = lazy(() => import("./screens/Analytics"));
+const AuditLog = lazy(() => import("./screens/AuditLog"));
 
 export function Splash({ children }: { children?: ReactNode }) {
   return (
@@ -77,6 +78,11 @@ const lazyAnalytics = (
     <Analytics />
   </Suspense>
 );
+const lazyAudit = (
+  <Suspense fallback={<div className="py-20 text-center text-muted">Загружаем журнал…</div>}>
+    <AuditLog />
+  </Suspense>
+);
 
 const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
@@ -107,6 +113,7 @@ const router = createBrowserRouter([
     element: <Guard roles={["owner"]} />,
     children: [
       { path: "/analytics", element: lazyAnalytics },
+      { path: "/audit", element: lazyAudit },
       { path: "/settings", element: <Settings /> },
     ],
   },

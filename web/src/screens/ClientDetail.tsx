@@ -29,6 +29,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { addClientNote, report, setClientTags, toast } from "../data/store";
 import type { Order } from "../data/types";
+import { EntityHistory } from "../components/AuditHistory";
 import { ServiceLabel, SourceIcon } from "../components/icons";
 import { Avatar, BackLink, Badge, Button, Card, EmptyState, IconTile, Loading, Menu, MenuItem, Textarea } from "../components/ui";
 import { cn, date, dateTime, money, phone, plural, shortName } from "../lib/format";
@@ -336,6 +337,7 @@ export default function ClientDetail() {
       <Card className="mt-4" title="История заказов" bodyClass="px-3 pb-3 sm:px-4">
         <OrdersTable orders={past} empty="Завершённых заказов пока нет" />
       </Card>
+      <EntityHistory entity="client" entityId={c.id} variant="card" className="mt-4" />
     </>
   );
 }

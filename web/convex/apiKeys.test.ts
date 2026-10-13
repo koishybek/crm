@@ -103,7 +103,7 @@ describe("ключи API", () => {
     const row = (await t.run((ctx) => ctx.db.get(body.id as Id<"leads">)))!;
     expect(row).toMatchObject({ number: body.number, source: "site", serviceId: "wm-repair", city: "Астана", clientPhone: "77014445566", clientName: "Ерлан" });
     const journal = await t.run((ctx) => ctx.db.query("audit").collect());
-    const entry = journal.find((x) => x.action === "lead.create")!;
+    const entry = journal.find((x) => x.action === "lead.created")!;
     expect(entry).toMatchObject({ actorName: "API", entityId: body.id });
     expect(entry.meta).toMatchObject({ keyPrefix: prefix, source: "site" });
     expect((await t.run((ctx) => ctx.db.get(id)))!.lastUsedAt).toBeDefined();

@@ -3,16 +3,19 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { currentUser, requireRole, scopeOf, TEAM } from "./lib/access";
-import { audit } from "./lib/audit";
+import { audit, ChangeLog, listDiff, listDiffText, quote } from "./lib/audit";
 import { nowIso, TENANT } from "./lib/domain";
 import { toExecutor, toOrder, toUser } from "./lib/dto";
+import { cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
 import { createLogin } from "./users";
 import { loadCatalog } from "./catalog";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
-import { canonicalSkills, catalogSkills, normalizeSkills, skillsDiff, skillsDiffNote, SKILLS_PER_EXECUTOR } from "../src/data/skills";
+import { canonicalSkills, catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_EXECUTOR } from "../src/data/skills";
 import { shortName } from "../src/lib/format";
 import { category } from "./schema";
+
+const COOPERATION: Record<Doc<"executors">["cooperation"], string> = { freelance: "фрилансер", staff: "в штате" };
 
 /**
  * Навыки мастера: без пустых и повторов, в пределах лимитов; совпавшие со справочником —
@@ -23,6 +26,19 @@ async function cleanExecutorSkills(ctx: QueryCtx, input: readonly string[]): Pro
   if (!r.ok) throw new ConvexError(r.error);
   return canonicalSkills(r.skills, catalogSkills((await loadCatalog(ctx)).categories));
 }
+
+/** Специализации — только из справочника направлений, без повторов. */
+async function cleanCategories(ctx: QueryCtx, input: readonly string[]): Promise<{ keys: string[]; label: (key: string) => string }> {
+  const known = (await loadCatalog(ctx)).categories;
+  const keys = [...new Set(input)];
+  if (!keys.length) throw new ConvexError("Выберите хотя бы одну специализацию");
+  if (keys.some((k) => !known.some((c) => c.id === k))) throw new ConvexError("Такого направления нет в справочнике");
+  return { keys, label: (key) => known.find((c) => c.id === key)?.label ?? key };
+}
+
+/** Текст журнала о смене «на смене / выходной» — один для сотрудника и для самого мастера (worker.setAvailable). */
+export const availabilityNote = (name: string, available: boolean): string =>
+  available ? `${shortName(name)} — снова на смене` : `${shortName(name)} — выходной, новые заказы не приходят`;
 
 /** Исполнители + их активные заказы (только статус — чтобы посчитать «свободен / на выезде»). */
 export const list = query({
@@ -70,12 +86,15 @@ export const _insert = internalMutation({
     if (await ctx.db.query("executors").withIndex("by_phone", (q) => q.eq("phone", phone)).first()) throw new ConvexError("Исполнитель с таким телефоном уже есть");
     if (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", phone)).unique()) throw new ConvexError("Этот телефон уже используется как логин");
     const skills = await cleanExecutorSkills(ctx, a.skills);
-    const name = a.name.trim();
-    const id = await ctx.db.insert("executors", { ...a, skills, name, phone, tenantId: TENANT, available: true, rating: 5, reviews: 0, joinedAt: nowIso() });
+    const { keys: categories } = await cleanCategories(ctx, a.categories);
+    const name = cleanText(a.name, 120, "ФИО");
+    const city = cleanText(a.city, 60, "Город");
+    if (!name || !city) throw new ConvexError("Укажите имя и город");
+    const id = await ctx.db.insert("executors", { ...a, categories, skills, name, city, phone, tenantId: TENANT, available: true, rating: 5, reviews: 0, joinedAt: nowIso() });
     await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true });
     await audit(ctx, (await currentUser(ctx)) ?? "Система", "executor.created", `Добавлен исполнитель ${shortName(name)}${skills.length ? `, навыков: ${skills.length}` : ""}`, {
       entityId: id,
-      meta: { categories: a.categories, skills },
+      meta: { categories, skills },
     });
     return id;
   },
@@ -111,26 +130,42 @@ export const update = mutation({
     // Руководитель добавляет и снимает только специализации своего направления: иначе он открыл бы мастеру чужие заказы.
     const touched = [...a.categories.filter((c) => !e.categories.includes(c)), ...e.categories.filter((c) => !a.categories.includes(c))];
     if (scope && touched.some((c) => !scope.includes(c))) throw new ConvexError("Менять можно только специализации своего направления");
+    const { keys: categories, label } = await cleanCategories(ctx, a.categories);
     const skills = await cleanExecutorSkills(ctx, a.skills);
-    const name = a.name.trim() || e.name;
-    // Телефон — это логин; менять его здесь нельзя, чтобы не сломать вход.
-    await ctx.db.patch(id, { name, city: a.city, categories: a.categories, skills, cooperation: a.cooperation });
-    const u = await ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", id)).first();
-    if (u && a.name.trim()) await ctx.db.patch(u._id, { name: a.name.trim() });
+    const name = cleanText(a.name, 120, "ФИО") || e.name;
+    const city = cleanText(a.city, 60, "Город");
+    if (!city) throw new ConvexError("Укажите город");
+
+    const cats = listDiff(e.categories, categories);
     const diff = skillsDiff(e.skills, skills);
-    await audit(ctx, me, "executor.updated", `Профиль исполнителя ${shortName(name)} изменён${skillsDiffNote(diff)}`, {
-      entityId: id,
-      meta: { categories: a.categories, city: a.city, ...diff },
-    });
+    const log = new ChangeLog();
+    if (name !== e.name) log.add(`ФИО ${quote(e.name)} → ${quote(name)}`, "name", "изменено");
+    if (city !== e.city) log.add(`город ${e.city} → ${city}`, "city", { from: e.city, to: city });
+    if (cats.added.length || cats.removed.length) log.add(`специализации ${listDiffText(cats, label)}`, "categories", cats);
+    if (a.cooperation !== e.cooperation) log.add(`сотрудничество: ${COOPERATION[e.cooperation]} → ${COOPERATION[a.cooperation]}`, "cooperation", { from: e.cooperation, to: a.cooperation });
+    if (diff.added.length || diff.removed.length) log.add(`навыки: ${listDiffText(diff)}`, "skills", diff);
+    // Те же навыки, но в написании справочника («мытье окон» → «Мытьё окон») или в другом порядке — тоже сохраняем.
+    else if (skills.join("\n") !== e.skills.join("\n")) log.add("навыки: написание и порядок", "skills", { from: e.skills, to: skills });
+    // Сохранили без изменений — ни записи, ни шума в журнале.
+    if (log.empty) return;
+
+    // Телефон — это логин; менять его здесь нельзя, чтобы не сломать вход.
+    await ctx.db.patch(id, { name, city, categories, skills, cooperation: a.cooperation });
+    const u = await ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", id)).first();
+    if (u && u.name !== name) await ctx.db.patch(u._id, { name });
+    await audit(ctx, me, "executor.updated", `Профиль исполнителя ${shortName(name)} изменён: ${log.text()}`, { entityId: id, meta: { changes: log.changes } });
   },
 });
 
 export const setAvailable = mutation({
   args: { id: v.id("executors"), available: v.boolean() },
   handler: async (ctx, { id, available }) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     const e = await ctx.db.get(id);
     if (!e || (scope && !e.categories.some((c) => scope.includes(c)))) throw new ConvexError("Это не ваше направление");
+    if (e.available === available) return;
     await ctx.db.patch(id, { available });
+    await audit(ctx, me, "executor.availability", availabilityNote(e.name, available), { entityId: id, meta: { available } });
   },
 });

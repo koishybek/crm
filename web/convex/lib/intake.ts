@@ -116,7 +116,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
 
   const what = svc.id === "other" ? "услугу уточнить" : svc.label;
   await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number} ${a.via}: ${what} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info" });
-  await audit(ctx, a.actor, "lead.create", `Заявка №${number} ${a.via}: ${svc.label}`, {
+  await audit(ctx, a.actor, "lead.created", `Заявка №${number} ${a.via}: ${svc.label}`, {
     entityId: leadId,
     meta: { source: a.source, serviceId: svc.id, newClient, ...a.auditMeta },
   });

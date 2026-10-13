@@ -68,7 +68,7 @@ describe("форма заявки с сайта", () => {
     const [m] = await t.run((ctx) => ctx.db.query("conversationMessages").collect());
     expect(m!.text).toContain(`Заявка №${number} с сайта`);
     const journal = await t.run((ctx) => ctx.db.query("audit").collect());
-    expect(journal.find((x) => x.action === "lead.create")).toMatchObject({ actorName: "Сайт", entityId: lead!._id });
+    expect(journal.find((x) => x.action === "lead.created")).toMatchObject({ actorName: "Сайт", entityId: lead!._id });
     const notes = await t.run((ctx) => ctx.db.query("notifications").collect());
     expect(notes.map((n) => n.userId).sort()).toEqual([ids.owner, ids.operator].sort());
     expect(notes[0]!.text).toContain(`Новая заявка №${number} с сайта`);

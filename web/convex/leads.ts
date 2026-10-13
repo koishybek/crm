@@ -1,13 +1,20 @@
 import { ConvexError, v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { assertScope, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
+import { audit, ChangeLog, quote } from "./lib/audit";
 import { cleanPhone, insertClient } from "./clients";
 import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
 import { toLead, toOrder } from "./lib/dto";
+import { cleanText } from "./lib/limits";
 import { loadCatalog } from "./catalog";
 import { aiSummary, source, urgency } from "./schema";
+import { LEAD_STATUS, SOURCES, URGENCY } from "../src/data/catalog";
+import { shortName } from "../src/lib/format";
 
 const CAP = 2000;
+/** Границы полей заявки: описание — до пары страниц, комментарий — до страницы. */
+const MAX = { clientName: 120, city: 60, description: 4000, comment: 2000, address: 300, reason: 200 } as const;
 
 /** Направление заявки — по услуге из справочника. */
 async function scoped(ctx: Parameters<typeof requireRole>[0], me: Me) {
@@ -70,8 +77,13 @@ export const create = mutation({
   },
   handler: async (ctx, a) => {
     const me = await requireRole(ctx, TEAM);
-    if (!a.clientName.trim()) throw new ConvexError("Укажите клиента");
-    if (!a.description.trim()) throw new ConvexError("Опишите, что нужно сделать");
+    const clientName = cleanText(a.clientName, MAX.clientName, "Имя клиента");
+    if (!clientName) throw new ConvexError("Укажите клиента");
+    const description = cleanText(a.description, MAX.description, "Описание");
+    if (!description) throw new ConvexError("Опишите, что нужно сделать");
+    const city = cleanText(a.city, MAX.city, "Город");
+    if (!city) throw new ConvexError("Укажите город");
+    const comment = a.comment === undefined ? undefined : cleanText(a.comment, MAX.comment, "Комментарий") || undefined;
     const svc = (await loadCatalog(ctx)).service(a.serviceId);
     // Звонок привязываем только один раз: повторная заявка из того же звонка — без связи.
     const found = a.callId ? await ctx.db.get(a.callId) : null;
@@ -81,7 +93,8 @@ export const create = mutation({
     // ТЗ п.7: ищем клиента по номеру, иначе создаём.
     let client = a.clientId ? await ctx.db.get(a.clientId) : null;
     if (!client) client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", phone)).first();
-    const clientId = client?._id ?? (await insertClient(ctx, { name: a.clientName, phone, city: a.city, source: a.source }));
+    const isNewClient = !client;
+    const clientId = client?._id ?? (await insertClient(ctx, { name: clientName, phone, city, source: a.source }));
     const c = (await ctx.db.get(clientId))!;
     const at = nowIso();
     const number = await nextNumber(ctx);
@@ -93,13 +106,13 @@ export const create = mutation({
       clientPhone: c.phone,
       source: a.source,
       serviceId: a.serviceId,
-      city: a.city,
-      description: a.description.trim(),
+      city,
+      description,
       urgency: a.urgency,
       status: "new",
       operatorId: me._id,
       createdAt: at,
-      comment: a.comment?.trim() || undefined,
+      comment,
       ai: a.ai,
       callId: call?._id,
     });
@@ -107,20 +120,68 @@ export const create = mutation({
     if (call) await ctx.db.patch(call._id, { leadId: id, clientId, clientName: c.name, ...(call.from || call.direction === "out" ? {} : { from: c.phone }) });
     await ctx.db.insert("interactions", { clientId, kind: "lead", channel: a.source, title: "Новая заявка", text: svc.label, at, leadId: id });
     await ctx.db.patch(clientId, { lastActivityAt: at });
+    // Одно действие — одна запись: новый клиент, заведённый вместе с заявкой, отмечен в ней же (ТЗ п.27).
+    await audit(ctx, me, "lead.created", `Заявка №${number}: ${svc.label} — ${shortName(c.name)}${isNewClient ? " (новый клиент)" : ""}, ${SOURCES[a.source].label}`, {
+      entityId: id,
+      meta: { source: a.source, serviceId: a.serviceId, city, urgency: a.urgency, clientId, newClient: isNewClient, callId: call?._id, ai: !!a.ai },
+    });
     await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number}: ${svc.label}`, { link: `/leads?open=${id}`, except: me._id });
     return { id, number };
   },
 });
 
+type LeadPatch = Partial<Pick<Doc<"leads">, "serviceId" | "city" | "description" | "urgency" | "comment">>;
+
+/** Правка заявки. Ничего не поменялось — ни записи, ни шума в журнале. */
 export const update = mutation({
   args: { id: v.id("leads"), serviceId: v.optional(v.string()), city: v.optional(v.string()), description: v.optional(v.string()), urgency: v.optional(urgency), comment: v.optional(v.string()) },
-  handler: async (ctx, { id, ...patch }) => {
+  handler: async (ctx, { id, ...input }) => {
     const me = await requireRole(ctx, TEAM);
     const l = await ctx.db.get(id);
     if (!l) throw new ConvexError("Заявка не найдена");
     if (!(await scoped(ctx, me))(l.serviceId)) throw new ConvexError("Это не ваше направление");
-    if (patch.serviceId) (await loadCatalog(ctx)).service(patch.serviceId);
-    await ctx.db.patch(id, Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined)));
+    const cat = await loadCatalog(ctx);
+    const patch: LeadPatch = {};
+    const log = new ChangeLog();
+
+    if (input.serviceId !== undefined && input.serviceId !== l.serviceId) {
+      const svc = cat.service(input.serviceId);
+      // Руководитель не может «отдать» заявку в чужое направление — как и заказ (orders.updateInfo).
+      assertScope(me, svc.category);
+      patch.serviceId = svc.id;
+      log.add(`услуга ${quote(cat.label(l.serviceId))} → ${quote(svc.label)}`, "serviceId", { from: l.serviceId, to: svc.id });
+    }
+    if (input.city !== undefined) {
+      const city = cleanText(input.city, MAX.city, "Город");
+      if (!city) throw new ConvexError("Укажите город");
+      if (city !== l.city) {
+        patch.city = city;
+        log.add(`город ${l.city} → ${city}`, "city", { from: l.city, to: city });
+      }
+    }
+    if (input.urgency !== undefined && input.urgency !== l.urgency) {
+      patch.urgency = input.urgency;
+      log.add(`срочность ${URGENCY[l.urgency].label} → ${URGENCY[input.urgency].label}`, "urgency", { from: l.urgency, to: input.urgency });
+    }
+    // Тексты клиента в журнал не копируем — только отметку, что их правили.
+    if (input.description !== undefined) {
+      const description = cleanText(input.description, MAX.description, "Описание");
+      if (!description) throw new ConvexError("Опишите, что нужно сделать");
+      if (description !== l.description) {
+        patch.description = description;
+        log.add("описание", "description", "изменено");
+      }
+    }
+    if (input.comment !== undefined) {
+      const comment = cleanText(input.comment, MAX.comment, "Комментарий");
+      if (comment !== (l.comment ?? "")) {
+        patch.comment = comment || undefined;
+        log.add(comment ? "комментарий" : "комментарий удалён", "comment", comment ? "изменено" : "удалено");
+      }
+    }
+    if (log.empty) return;
+    await ctx.db.patch(id, patch);
+    await audit(ctx, me, "lead.updated", `Заявка №${l.number}: ${log.text()}`, { entityId: id, meta: { changes: log.changes } });
   },
 });
 
@@ -132,7 +193,17 @@ export const setStatus = mutation({
     if (!l) throw new ConvexError("Заявка не найдена");
     if (!(await scoped(ctx, me))(l.serviceId)) throw new ConvexError("Это не ваше направление");
     if (l.status === "converted") throw new ConvexError("По заявке уже создан заказ");
-    await ctx.db.patch(id, { status, rejectReason: status === "rejected" ? (reason ?? "Без причины") : undefined });
+    const why = status === "rejected" ? reason?.trim().slice(0, MAX.reason) || "Без причины" : undefined;
+    // Повторное нажатие того же этапа ничего не меняет — и в журнал не пишется.
+    if (l.status === status && l.rejectReason === why) return;
+    await ctx.db.patch(id, { status, rejectReason: why });
+    await audit(
+      ctx,
+      me,
+      status === "rejected" ? "lead.rejected" : "lead.status",
+      status === "rejected" ? `Заявка №${l.number}: отказ — ${why}` : `Заявка №${l.number}: «${LEAD_STATUS[l.status].label}» → «${LEAD_STATUS[status].label}»`,
+      { entityId: id, meta: { from: l.status, to: status, ...(why ? { reason: why } : {}) } },
+    );
   },
 });
 
@@ -161,7 +232,7 @@ export const convert = mutation({
       category: svc.category,
       description: l.description,
       city: l.city,
-      address: address ?? c.address ?? "",
+      address: (address === undefined ? undefined : cleanText(address, MAX.address, "Адрес")) || c.address || "",
       deadline: dl.toISOString(),
       priority: l.urgency,
       status: "new",
@@ -176,6 +247,7 @@ export const convert = mutation({
     });
     await ctx.db.patch(l._id, { status: "converted", orderId });
     await log(ctx, orderId, "created", "Заказ создан из заявки", userActor(me._id));
+    await audit(ctx, me, "lead.converted", `Заявка №${l.number} → заказ №${l.number}: ${svc.label}`, { entityId: id, meta: { orderId } });
     await refreshClient(ctx, l.clientId);
     return { id: orderId, number: l.number };
   },
