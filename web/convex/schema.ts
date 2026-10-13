@@ -216,7 +216,9 @@ export default defineSchema({
     .index("by_client", ["clientId", "createdAt"])
     .index("by_created", ["createdAt"])
     .index("by_done", ["doneAt"])
-    .index("by_number", ["number"]),
+    .index("by_number", ["number"])
+    // Долг исполнителям: невыплаченные выполненные заказы без перебора всей истории.
+    .index("by_payout", ["payoutPaid", "doneAt"]),
 
   messages: defineTable({
     orderId: v.id("orders"),

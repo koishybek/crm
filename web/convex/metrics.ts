@@ -1,16 +1,30 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { query } from "./_generated/server";
 import { inScope, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
+import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";
 import { toLead, toOrder } from "./lib/dto";
+import { monthOf } from "../src/data/analytics";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
+import type { Order } from "../src/data/types";
+
+/** «Главной» не владельца хватает воронки за 90 дней и сравнения 30 дней с прошлыми 30 — глубже срез не отдаём. */
+const TEAM_MAX_DAYS = 92;
+
+/** Граница среза: любая дата → ISO UTC (как поля createdAt и doneAt); мусор — понятная ошибка. */
+function isoFrom(from: string): string {
+  const t = Date.parse(from);
+  if (Number.isNaN(t)) throw new ConvexError("Неверная дата");
+  return new Date(t).toISOString();
+}
 
 /**
  * Срез для «Главной» и «Аналитики»: заявки с даты from, заказы — активные, созданные или выполненные
- * с этой даты, и заказы этих заявок. Формулы считаются на фронте (src/data/metrics.ts) — одни на оба экрана.
+ * с этой даты, и заказы этих заявок. Формулы считаются на фронте (src/data/metrics.ts, src/data/analytics.ts) —
+ * одни на оба экрана.
  */
-async function slice(ctx: Parameters<typeof requireRole>[0], from: string, scope: string[] | null = null) {
+async function slice(ctx: Parameters<typeof requireRole>[0], from: string, scope: string[] | null = null): Promise<{ leads: Doc<"leads">[]; orders: Doc<"orders">[] }> {
   const leads = await ctx.db.query("leads").withIndex("by_created", (q) => q.gte("createdAt", from)).collect();
   const byId = new Map<string, Doc<"orders">>();
   const add = (o: Doc<"orders"> | null) => o && byId.set(o._id, o);
@@ -18,27 +32,51 @@ async function slice(ctx: Parameters<typeof requireRole>[0], from: string, scope
   (await ctx.db.query("orders").withIndex("by_created", (q) => q.gte("createdAt", from)).collect()).forEach(add);
   (await ctx.db.query("orders").withIndex("by_done", (q) => q.gte("doneAt", from)).collect()).forEach(add);
   for (const l of leads) if (l.orderId && !byId.has(l.orderId)) add(await ctx.db.get(l.orderId));
-  if (!scope) return { leads: leads.map(toLead), orders: [...byId.values()].map(toOrder) };
+  if (!scope) return { leads, orders: [...byId.values()] };
   const cat = await loadCatalog(ctx);
   const catOf = (sid: string) => cat.services.find((s) => s.id === sid)?.category ?? "";
   return {
-    leads: leads.filter((l) => inScope(scope, catOf(l.serviceId))).map(toLead),
-    orders: [...byId.values()].filter((o) => inScope(scope, o.category)).map(toOrder),
+    leads: leads.filter((l) => inScope(scope, catOf(l.serviceId))),
+    orders: [...byId.values()].filter((o) => inScope(scope, o.category)),
   };
 }
+
+/**
+ * Заказ без денег — для «Главной» оператора и руководителя: им нужны статусы и сроки, а выручка, маржа
+ * и выплаты компании — финансовая аналитика владельца (ТЗ п.4–5; аудит M-2).
+ */
+const withoutMoney = (o: Order): Order => ({ ...o, clientPrice: 0, payoutMode: "fixed", payoutValue: 0, payments: [], payoutPaid: false });
 
 export const dashboard = query({
   args: { from: v.string() },
   handler: async (ctx, { from }) => {
     const me = await requireRole(ctx, TEAM);
-    return slice(ctx, from, scopeOf(me));
+    const start = isoFrom(from);
+    if (me.role === "owner") {
+      const s = await slice(ctx, start);
+      return { leads: s.leads.map(toLead), orders: s.orders.map(toOrder) };
+    }
+    const floor = new Date(Date.now() - TEAM_MAX_DAYS * 86400_000).toISOString();
+    const s = await slice(ctx, start > floor ? start : floor, scopeOf(me));
+    return { leads: s.leads.map(toLead), orders: s.orders.map((o) => withoutMoney(toOrder(o))) };
   },
 });
 
+/**
+ * «Аналитика» владельца: срез + какие заявки завела система (их не засчитываем операторам)
+ * + расходы на рекламу за месяцы периода (для стоимости заявки и заказа).
+ */
 export const analytics = query({
   args: { from: v.string() },
   handler: async (ctx, { from }) => {
     await requireRole(ctx, OWNER);
-    return slice(ctx, from);
+    const start = isoFrom(from);
+    const s = await slice(ctx, start);
+    return {
+      leads: s.leads.map(toLead),
+      orders: s.orders.map(toOrder),
+      autoLeads: await autoLeadIds(ctx, s.leads),
+      adSpend: await spendRows(ctx, monthOf(Date.parse(start)), monthOf(Date.now())),
+    };
   },
 });

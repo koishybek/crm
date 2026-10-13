@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as aiCheck from "../aiCheck.js";
+import type * as analytics from "../analytics.js";
 import type * as apiKeys from "../apiKeys.js";
 import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
@@ -50,6 +51,7 @@ import type * as notifications from "../notifications.js";
 import type * as orders from "../orders.js";
 import type * as publicApi from "../publicApi.js";
 import type * as reminders from "../reminders.js";
+import type * as reviews from "../reviews.js";
 import type * as search from "../search.js";
 import type * as seed from "../seed.js";
 import type * as site from "../site.js";
@@ -66,6 +68,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   aiCheck: typeof aiCheck;
+  analytics: typeof analytics;
   apiKeys: typeof apiKeys;
   audit: typeof audit;
   auth: typeof auth;
@@ -106,6 +109,7 @@ declare const fullApi: ApiFromModules<{
   orders: typeof orders;
   publicApi: typeof publicApi;
   reminders: typeof reminders;
+  reviews: typeof reviews;
   search: typeof search;
   seed: typeof seed;
   site: typeof site;

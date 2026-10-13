@@ -25,6 +25,7 @@ import { WorkerError } from "./screens/worker/WorkerError";
 
 const Analytics = lazy(() => import("./screens/Analytics"));
 const AuditLog = lazy(() => import("./screens/AuditLog"));
+const PublicReview = lazy(() => import("./screens/PublicReview"));
 
 // Кабинет мастера — один отдельный чанк: сотрудникам он не нужен. Suspense — в WorkerShell.
 const workerScreens = () => import("./screens/worker");
@@ -100,6 +101,11 @@ const lazyAudit = (
     <AuditLog />
   </Suspense>
 );
+const lazyReview = (
+  <Suspense fallback={<Splash />}>
+    <PublicReview />
+  </Suspense>
+);
 
 const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
@@ -145,6 +151,8 @@ const router = createBrowserRouter([
       { path: "/w/orders/:id", element: <WorkerOrderPage /> },
     ],
   },
+  // Оценка заказа клиентом по ссылке из сообщения — без входа.
+  { path: "/otzyv/:token", element: lazyReview },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);
 

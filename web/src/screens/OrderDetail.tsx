@@ -39,6 +39,9 @@ import { EXEC_STATE, debt, executorState, isOverdue, margin, marginPct, paidAmou
 import { addPayment, assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, PaymentMethod, Urgency, User } from "../data/types";
 import { OrderChat } from "../components/OrderChat";
+import { OrderReview } from "../components/OrderReview";
+import { ExecutorRating } from "../components/Rating";
+import { ratingValue } from "../data/reviews";
 import { Source, ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillPicker } from "../components/SkillChips";
 import { hasSkill } from "../data/skills";
@@ -256,9 +259,8 @@ export default function OrderDetail() {
                     <div className="mt-0.5 text-[14px] text-muted">
                       Специализация: <span className="text-ink-2">{ex.categories.map((c) => categoryById(c).label).join(", ")}</span>
                     </div>
-                    <div className="mt-1 flex items-center gap-1.5 text-[14px] text-ink-2">
-                      <Star size={16} className="fill-[#ffb547] text-[#ffb547]" />
-                      {ex.rating.toFixed(1)} <span className="text-muted">({ex.reviews} отзывов)</span>
+                    <div className="mt-1 text-[14px] text-ink-2">
+                      <ExecutorRating e={ex} />
                     </div>
                   </div>
                 </Link>
@@ -287,6 +289,8 @@ export default function OrderDetail() {
               </div>
             )}
           </Card>
+
+          <OrderReview o={o} />
 
           <Card title="История действий">
             <HistoryList />
@@ -501,7 +505,14 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
                 </Badge>
               </div>
               <div className="mt-0.5 truncate text-[13px] text-muted">
-                {e.city} · {e.categories.map((c) => categoryById(c).label).join(", ")} · в работе: {load} · <Star size={12} className="inline -translate-y-px fill-[#ffb547] text-[#ffb547]" /> {e.rating}
+                {e.city} · {e.categories.map((c) => categoryById(c).label).join(", ")} · в работе: {load} ·{" "}
+                {ratingValue(e) ? (
+                  <>
+                    <Star size={12} className="inline -translate-y-px fill-[#ffb547] text-[#ffb547]" /> {ratingValue(e)}
+                  </>
+                ) : (
+                  "нет оценок"
+                )}
               </div>
               {!fits && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Почему не подходит">
