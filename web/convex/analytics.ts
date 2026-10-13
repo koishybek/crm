@@ -1,0 +1,140 @@
+// Аналитика владельца (ТЗ п.5 «Dashboard: выплаты, маржа», п.17): расходы на рекламу, выплаты исполнителям
+// и кто на самом деле завёл заявку. Деньги компании целиком видит только владелец — всё здесь только для OWNER.
+// Формулы — общие с интерфейсом (src/data/analytics.ts).
+import { ConvexError, v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import { OWNER, requireRole } from "./lib/access";
+import { audit } from "./lib/audit";
+import { nowIso } from "./lib/domain";
+import { cleanMoney } from "./lib/limits";
+import { source } from "./schema";
+import { FIRST_MONTH, MONTH_RE, monthLabel, monthOf, payoutSummary, type AdSpendRow, type PayoutSummary } from "../src/data/analytics";
+import { SOURCE_IDS, SOURCES } from "../src/data/catalog";
+import type { SourceId } from "../src/data/types";
+import { money } from "../src/lib/format";
+
+/**
+ * Заявки, которые завела не команда, а канал или AI: бот Telegram, сайт, API, WhatsApp, OLX, AI по звонку,
+ * который не принимал никто из сотрудников. Каналы записывают такие заявки на владельца — в работе операторов
+ * их не засчитываем никому. Кто завёл заявку — по записи «lead.created» в журнале: она пишется в той же
+ * мутации, что и заявка (автор — сотрудник или «Telegram», «Сайт», «API», «AI»…). Заявки, созданные до журнала
+ * действий, остаются за тем, на кого записаны.
+ */
+export async function autoLeadIds(ctx: QueryCtx, leads: readonly Doc<"leads">[]): Promise<string[]> {
+  const owners = new Set<string>((await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).collect()).map((u) => u._id));
+  const out: string[] = [];
+  for (const l of leads) {
+    // Каналы записывают заявку на владельца; AI-заявку из звонка — на сотрудника, который его принял: это его работа.
+    if (!owners.has(l.operatorId)) continue;
+    const created = await ctx.db
+      .query("audit")
+      .withIndex("by_entity", (q) => q.eq("entity", "lead").eq("entityId", l._id))
+      .first();
+    if (!created || created.action !== "lead.created" || created.actorId) continue;
+    // Звонок принял или загрузил сам владелец — AI лишь оформил его разговор.
+    const call = l.callId ? await ctx.db.get(l.callId) : null;
+    if (call?.operatorId === l.operatorId) continue;
+    out.push(l._id);
+  }
+  return out;
+}
+
+/** Расходы на рекламу за месяцы first…last (YYYY-MM) включительно. */
+export async function spendRows(ctx: QueryCtx, first: string, last: string): Promise<AdSpendRow[]> {
+  const rows = await ctx.db
+    .query("adSpend")
+    .withIndex("by_month", (q) => q.gte("month", first).lte("month", last))
+    .collect();
+  return rows.map((r) => ({ month: r.month, source: r.source, amount: r.amount }));
+}
+
+/** Месяц расходов: формат YYYY-MM, не раньше FIRST_MONTH и не позже текущего (по Алматы). */
+function checkMonth(month: string): void {
+  if (!MONTH_RE.test(month) || month < FIRST_MONTH) throw new ConvexError("Неверный месяц");
+  if (month > monthOf(Date.now())) throw new ConvexError("Расходы вносятся за прошедшие месяцы и текущий");
+}
+
+/** Расходы на рекламу за месяц по источникам — для редактора на экране «Аналитика». */
+export const adSpendMonth = query({
+  args: { month: v.string() },
+  handler: async (ctx, { month }): Promise<AdSpendRow[]> => {
+    await requireRole(ctx, OWNER);
+    if (!MONTH_RE.test(month)) throw new ConvexError("Неверный месяц");
+    return spendRows(ctx, month, month);
+  },
+});
+
+/**
+ * Владелец вносит расходы на рекламу за месяц по источникам (ТЗ п.17 «стоимость привлечения»): строка есть —
+ * обновляем, нет — создаём, 0 — расходов не было, строку убираем. Ничего не поменялось — ни записи, ни шума в журнале.
+ */
+export const setAdSpend = mutation({
+  args: { month: v.string(), items: v.array(v.object({ source, amount: v.number() })) },
+  handler: async (ctx, { month, items }): Promise<{ changed: number }> => {
+    const me = await requireRole(ctx, OWNER);
+    checkMonth(month);
+    if (items.length > SOURCE_IDS.length) throw new ConvexError("Слишком много строк");
+    const seen = new Set<SourceId>();
+    const changes: Record<string, { from: number; to: number }> = {};
+    const parts: string[] = [];
+    for (const item of items) {
+      if (seen.has(item.source)) throw new ConvexError("Источник указан дважды");
+      seen.add(item.source);
+      const amount = cleanMoney(item.amount, `Расходы «${SOURCES[item.source].label}»`);
+      const row = await ctx.db
+        .query("adSpend")
+        .withIndex("by_month", (q) => q.eq("month", month).eq("source", item.source))
+        .first();
+      const before = row?.amount ?? 0;
+      if (before === amount) continue;
+      if (row && amount === 0) await ctx.db.delete(row._id);
+      else if (row) await ctx.db.patch(row._id, { amount, updatedAt: nowIso(), updatedBy: me._id });
+      else await ctx.db.insert("adSpend", { month, source: item.source, amount, updatedAt: nowIso(), updatedBy: me._id });
+      changes[item.source] = { from: before, to: amount };
+      parts.push(`${SOURCES[item.source].label} ${money(before)} → ${money(amount)}`);
+    }
+    if (!parts.length) return { changed: 0 };
+    await audit(ctx, me, "settings.ad_spend_updated", `Расходы на рекламу за ${monthLabel(month)}: ${parts.join(", ")}`, { meta: { month, changes } });
+    return { changed: parts.length };
+  },
+});
+
+/** Сводка выплат с именами мастеров, которым компания должна. */
+export interface PayoutView {
+  period: PayoutSummary["period"];
+  owed: { total: number; orders: number; executors: { id: string; name: string; amount: number; orders: number }[] };
+}
+
+/**
+ * Выплаты исполнителям для «Главной» и «Аналитики» владельца: начислено и выплачено за заказы, выполненные
+ * с даты from, и долг исполнителям сейчас — за все выполненные и не выплаченные заказы, по мастерам.
+ */
+export const payouts = query({
+  args: { from: v.string() },
+  handler: async (ctx, { from }): Promise<PayoutView> => {
+    await requireRole(ctx, OWNER);
+    const start = Date.parse(from);
+    if (Number.isNaN(start)) throw new ConvexError("Неверная дата");
+    const byId = new Map<string, Doc<"orders">>();
+    const done = await ctx.db
+      .query("orders")
+      .withIndex("by_done", (q) => q.gte("doneAt", new Date(start).toISOString()))
+      .collect();
+    // Невыплаченные выполненные — по индексу: перебирать всю историю заказов не нужно.
+    const unpaid = await ctx.db
+      .query("orders")
+      .withIndex("by_payout", (q) => q.eq("payoutPaid", false).gt("doneAt", ""))
+      .collect();
+    for (const o of [...done, ...unpaid]) byId.set(o._id, o);
+    const summary = payoutSummary([...byId.values()], { from: start, to: Date.now() });
+    const executors = await Promise.all(
+      summary.owed.executors.map(async (x) => {
+        const id = ctx.db.normalizeId("executors", x.id);
+        const e = id ? await ctx.db.get(id) : null;
+        return { ...x, name: e?.name ?? "Исполнитель удалён" };
+      }),
+    );
+    return { ...summary, owed: { ...summary.owed, executors } };
+  },
+});

@@ -1,15 +1,19 @@
-import { Briefcase, ChartNoAxesColumn, Download, Wallet, Banknote, Star } from "lucide-react";
+import { Briefcase, ChartNoAxesColumn, Download, Wallet, Banknote } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CATEGORIES, SOURCES, serviceById } from "../data/catalog";
+import { SOURCES, categoryById, serviceById } from "../data/catalog";
 import { useNow } from "../data/hooks";
-import { PERIODS, dailySeries, doneIn, funnel, operatorStats, rangeOf, revenueBySource, sums, topExecutors, trend, type PeriodId } from "../data/metrics";
+import { PERIODS, dailySeries, doneIn, funnel, rangeOf, sums, topExecutors, trend, type PeriodId } from "../data/metrics";
+import { operatorRows, sourceRows, spendWithin } from "../data/analytics";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useTeam } from "../data/hooks";
 import type { SourceId } from "../data/types";
-import { Source, SourceIcon } from "../components/icons";
+import { SourceIcon } from "../components/icons";
 import { Avatar, Button, Card, KpiCard, Loading, PageHeader } from "../components/ui";
+import { PayoutsCard } from "../components/PayoutsCard";
+import { ExecutorRating } from "../components/Rating";
+import { AdSpendModal, OperatorsCard, SourceCostsCard } from "./AnalyticsCards";
 import { PeriodSelect } from "./Dashboard";
 import { dayLabel, money, moneyShort, num, pct } from "../lib/format";
 import { exportCsv } from "../lib/csv";
@@ -43,20 +47,21 @@ export default function Analytics() {
   const now = useNow(60_000);
   const team = useTeam();
   const [period, setPeriod] = useState<PeriodId>("30d");
+  const [spendOpen, setSpendOpen] = useState(false);
   // С сервера — срез от начала прошлого периода (для сравнения), формулы — общие с «Главной».
   const slice = useQuery(api.metrics.analytics, { from: new Date(rangeOf(period, now).prev.from).toISOString() });
   const db = useMemo(() => ({ leads: slice?.leads ?? [], orders: slice?.orders ?? [], executors: team.executors, users: team.users }), [slice, team]);
+  const auto = useMemo(() => new Set(slice?.autoLeads ?? []), [slice]);
 
   const d = useMemo(() => {
     const { cur, prev, days } = rangeOf(period, now);
     const caption = PERIODS.find((p) => p.id === period)!.prev;
-    const s = sums(doneIn(db, cur));
+    const done = doneIn(db, cur);
+    const s = sums(done);
     const p = sums(doneIn(db, prev));
-    const byCat = CATEGORIES.map((c) => {
-      const orders = doneIn(db, cur).filter((o) => serviceById(o.serviceId).category === c.id);
-      return { label: c.label, ...sums(orders) };
-    })
-      .filter((x) => x.count)
+    // По направлению заказа (а не услуги): заказ из удалённого или переименованного направления не теряется.
+    const byCat = [...new Set(done.map((o) => o.category))]
+      .map((c) => ({ label: categoryById(c).label, ...sums(done.filter((o) => o.category === c)) }))
       .sort((a, b) => b.margin - a.margin);
     return {
       cur,
@@ -67,14 +72,14 @@ export default function Analytics() {
         margin: trend(s.margin, p.margin, caption),
         count: trend(s.count, p.count, caption),
       },
-      sources: revenueBySource(db, cur),
+      sources: sourceRows(db.leads, db.orders, spendWithin(slice?.adSpend ?? [], cur), cur),
       series: dailySeries(db, cur, days).map((x) => ({ ...x, label: dayLabel(x.day) })),
       funnel: funnel(db, cur),
       top: topExecutors(db, cur, 5),
-      ops: operatorStats(db, cur),
+      ops: operatorRows(db.leads, db.orders, auto, cur),
       byCat,
     };
-  }, [db, period, now]);
+  }, [db, slice, auto, period, now]);
 
   const fTop = Math.max(1, d.funnel[0]!.value);
 
@@ -210,11 +215,8 @@ export default function Analytics() {
                     <td className="text-center tabular-nums">{x.count}</td>
                     <td className="text-right tabular-nums">{money(x.revenue)}</td>
                     <td className="text-right font-semibold text-ok-ink tabular-nums">{money(x.margin)}</td>
-                    <td className="text-right">
-                      <span className="inline-flex items-center gap-1 font-medium">
-                        <Star size={15} className="fill-[#ffb547] text-[#ffb547]" />
-                        {x.e.rating.toFixed(1)}
-                      </span>
+                    <td className="text-right whitespace-nowrap">
+                      <ExecutorRating e={x.e} count={false} size={15} className="text-[13.5px]" />
                     </td>
                   </tr>
                 ))}
@@ -245,67 +247,16 @@ export default function Analytics() {
         </Card>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
-        <Card title="Эффективность источников" bodyClass="px-3 pb-3 sm:px-4">
-          <div className="scroll-x">
-            <table className="tbl min-w-[620px]">
-              <thead>
-                <tr>
-                  <th>Источник</th>
-                  <th className="text-center">Заявок</th>
-                  <th className="text-center">Конверсия</th>
-                  <th className="text-right">Средний чек</th>
-                  <th className="text-right">Маржа</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.sources.map((x) => (
-                  <tr key={x.source}>
-                    <td>
-                      <Source source={x.source} className="font-medium text-ink" />
-                    </td>
-                    <td className="text-center tabular-nums">{x.leads}</td>
-                    <td className="text-center tabular-nums">{Math.round(x.conv * 100)}%</td>
-                    <td className="text-right tabular-nums">{x.count ? money(x.avg) : "—"}</td>
-                    <td className="text-right font-semibold text-ok-ink tabular-nums">{money(x.margin)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="px-1 pt-3 text-[12.5px] text-muted">Стоимость привлечения появится, когда подключим расходы на рекламу (OLX, Instagram).</p>
-        </Card>
-
-        <Card title="Операторы" bodyClass="px-3 pb-3 sm:px-4">
-          <div className="scroll-x">
-            <table className="tbl min-w-[380px]">
-              <thead>
-                <tr>
-                  <th>Сотрудник</th>
-                  <th className="text-center">Заявок</th>
-                  <th className="text-center">В заказ</th>
-                  <th className="text-right">Конверсия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.ops.map((x) => (
-                  <tr key={x.u.id}>
-                    <td>
-                      <span className="flex items-center gap-2.5">
-                        <Avatar name={x.u.name} size={30} variant="person" />
-                        <span className="font-medium text-ink">{x.u.name.split(" ")[0]}</span>
-                      </span>
-                    </td>
-                    <td className="text-center tabular-nums">{x.leads}</td>
-                    <td className="text-center tabular-nums">{x.conv}</td>
-                    <td className="text-right font-semibold tabular-nums">{Math.round(x.rate * 100)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      <div className="mt-4">
+        <SourceCostsCard rows={d.sources} onSpend={() => setSpendOpen(true)} />
       </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <OperatorsCard rows={d.ops.rows} auto={d.ops.auto} users={team.users} />
+        <PayoutsCard from={d.cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} />
+      </div>
+
+      {spendOpen && <AdSpendModal onClose={() => setSpendOpen(false)} />}
     </>
   );
 }

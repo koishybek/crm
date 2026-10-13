@@ -66,6 +66,8 @@ function WhoInline({ entry }: { entry: Who }) {
 
 const PATH: Partial<Record<AuditEntity, (id: string) => string>> = {
   order: (id) => `/orders/${id}`,
+  // Отзыв — один на заказ, в журнале он записан на заказ: открываем карточку заказа с блоком «Отзыв клиента».
+  review: (id) => `/orders/${id}`,
   client: (id) => `/clients/${id}`,
   executor: (id) => `/executors/${id}`,
   call: (id) => `/calls?open=${encodeURIComponent(id)}`,

@@ -9,6 +9,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Order } from "../data/types";
 import { Source } from "../components/icons";
+import { PayoutsCard } from "../components/PayoutsCard";
 import { Avatar, Badge, Card, KpiCard, Loading, PageHeader, Select, TextLink } from "../components/ui";
 import { cn, dayDiff, deadline, money, num, shortName, whenShort } from "../lib/format";
 
@@ -241,6 +242,8 @@ export default function Dashboard() {
             ))}
           </div>
         </Card>
+
+        {isOwner && <PayoutsCard from={rangeOf(period, now).cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
       </div>
     </>
   );

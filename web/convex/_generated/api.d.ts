@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as aiCheck from "../aiCheck.js";
+import type * as analytics from "../analytics.js";
 import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as bot from "../bot.js";
@@ -38,6 +39,7 @@ import type * as metrics from "../metrics.js";
 import type * as notifications from "../notifications.js";
 import type * as orders from "../orders.js";
 import type * as reminders from "../reminders.js";
+import type * as reviews from "../reviews.js";
 import type * as search from "../search.js";
 import type * as seed from "../seed.js";
 import type * as telegram from "../telegram.js";
@@ -53,6 +55,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   aiCheck: typeof aiCheck;
+  analytics: typeof analytics;
   audit: typeof audit;
   auth: typeof auth;
   bot: typeof bot;
@@ -81,6 +84,7 @@ declare const fullApi: ApiFromModules<{
   notifications: typeof notifications;
   orders: typeof orders;
   reminders: typeof reminders;
+  reviews: typeof reviews;
   search: typeof search;
   seed: typeof seed;
   telegram: typeof telegram;

@@ -1,12 +1,15 @@
 // Метрики для «Главной» и «Аналитики» — одни и те же формулы, чтобы цифры совпадали между экранами.
-import { SOURCE_IDS } from "./catalog";
-import { isFinished, margin, payout } from "./logic";
-import type { DB, Order, SourceId } from "./types";
+// Деньги, стоимость привлечения и работа операторов — в ./analytics (их считает и сервер).
+import { doneWithin, sums } from "./analytics";
+import { isFinished } from "./logic";
+import type { DB } from "./types";
+import { addDays, startOfDay } from "../lib/format";
+import type { Trend } from "../components/ui";
+
+export { sums };
 
 /** Минимум данных для формул: заявки и заказы за период + справочники. */
 export type Slice = Pick<DB, "leads" | "orders" | "executors" | "users">;
-import { addDays, startOfDay } from "../lib/format";
-import type { Trend } from "../components/ui";
 
 export type PeriodId = "today" | "7d" | "30d" | "90d";
 export const PERIODS: { id: PeriodId; label: string; prev: string }[] = [
@@ -40,16 +43,10 @@ const inR = (iso: string | undefined, r: Range) => {
   return t >= r.from && t <= r.to;
 };
 
-/** Выручку признаём в момент выполнения работы (статус «Выполнен» и дальше). */
-export const doneIn = (db: Slice, r: Range) => db.orders.filter((o) => (isFinished(o) || o.status === "refund") && inR(o.doneAt, r));
+/** Выручку признаём в момент выполнения работы (статус «Выполнен» и дальше); возвраты — не выручка. */
+export const doneIn = (db: Slice, r: Range) => doneWithin(db.orders, r);
 export const leadsIn = (db: Slice, r: Range) => db.leads.filter((l) => inR(l.createdAt, r));
 export const ordersCreatedIn = (db: Slice, r: Range) => db.orders.filter((o) => inR(o.createdAt, r));
-
-export const sums = (orders: Order[]) => {
-  const revenue = orders.reduce((s, o) => s + o.clientPrice, 0);
-  const payouts = orders.reduce((s, o) => s + payout(o), 0);
-  return { revenue, payouts, margin: orders.reduce((s, o) => s + margin(o), 0), count: orders.length, avg: orders.length ? revenue / orders.length : 0 };
-};
 
 export function trend(cur: number, prev: number, caption: string, goodWhenUp = true): Trend {
   if (prev === 0) {
@@ -73,17 +70,6 @@ export function funnel(db: Slice, r: Range) {
   ];
 }
 
-export function revenueBySource(db: Slice, r: Range) {
-  const done = doneIn(db, r);
-  return SOURCE_IDS.map((s) => {
-    const mine = done.filter((o) => o.source === s);
-    const leads = leadsIn(db, r).filter((l) => l.source === s);
-    return { source: s as SourceId, ...sums(mine), leads: leads.length, conv: leads.length ? leads.filter((l) => l.status === "converted").length / leads.length : 0 };
-  })
-    .filter((x) => x.revenue > 0 || x.leads > 0)
-    .sort((a, b) => b.revenue - a.revenue);
-}
-
 export function dailySeries(db: Slice, r: Range, days: number) {
   const out: { day: Date; orders: number; revenue: number; leads: number }[] = [];
   const first = startOfDay(new Date(r.from));
@@ -105,16 +91,4 @@ export function topExecutors(db: Slice, r: Range, limit = 5) {
     .filter((x) => x.count > 0)
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
-}
-
-export function operatorStats(db: Slice, r: Range) {
-  return db.users
-    .filter((u) => u.role !== "executor")
-    .map((u) => {
-      const leads = leadsIn(db, r).filter((l) => l.operatorId === u.id);
-      const conv = leads.filter((l) => l.status === "converted").length;
-      return { u, leads: leads.length, conv, rate: leads.length ? conv / leads.length : 0 };
-    })
-    .filter((x) => x.leads > 0)
-    .sort((a, b) => b.leads - a.leads);
 }

@@ -1,4 +1,4 @@
-import { KeyRound, Briefcase, CalendarDays, ClipboardCheck, Ellipsis, MapPin, Moon, Pencil, Phone, Plus, Search, Star, Truck, Users, Wallet, Clock, Ban, TrendingUp, FileText } from "lucide-react";
+import { KeyRound, Briefcase, CalendarDays, ClipboardCheck, Ellipsis, MapPin, Moon, Pencil, Phone, Plus, Search, Truck, Users, Wallet, Clock, Ban, TrendingUp, FileText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { APP_NAME, CATEGORIES, CITIES, SERVICES, categoryById } from "../data/catalog";
@@ -11,6 +11,8 @@ import { report, resetPassword, setExecutorAvailable, setUserActive, toast } fro
 import { useMe } from "../data/hooks";
 import type { CategoryId, Executor } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
+import { ExecutorReviews } from "../components/ExecutorReviews";
+import { ExecutorRating } from "../components/Rating";
 import { ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { textKey } from "../data/skills";
@@ -150,10 +152,8 @@ export default function Executors() {
                     <td>
                       <DotBadge tone={EXEC_STATE[state].tone}>{EXEC_STATE[state].label}</DotBadge>
                     </td>
-                    <td>
-                      <span className="inline-flex items-center gap-1.5 font-semibold text-ink">
-                        <Star size={17} className="fill-[#ffb547] text-[#ffb547]" /> {e.rating.toFixed(1)}
-                      </span>
+                    <td className="whitespace-nowrap">
+                      <ExecutorRating e={e} count={false} size={17} />
                     </td>
                     <td className="text-center font-medium text-ink tabular-nums">{active}</td>
                     <td onClick={(ev) => ev.stopPropagation()}>
@@ -236,9 +236,7 @@ export function ExecutorDetail() {
             <span className="inline-flex items-center gap-2">
               <MapPin size={17} className="text-muted" /> {e.city}
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Star size={17} className="fill-[#ffb547] text-[#ffb547]" /> {e.rating.toFixed(1)} <span className="text-muted">({e.reviews} отзывов)</span>
-            </span>
+            <ExecutorRating e={e} size={17} />
             <span className="text-muted">
               {e.cooperation === "staff" ? "В штате" : "Фрилансер"} · с {date(e.joinedAt)}
             </span>
@@ -322,6 +320,7 @@ export function ExecutorDetail() {
         <KpiCard icon={TrendingUp} tone="violet" label="Доход за 30 дней" value={money(s.incomeMonth)} />
         <KpiCard icon={Wallet} tone="amber" label="К выплате" value={money(s.toPay)} caption="выполнено, ещё не выплачено" />
       </div>
+      <ExecutorReviews e={e} className="mt-4" />
 
       <Modal open={!!creds} onClose={() => setCreds(null)} title="Новый пароль" width={440}>
         {creds && (
