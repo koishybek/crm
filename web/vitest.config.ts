@@ -7,5 +7,7 @@ export default defineConfig({
     environment: "edge-runtime",
     server: { deps: { inline: ["convex-test"] } },
     include: ["convex/**/*.test.ts", "src/**/*.test.ts"],
+    // Сценарии convex-test тяжёлые: при параллельном прогоне всех файлов 5 с по умолчанию не хватает.
+    testTimeout: 30_000,
   },
 });
