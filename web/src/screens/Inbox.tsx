@@ -573,13 +573,22 @@ function Linkified({ text }: { text: string }) {
 }
 
 const VIDEO = /\.(mp4|mov|webm|m4v)$/i;
-const COORDS = /^(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)$/;
+/** Координаты в тексте геопозиции: Telegram — «43.238949, 76.889709», WhatsApp — «📍 Место» + координаты + ссылка на карту. */
+const COORDS = /(-?\d{1,2}\.\d+),\s*(-?\d{1,3}\.\d+)/;
+
+/** Название и адрес места (WhatsApp) — первая строка «📍 …», если в ней не сами координаты. */
+function placeOf(text: string): string | undefined {
+  const first = text.split("\n", 1)[0]!;
+  const place = first.startsWith("📍") ? first.slice("📍".length).trim() : "";
+  return place && !COORDS.test(place) ? place : undefined;
+}
 
 function Media({ m, onPreview }: { m: ConversationMessage; onPreview: (m: ConversationMessage) => void }) {
   if (m.kind === "location") {
     const g = COORDS.exec(m.text);
     if (!g) return null;
     const [lat, lon] = [g[1]!, g[2]!];
+    const place = placeOf(m.text);
     return (
       <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13.5px]">
         <span className="inline-flex items-center gap-1 font-semibold text-ink">
@@ -591,6 +600,7 @@ function Media({ m, onPreview }: { m: ConversationMessage; onPreview: (m: Conver
         <a href={`https://www.google.com/maps/search/?api=1&query=${lat},${lon}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-brand-ink hover:underline">
           Google Карты
         </a>
+        {place && <span className="basis-full text-ink-2">{place}</span>}
       </div>
     );
   }
@@ -625,11 +635,14 @@ function Media({ m, onPreview }: { m: ConversationMessage; onPreview: (m: Conver
 function Bubble({ m, author, onPreview }: { m: ConversationMessage; author: string; onPreview: (m: ConversationMessage) => void }) {
   const [busy, setBusy] = useState(false);
   if (m.kind === "system") {
+    // Входящая отметка (реакция клиента, смена номера, «не поддерживается») — от канала, а не автоответ бота.
+    const fromChannel = m.direction === "in";
+    const Icon = fromChannel ? Info : Bot;
     return (
       <div className="my-2 flex justify-center">
         <div className="max-w-[88%] rounded-[12px] bg-[#ece9e2] px-3 py-1.5 text-[12.5px] leading-snug text-ink-2 sm:max-w-[75%]">
-          <Bot size={13} className="mr-1 -mt-0.5 inline text-muted" aria-hidden />
-          <span className="sr-only">Автоответ бота: </span>
+          <Icon size={13} className="mr-1 -mt-0.5 inline text-muted" aria-hidden />
+          <span className="sr-only">{fromChannel ? "Служебная отметка: " : "Автоответ бота: "}</span>
           <span className="whitespace-pre-wrap">{m.text}</span>
           <span className="ml-1.5 text-[11px] text-muted">{hm(new Date(m.at))}</span>
           {m.status === "failed" && <span className="ml-1 text-[11px] text-bad-ink">· не доставлено</span>}

@@ -11,7 +11,7 @@ import { phone } from "../lib/format";
 import type { User } from "../data/types";
 import { AccessModal } from "../components/AccessModal";
 import { CatalogEditor } from "./CatalogEditor";
-import { ApiAndSiteCard } from "./ChannelCards";
+import { ApiAndSiteCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
@@ -240,6 +240,10 @@ export default function Settings() {
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.3fr_1fr]">
         <TelephonyCard />
         <AiStatusCard />
+      </div>
+
+      <div className="mt-4">
+        <WhatsAppCard />
       </div>
 
       <div className="mt-4">

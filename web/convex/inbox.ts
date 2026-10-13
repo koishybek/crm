@@ -185,8 +185,8 @@ export async function ingestMessage(ctx: MutationCtx, a: IngestInput): Promise<I
   const phone = contactPhone(a.contactPhone) ?? (inbound && a.kind !== "system" ? (findKzPhone(text) ?? undefined) : undefined);
   const subject = clip(a.subject, 300) || undefined;
   const subjectUrl = safeUrl(a.subjectUrl);
-  // Окно ответа WhatsApp открывает только сообщение клиента.
-  const replyUntil = inbound && a.channel === "whatsapp" ? new Date(Date.parse(at) + WA_WINDOW_MS).toISOString() : undefined;
+  // Окно ответа WhatsApp открывает только сообщение клиента; служебные отметки (реакция, «не поддерживается») его не продлевают.
+  const replyUntil = inbound && a.channel === "whatsapp" && a.kind !== "system" ? new Date(Date.parse(at) + WA_WINDOW_MS).toISOString() : undefined;
 
   let conv = await byExternal(ctx, a.channel, externalId);
   const created = !conv;
@@ -268,6 +268,13 @@ export const ingest = internalMutation({
 
 const DELIVERY_RANK = { sending: 0, sent: 1, delivered: 2, read: 3, failed: 1 } as const;
 
+/** Окно ответа закрылось раньше, чем мы считали (Meta вернула «прошло 24 часа»): дальше — только звонок. */
+async function closeReplyWindow(ctx: MutationCtx, id: Id<"conversations">): Promise<void> {
+  const c = await ctx.db.get(id);
+  const now = nowIso();
+  if (c && (!c.replyUntil || c.replyUntil > now)) await ctx.db.patch(id, { replyUntil: now });
+}
+
 /**
  * Статус доставки от канала (вебхук WhatsApp: delivered/read/failed) по id сообщения в канале.
  * Статус не откатывается назад: «прочитано» после «доставлено» — да, «доставлено» после «прочитано» — нет.
@@ -278,6 +285,8 @@ export const _deliveryStatus = internalMutation({
     externalMessageId: v.string(),
     status: v.union(v.literal("sent"), v.literal("delivered"), v.literal("read"), v.literal("failed")),
     error: v.optional(v.string()),
+    /** Канал сообщил, что окно ответа закрыто (WhatsApp: прошло 24 часа) — выключаем поле ответа. */
+    closeWindow: v.optional(v.boolean()),
   },
   handler: async (ctx, a): Promise<boolean> => {
     const m = await ctx.db
@@ -289,6 +298,7 @@ export const _deliveryStatus = internalMutation({
     if (a.status === "failed") {
       if (current === "delivered" || current === "read" || current === "failed") return false;
       await ctx.db.patch(m._id, { status: "failed", error: clip(a.error, 300) || "Сообщение не доставлено" });
+      if (a.closeWindow) await closeReplyWindow(ctx, m.conversationId);
       return true;
     }
     if (DELIVERY_RANK[a.status] <= DELIVERY_RANK[current] && current !== "failed") return false;
@@ -440,7 +450,8 @@ export const _autoLeadJob = internalQuery({
       .withIndex("by_conversation", (q) => q.eq("conversationId", c._id))
       .order("desc")
       .take(30);
-    const latest = recent.find((m) => m.direction === "in" && isMeaningful(m.text));
+    // Геопозиция и служебные отметки (реакция, «не поддерживается») — не текст обращения: очередь не перезапускают.
+    const latest = recent.find((m) => m.direction === "in" && m.kind !== "system" && m.kind !== "location" && isMeaningful(m.text));
     if (latest && latest._id !== a.messageId) return null;
     const now = Date.now();
     if ((await openWork(ctx, c, now)).busy) return null;
@@ -741,13 +752,26 @@ export const _deliver = internalAction({
       const known = e instanceof ChannelError;
       // Текст сообщения и номер клиента в лог не пишем.
       console.warn(`inbox: ответ ${messageId} не доставлен (${job.target.channel}): ${known ? e.data : errText(e)}`);
-      await ctx.runMutation(internal.inbox._delivered, { messageId, ok: false, error: known ? e.data : "Не удалось отправить сообщение", systemic: known ? e.systemic : true });
+      await ctx.runMutation(internal.inbox._delivered, {
+        messageId,
+        ok: false,
+        error: known ? e.data : "Не удалось отправить сообщение",
+        systemic: known ? e.systemic : true,
+        closeWindow: known && e.closeWindow ? true : undefined,
+      });
     }
   },
 });
 
 export const _delivered = internalMutation({
-  args: { messageId: v.id("conversationMessages"), ok: v.boolean(), externalId: v.optional(v.string()), error: v.optional(v.string()), systemic: v.optional(v.boolean()) },
+  args: {
+    messageId: v.id("conversationMessages"),
+    ok: v.boolean(),
+    externalId: v.optional(v.string()),
+    error: v.optional(v.string()),
+    systemic: v.optional(v.boolean()),
+    closeWindow: v.optional(v.boolean()),
+  },
   handler: async (ctx, a): Promise<void> => {
     const m = await ctx.db.get(a.messageId);
     if (!m) return;
@@ -758,6 +782,7 @@ export const _delivered = internalMutation({
       return;
     }
     await ctx.db.patch(m._id, { status: "failed", error: (a.error ?? "Не удалось отправить сообщение").slice(0, 300) });
+    if (c && a.closeWindow) await closeReplyWindow(ctx, c._id);
     if (c && c.channel !== "site" && a.systemic) await markError(ctx, c.channel, a.error ?? "Ответ клиенту не отправлен");
   },
 });

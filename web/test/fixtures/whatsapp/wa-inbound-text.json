@@ -1,0 +1,41 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1234567890123456",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "77273000000",
+              "phone_number_id": "987654321098765"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Айгерим"
+                },
+                "wa_id": "77011234567",
+                "user_id": "KZ.1349120865530274191"
+              }
+            ],
+            "messages": [
+              {
+                "from": "77011234567",
+                "from_user_id": "KZ.1349120865530274191",
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgASGBQzQTZGMDg1MDY1QkRDOTFFMTI0RgA=",
+                "timestamp": "1791795600",
+                "type": "text",
+                "text": {
+                  "body": "Здравствуйте! Кондиционер не холодит, Алматы, мкр Самал-2. Можно мастера сегодня?"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

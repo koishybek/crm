@@ -380,9 +380,15 @@ export default defineSchema({
     assigneeId: v.optional(v.id("users")),
     /** WhatsApp: до какого момента можно отвечать свободным текстом (окно 24 часа). */
     replyUntil: v.optional(v.string()),
+    /**
+     * WhatsApp: BSUID собеседника («KZ.…») — есть во всех вебхуках с 04.2026, а номер у клиентов с username может скрыться.
+     * Диалог ищем по нему, затем по номеру (externalId).
+     */
+    waUserId: v.optional(v.string()),
     meta: v.optional(v.any()),
   })
     .index("by_channel_external", ["channel", "externalId"])
+    .index("by_wa_user", ["waUserId"])
     .index("by_last", ["lastMessageAt"])
     .index("by_status_last", ["status", "lastMessageAt"])
     .index("by_client", ["clientId", "lastMessageAt"])

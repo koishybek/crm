@@ -1,0 +1,83 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "1234567890123456",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "77273000000",
+              "phone_number_id": "987654321098765"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Айгерим"
+                },
+                "wa_id": "77011234567",
+                "user_id": "KZ.1349120865530274191"
+              }
+            ],
+            "statuses": [
+              {
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgARGBI5QTNDQTVCM0Q0Q0Q2RTY3RTcA",
+                "status": "read",
+                "timestamp": "1791796620",
+                "recipient_id": "77011234567",
+                "recipient_user_id": "KZ.1349120865530274191",
+                "biz_opaque_callback_data": "cm:k57a3x9y2b1c0d8e7f6g5h4j3k2l1m0n"
+              },
+              {
+                "id": "wamid.HBgLNzcwMTEyMzQ1NjcVAgARGBI5QTNDQTVCM0Q0Q0Q2RTY3RTcA",
+                "status": "delivered",
+                "timestamp": "1791796500",
+                "recipient_id": "77011234567",
+                "recipient_user_id": "KZ.1349120865530274191",
+                "biz_opaque_callback_data": "cm:k57a3x9y2b1c0d8e7f6g5h4j3k2l1m0n",
+                "pricing": {
+                  "billable": true,
+                  "pricing_model": "PMP",
+                  "type": "regular",
+                  "category": "service"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        },
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "77273000000",
+              "phone_number_id": "987654321098765"
+            },
+            "statuses": [
+              {
+                "id": "wamid.HBgLNzcwNTk4NzY1NDMVAgARGBJCMjE4RkE3QzlEMEU1RjYwQjMA",
+                "status": "failed",
+                "timestamp": "1791796560",
+                "recipient_id": "77059876543",
+                "biz_opaque_callback_data": "cm:k17f0e2d3c4b5a69788796a5b4c3d2e1",
+                "errors": [
+                  {
+                    "code": 131047,
+                    "title": "Re-engagement message",
+                    "message": "Re-engagement message",
+                    "error_data": {
+                      "details": "Message failed to send because more than 24 hours have passed since the customer last replied to this number."
+                    },
+                    "href": "/documentation/business-messaging/whatsapp/support/error-codes"
+                  }
+                ]
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

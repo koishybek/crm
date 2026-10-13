@@ -412,3 +412,19 @@ export interface ApiKeyInfo {
   lastUsedAt?: string;
   revokedAt?: string;
 }
+
+/** Карточка «WhatsApp» у владельца: что настроено и доходят ли вебхуки. Значений секретов здесь нет — только имена недостающих переменных. */
+export interface WhatsAppSettings {
+  configured: boolean;
+  /** Обязательные переменные окружения Convex, которые не заданы. */
+  missing: string[];
+  /** Callback URL для Meta: …convex.site/whatsapp/webhook. */
+  webhookUrl: string | null;
+  /** Verify token: не задан, слишком короткий или задан (тогда — последние 4 символа, чтобы сверить с Meta). */
+  verifyToken: { state: "missing" | "short" | "ok"; end?: string };
+  graphVersion: string;
+  /** Номер компании в WhatsApp — из последнего вебхука. */
+  businessPhone?: string;
+  lastWebhookAt?: string;
+  health?: { okAt?: string; okNote?: string; errorAt?: string; error?: string };
+}

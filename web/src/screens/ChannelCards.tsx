@@ -1,14 +1,16 @@
 // «API и сайт» в настройках владельца (ТЗ п.6 «Сайт», п.26 «API-first»): форма заявки для сайта (ссылка и iframe),
 // сайты компании, которым можно слать заявки напрямую, и ключи публичного API с примерами запросов.
+// «WhatsApp» — официальный WhatsApp Cloud API: что настроено, доходят ли вебхуки, как подключить.
 import { useQuery } from "convex/react";
-import { Ban, Code2, Copy, ExternalLink, Globe, KeyRound, Plus, TriangleAlert } from "lucide-react";
+import { Ban, Code2, Copy, ExternalLink, Globe, KeyRound, MessageCircle, Plus, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import { Badge, Button, Card, FormRow, Input, Loading, Modal, Textarea } from "../components/ui";
+import { useNow } from "../data/hooks";
 import { createApiKey, revokeApiKey, saveSiteOrigins, siteUrl } from "../data/publicApi";
 import { report } from "../data/store";
-import type { ApiKeyInfo } from "../data/types";
-import { dateTime } from "../lib/format";
+import type { ApiKeyInfo, WhatsAppSettings } from "../data/types";
+import { dateTime, phone } from "../lib/format";
 import { copy, CopyRow } from "./Integrations";
 
 /** Встраивание формы: iframe + скрипт, который передаёт рекламные метки страницы и подгоняет высоту. */
@@ -276,5 +278,139 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
         )}
       </Modal>
     </>
+  );
+}
+
+// ── WhatsApp ─────────────────────────────────────────────────────────────────
+
+const WA_DOCS = "https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started";
+
+/** Подключение по шагам — значения потом задаются в окружении Convex. */
+const WA_STEPS = [
+  <>
+    В <b>business.facebook.com</b> — бизнес-портфолио компании. Пройдите верификацию бизнеса: лимит сообщений вне 24-часового окна вырастет с 250 до 2 000 клиентов в сутки.
+  </>,
+  <>
+    <b>developers.facebook.com/apps</b> → Create App → сценарий «Connect with customers through WhatsApp».
+  </>,
+  <>
+    Use cases → Customize → <b>API Setup</b>: добавьте номер компании (+7…, не зарегистрированный в обычном WhatsApp или WhatsApp Business), подтвердите его кодом, зарегистрируйте в Cloud API (PIN из 6 цифр
+    сохраните) и скопируйте <b>Phone number ID</b>.
+  </>,
+  <>
+    Business settings → <b>System users</b> → пользователь с ролью Admin, дайте ему приложение и WhatsApp-аккаунт → Generate token: срок «Никогда», права <code>whatsapp_business_messaging</code>,{" "}
+    <code>whatsapp_business_management</code>, <code>business_management</code>. Это постоянный токен.
+  </>,
+  <>
+    App settings → Basic → <b>App secret</b> — им Meta подписывает каждый вебхук.
+  </>,
+  <>
+    В Convex (Settings → Environment Variables) задайте <code>WHATSAPP_TOKEN</code>, <code>WHATSAPP_PHONE_NUMBER_ID</code>, <code>WHATSAPP_APP_SECRET</code> и <code>WHATSAPP_VERIFY_TOKEN</code> — свою случайную
+    строку от 32 символов (например, <code>openssl rand -hex 32</code>).
+  </>,
+  <>
+    В приложении Meta: Configuration → <b>Webhook</b> — Callback URL и Verify token отсюда → Verify and save. Подпишитесь на поля <code>messages</code> и <code>user_id_update</code>.
+  </>,
+  <>Переведите приложение в режим Live и добавьте способ оплаты в WhatsApp Manager.</>,
+];
+
+const verifyHint = (t: WhatsAppSettings["verifyToken"]): string =>
+  t.state === "ok"
+    ? `Verify token — значение WHATSAPP_VERIFY_TOKEN (заканчивается на «…${t.end ?? ""}»). Его же введите в Meta рядом с Callback URL.`
+    : t.state === "short"
+      ? "Verify token короче 16 символов — замените WHATSAPP_VERIFY_TOKEN на случайную строку от 32 символов."
+      : "Verify token не задан — придумайте случайную строку от 32 символов и задайте её в WHATSAPP_VERIFY_TOKEN.";
+
+/** Ошибку недельной давности ещё показываем: вебхуки идут и при сломанном токене, а отметка «работает» у них общая. */
+const ERROR_SHOWN_MS = 7 * 86400_000;
+
+/** Последняя ошибка за неделю; fresh — после неё ничего успешного не было. */
+function lastError(h: WhatsAppSettings["health"], now: number): { at: string; text: string; fresh: boolean } | undefined {
+  if (!h?.errorAt || now - Date.parse(h.errorAt) > ERROR_SHOWN_MS) return undefined;
+  return { at: h.errorAt, text: h.error ?? "Ошибка", fresh: !h.okAt || h.errorAt > h.okAt };
+}
+
+function waStatus(s: WhatsAppSettings, error: ReturnType<typeof lastError>): { tone: "green" | "amber" | "red" | "gray"; label: string } {
+  if (!s.configured) return { tone: "gray", label: "Не подключён" };
+  if (error?.fresh) return { tone: "red", label: "Есть ошибка" };
+  return s.lastWebhookAt ? { tone: "green", label: "Работает" } : { tone: "amber", label: "Ждём первый вебхук" };
+}
+
+export function WhatsAppCard() {
+  const s = useQuery(api.channels.whatsapp.settings);
+  const now = useNow(60_000);
+  if (s === undefined) {
+    return (
+      <Card icon={MessageCircle} title="WhatsApp">
+        <Loading className="py-6" />
+      </Card>
+    );
+  }
+  const error = lastError(s.health, now);
+  const status = waStatus(s, error);
+  return (
+    <Card icon={MessageCircle} title="WhatsApp">
+      <p className="text-[13.5px] text-muted">
+        Клиенты пишут на номер компании в WhatsApp — текст, фото, документы, голосовые (с расшифровкой) и геопозиция появляются в «Сообщениях», оттуда же отвечаем. Свободным текстом WhatsApp разрешает отвечать
+        24 часа после последнего сообщения клиента — дальше звоним.
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <section className="min-w-0 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={status.tone}>{status.label}</Badge>
+            {s.businessPhone && <span className="text-[14px] font-semibold text-ink">{phone(s.businessPhone)}</span>}
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[13.5px]">
+            <dt className="text-muted">Последний вебхук</dt>
+            <dd className="font-medium text-ink">{s.lastWebhookAt ? dateTime(s.lastWebhookAt) : "ещё не приходил"}</dd>
+            <dt className="text-muted">Версия Graph API</dt>
+            <dd className="text-ink-2">{s.graphVersion}</dd>
+          </dl>
+          {s.missing.length > 0 && (
+            <div className="flex items-start gap-2 rounded-[10px] bg-warn-bg px-3 py-2.5 text-[13px] text-warn-ink">
+              <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                Не заданы переменные окружения Convex: <code>{s.missing.join(", ")}</code>.
+              </span>
+            </div>
+          )}
+          {error && (
+            <div className={error.fresh ? "flex items-start gap-2 rounded-[10px] bg-bad-bg px-3 py-2.5 text-[13px] text-bad-ink" : "flex items-start gap-2 rounded-[10px] bg-warn-bg px-3 py-2.5 text-[13px] text-warn-ink"}>
+              <TriangleAlert size={16} className="mt-0.5 shrink-0" aria-hidden />
+              <span>
+                {error.fresh ? "" : "Последняя ошибка: "}
+                {error.text} · {dateTime(error.at)}
+              </span>
+            </div>
+          )}
+          {s.webhookUrl ? (
+            <CopyRow label="Callback URL — вставьте в Meta (Configuration → Webhook)" value={s.webhookUrl} />
+          ) : (
+            <p className="text-[13.5px] text-bad-ink">Адрес сервера не определён — проверьте настройки деплоя Convex.</p>
+          )}
+          <p className={s.verifyToken.state === "ok" ? "text-[13px] text-ink-2" : "text-[13px] text-warn-ink"}>{verifyHint(s.verifyToken)}</p>
+        </section>
+
+        <section className="min-w-0 space-y-3">
+          <details className="group rounded-[12px] border border-line" open={!s.configured}>
+            <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Как подключить</summary>
+            <ol className="list-decimal space-y-1.5 border-t border-line py-3 pr-3.5 pl-8 text-[13px] text-ink-2">
+              {WA_STEPS.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+            </ol>
+          </details>
+          <div className="rounded-[12px] bg-[#f8f6f1] px-3.5 py-3 text-[13px] text-ink-2">
+            <div className="mb-1 font-semibold text-ink">Цены Meta для Казахстана с 1 октября 2026</div>
+            Входящие — бесплатно. Ответ в течение 24 часов — $0,018 за доставленное сообщение. Шаблоны: utility — $0,018, marketing — $0,0604. После рекламы Click-to-WhatsApp — 72 часа бесплатно. Meta
+            списывает в долларах; расход — в WhatsApp Manager → Insights.
+          </div>
+          <a href={WA_DOCS} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[13.5px] font-semibold text-brand-ink hover:underline">
+            Документация WhatsApp Cloud API <ExternalLink size={14} aria-hidden />
+          </a>
+        </section>
+      </div>
+    </Card>
   );
 }
