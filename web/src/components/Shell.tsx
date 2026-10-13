@@ -35,6 +35,7 @@ import { markAllRead, report, telegramLink, telegramUnlink, toast } from "../dat
 import type { User } from "../data/types";
 import { cn, whenShort } from "../lib/format";
 import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui";
+import { EmailToggle } from "./EmailToggle";
 import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
@@ -319,6 +320,7 @@ function UserMenu({ me }: { me: User }) {
                 Подключить Telegram
               </MenuItem>
             )}
+            <EmailToggle />
             {me.role === "owner" && (
               <MenuItem icon={SettingsIcon} onClick={() => (close(), nav("/settings"))}>
                 Настройки и команда

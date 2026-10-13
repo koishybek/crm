@@ -33,7 +33,7 @@ const DRAFT_MESSAGES = 15;
 const DRAFT_TEXT = 3000;
 
 /** «в Telegram», «на OLX» — в уведомлениях и журнале. */
-const CHANNEL_IN: Record<Channel, string> = { telegram: "в Telegram", whatsapp: "в WhatsApp", olx: "на OLX", site: "с сайта" };
+export const CHANNEL_IN: Record<Channel, string> = { telegram: "в Telegram", whatsapp: "в WhatsApp", olx: "на OLX", site: "с сайта" };
 /** «из WhatsApp» — откуда пришла заявка. */
 export const CHANNEL_FROM: Record<Channel, string> = { telegram: "из Telegram", whatsapp: "из WhatsApp", olx: "с OLX", site: "с сайта" };
 const CHANNEL_ACTOR: Record<Channel, AuditActor> = { telegram: "Telegram", whatsapp: "WhatsApp", olx: "OLX", site: "Сайт" };
@@ -754,12 +754,16 @@ export const _outboxItem = internalQuery({
 });
 
 export const _deliver = internalAction({
-  args: { messageId: v.id("conversationMessages") },
-  handler: async (ctx, { messageId }): Promise<void> => {
+  args: {
+    messageId: v.id("conversationMessages"),
+    /** Кнопки под автоматическим сообщением клиенту (оценка звёздами) — их умеет только Telegram. */
+    buttons: v.optional(v.array(v.array(v.object({ text: v.string(), data: v.optional(v.string()), url: v.optional(v.string()) })))),
+  },
+  handler: async (ctx, { messageId, buttons }): Promise<void> => {
     const job = await ctx.runQuery(internal.inbox._outboxItem, { messageId });
     if (!job) return;
     try {
-      const res = await sendToChannel(ctx, job.target, job.text);
+      const res = await sendToChannel(ctx, job.target, job.text, buttons);
       await ctx.runMutation(internal.inbox._delivered, { messageId, ok: true, externalId: res.externalId });
     } catch (e) {
       const known = e instanceof ChannelError;

@@ -70,7 +70,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "rateLimits", "systemStatus", "backups", "oauthStates", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await client.mutation(api.seed.wipe, { secret: secret!, table: t })) > 0);
     }
     while ((await client.mutation(api.seed.wipeFiles, { secret: secret! })) > 0);

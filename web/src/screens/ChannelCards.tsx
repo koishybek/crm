@@ -3,12 +3,15 @@
 // «WhatsApp» — официальный WhatsApp Cloud API: что настроено, доходят ли вебхуки, как подключить.
 // «OLX» — Partner API OLX.kz: ключи приложения, подключение аккаунта компании, синхронизация чатов.
 import { useQuery } from "convex/react";
-import { Ban, Code2, Copy, ExternalLink, Globe, KeyRound, LogIn, MessageCircle, Plus, RefreshCw, Store, TriangleAlert, Unplug } from "lucide-react";
+import { Ban, BellRing, Code2, Copy, ExternalLink, Globe, KeyRound, LogIn, Mail, MessageCircle, Plus, RefreshCw, Send, Store, TriangleAlert, Unplug } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { api } from "../../convex/_generated/api";
-import { Badge, Button, Card, FormRow, Input, Loading, Modal, Textarea } from "../components/ui";
+import { Badge, Button, Card, FormRow, Input, Loading, Modal, Textarea, Toggle } from "../components/ui";
+import { APP_NAME } from "../data/catalog";
 import { useNow } from "../data/hooks";
+import { sendTestEmail, setClientNotify } from "../data/notifyActions";
+import { EMAIL_KINDS, type EmailSettings } from "../data/notifyRules";
 import { disconnectOlx, olxReturnMessage, startOlxConnect, syncOlxNow } from "../data/olx";
 import { createApiKey, revokeApiKey, saveSiteOrigins, siteUrl } from "../data/publicApi";
 import { report, toast } from "../data/store";
@@ -595,5 +598,178 @@ export function OlxCard() {
         </section>
       </div>
     </Card>
+  );
+}
+
+// ── Email ────────────────────────────────────────────────────────────────────
+
+/** Подключение Resend по шагам — значения потом задаются в окружении Convex. */
+const EMAIL_STEPS = [
+  <>
+    <b>resend.com</b> → Domains → Add domain: поддомен только для писем, например <code>notify.ваш-домен.kz</code>, регион <b>eu-west-1</b>.
+  </>,
+  <>
+    Перенесите в DNS записи из вкладки Records: MX и TXT (SPF) для <code>send.notify</code>, TXT (DKIM) для <code>resend._domainkey.notify</code> и DMARC — TXT для <code>_dmarc</code>:{" "}
+    <code>v=DMARC1; p=none</code>. В Cloudflare — без оранжевого облака.
+  </>,
+  <>
+    Нажмите <b>Verify</b>: обычно до 15 минут, бывает до 72 часов.
+  </>,
+  <>
+    API Keys → Create API key: права <b>Sending access</b>, только этот домен.
+  </>,
+  <>
+    В Convex (Settings → Environment Variables): <code>EMAIL_API_KEY</code> — ключ, <code>EMAIL_FROM</code> — <code>Home Max Service &lt;noreply@notify.ваш-домен.kz&gt;</code>, по желанию{" "}
+    <code>EMAIL_REPLY_TO</code> — ящик офиса. На тестовом деплойменте добавьте <code>EMAIL_REDIRECT_TO</code> — все письма уйдут на этот адрес.
+  </>,
+  <>Нажмите «Отправить проверочное письмо» — оно придёт на ваш email из логина.</>,
+];
+
+function emailBadge(s: EmailSettings, error: ReturnType<typeof lastError>): { tone: "green" | "amber" | "red" | "gray"; label: string } {
+  if (!s.configured) return { tone: "gray", label: "Не настроен" };
+  if (error?.fresh) return { tone: "red", label: "Есть ошибка" };
+  return s.health?.okAt ? { tone: "green", label: "Работает" } : { tone: "amber", label: "Писем ещё не было" };
+}
+
+export function EmailCard() {
+  const s = useQuery(api.email.settings);
+  const now = useNow(60_000);
+  const [busy, setBusy] = useState(false);
+  if (s === undefined) {
+    return (
+      <Card icon={Mail} title="Email">
+        <Loading className="py-6" />
+      </Card>
+    );
+  }
+  const error = lastError(s.health, now);
+  const badge = emailBadge(s, error);
+  const test = async () => {
+    setBusy(true);
+    report(await sendTestEmail(), "Проверочное письмо отправлено — проверьте почту");
+    setBusy(false);
+  };
+  return (
+    <Card icon={Mail} title="Email">
+      <p className="text-[13.5px] text-muted">
+        Копии важных уведомлений сотрудникам — через Resend. Каждый включает их сам: меню профиля → «Дублировать на email». В письмах нет данных клиентов — номер, услуга и ссылка в кабинет.
+      </p>
+      <div className="mt-4 space-y-3">
+        <div>
+          <Badge tone={badge.tone}>{badge.label}</Badge>
+        </div>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[13.5px]">
+          <dt className="text-muted">Отправитель</dt>
+          <dd className="min-w-0 font-medium break-words text-ink">{s.from ?? "не задан"}</dd>
+          {s.replyTo && (
+            <>
+              <dt className="text-muted">Ответы</dt>
+              <dd className="min-w-0 break-words text-ink-2">{s.replyTo}</dd>
+            </>
+          )}
+          <dt className="text-muted">Получают</dt>
+          <dd className="min-w-0 text-ink-2">{s.subscribers.length ? s.subscribers.join(", ") : "пока никто не включил"}</dd>
+        </dl>
+        {s.redirectTo && <Notice tone="warn">Тестовый режим: все письма уходят на {s.redirectTo} (EMAIL_REDIRECT_TO).</Notice>}
+        {s.missing.length > 0 && (
+          <Notice tone="warn">
+            Задайте переменные окружения Convex: <code>{s.missing.join(", ")}</code>.
+          </Notice>
+        )}
+        {error && (
+          <Notice tone={error.fresh ? "bad" : "warn"}>
+            {error.fresh ? "" : "Последняя ошибка: "}
+            {error.text} · {dateTime(error.at)}
+          </Notice>
+        )}
+        <div className="rounded-[12px] bg-[#f8f6f1] px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="mb-1 font-semibold text-ink">Что приходит на email</div>
+          <ul className="list-disc space-y-1 pl-4">
+            {Object.values(EMAIL_KINDS).map((k) => (
+              <li key={k.label}>
+                <b>{k.label}</b> — {k.to}
+              </li>
+            ))}
+          </ul>
+        </div>
+        {s.configured && (
+          <Button size="sm" variant="secondary" icon={Send} disabled={busy} onClick={() => void test()}>
+            {busy ? "Отправляем…" : "Отправить проверочное письмо"}
+          </Button>
+        )}
+        <details className="rounded-[12px] border border-line" open={!s.configured}>
+          <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Как подключить</summary>
+          <ol className="list-decimal space-y-1.5 border-t border-line py-3 pr-3.5 pl-8 text-[13px] text-ink-2">
+            {EMAIL_STEPS.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+        </details>
+      </div>
+    </Card>
+  );
+}
+
+// ── Уведомления клиентам ─────────────────────────────────────────────────────
+
+const CLIENT_EXAMPLES = [
+  { when: "Мастер взял заказ", text: "«Заказ №1024: мастер Асет приедет завтра до 14:00»" },
+  { when: "Работа выполнена", text: `«Заказ №1024 выполнен — спасибо, что выбрали ${APP_NAME}!» и просьба оценить мастера: звёзды в Telegram, ссылка в WhatsApp` },
+  { when: "Заказ отменён", text: "«Заказ №1024 отменён. Если это ошибка — напишите нам сюда»" },
+];
+
+export function ClientNotifyCard() {
+  const s = useQuery(api.clientNotify.settings);
+  const [busy, setBusy] = useState(false);
+  if (s === undefined) {
+    return (
+      <Card icon={BellRing} title="Уведомления клиентам">
+        <Loading className="py-6" />
+      </Card>
+    );
+  }
+  const channels = [s.channels.telegram ? "Telegram" : "", s.channels.whatsapp ? "WhatsApp" : "", s.channels.olx ? "OLX" : ""].filter(Boolean);
+  const toggle = async (on: boolean) => {
+    setBusy(true);
+    report(await setClientNotify(on), on ? "Клиенты будут получать сообщения о заказах" : "Сообщения клиентам выключены");
+    setBusy(false);
+  };
+  return (
+    <Card icon={BellRing} title="Уведомления клиентам">
+      <p className="text-[13.5px] text-muted">
+        Клиент получает короткое сообщение о своём заказе там, где писал нам последним: в Telegram, WhatsApp (только 24 часа после его сообщения) или на OLX. Клиенту с сайта или по телефону не пишем — звоним.
+      </p>
+      <div className="mt-4 space-y-3">
+        <Toggle
+          checked={s.enabled}
+          onChange={(on) => {
+            if (!busy) void toggle(on);
+          }}
+          label="Уведомлять клиентов"
+        />
+        <p className="text-[13px] text-ink-2">{channels.length ? `Сейчас можно писать: ${channels.join(", ")}.` : "Каналы для сообщений клиентам пока не подключены."}</p>
+        <div className="rounded-[12px] bg-[#f8f6f1] px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="mb-1 font-semibold text-ink">Что получает клиент</div>
+          <ul className="list-disc space-y-1 pl-4">
+            {CLIENT_EXAMPLES.map((x) => (
+              <li key={x.when}>
+                <b>{x.when}</b> — {x.text}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[12.5px] text-muted">Каждое событие — один раз. Только имя мастера и время: без цен, выплат и его телефона. Отправленное видно в «Сообщениях» и в истории заказа.</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Email сотрудникам и сообщения клиентам — рядом, одной строкой в «Настройках». */
+export function NotifyCards() {
+  return (
+    <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <EmailCard />
+      <ClientNotifyCard />
+    </div>
   );
 }

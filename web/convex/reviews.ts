@@ -99,7 +99,9 @@ async function alertLowRating(ctx: MutationCtx, o: Doc<"orders">, rating: number
   const managers = (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "manager")).collect()).filter((u) => u.categories?.includes(o.category));
   const ids = [...owners, ...managers].filter((u) => u.active !== false && u._id !== except).map((u) => u._id);
   const comment = text ? `: «${text.length > 100 ? `${text.slice(0, 99)}…` : text}»` : "";
-  await notify(ctx, ids, `Низкая оценка ${rating}★ по заказу №${o.number} — мастер ${shortName(executor)}${comment}`, { link: `/orders/${o._id}`, tone: "bad" });
+  const title = `Низкая оценка ${rating}★ по заказу №${o.number} — мастер ${shortName(executor)}`;
+  // В письме — без слов клиента: письма хранит почтовый сервис за рубежом.
+  await notify(ctx, ids, `${title}${comment}`, { link: `/orders/${o._id}`, tone: "bad", email: { kind: "low_rating", text: title } });
   return ids.length;
 }
 
@@ -226,28 +228,33 @@ export const forExecutor = query({
 // ── Ссылка для клиента ───────────────────────────────────────────────────────
 
 /**
- * Ссылка «оцените работу» для клиента (сотрудник отправляет её сам). Есть действующая неиспользованная — та же,
- * иначе новая на REVIEW_LINK_DAYS дней. В журнал — только создание новой ссылки, сам токен — никогда.
+ * Ссылка «оцените работу» по заказу: есть действующая неиспользованная — та же, иначе новая на REVIEW_LINK_DAYS дней.
+ * В журнал — только создание новой ссылки (кто запросил: сотрудник или система), сам токен — никогда.
  */
+export async function issueReviewLink(ctx: MutationCtx, o: Doc<"orders">, actor: AuditActor): Promise<{ url: string; expiresAt: string }> {
+  const now = Date.now();
+  const open = (
+    await ctx.db
+      .query("reviewRequests")
+      .withIndex("by_order", (q) => q.eq("orderId", o._id))
+      .collect()
+  ).find((r) => !r.usedAt && Date.parse(r.expiresAt) > now);
+  if (open) return { url: reviewUrl(open.token), expiresAt: open.expiresAt };
+  const token = newToken();
+  const expiresAt = new Date(now + REVIEW_LINK_DAYS * DAY_MS).toISOString();
+  await ctx.db.insert("reviewRequests", { token, orderId: o._id, createdAt: nowIso(), expiresAt });
+  await audit(ctx, actor, "review.requested", `Заказ №${o.number}: создана ссылка для оценки, действует до ${almatyStamp(expiresAt)}`, { entityId: o._id, meta: { expiresAt } });
+  return { url: reviewUrl(token), expiresAt };
+}
+
+/** Ссылка «оцените работу» для клиента — сотрудник отправляет её сам (автоматически её шлёт clientNotify.ts). */
 export const requestLink = mutation({
   args: { orderId: v.id("orders") },
   handler: async (ctx, { orderId }): Promise<{ url: string; expiresAt: string }> => {
     const me = await requireRole(ctx, STAFF);
     const o = await reviewableOrder(ctx, orderId);
     if (await reviewOf(ctx, orderId)) throw new ConvexError("Клиент уже оценил этот заказ");
-    const now = Date.now();
-    const open = (
-      await ctx.db
-        .query("reviewRequests")
-        .withIndex("by_order", (q) => q.eq("orderId", orderId))
-        .collect()
-    ).find((r) => !r.usedAt && Date.parse(r.expiresAt) > now);
-    if (open) return { url: reviewUrl(open.token), expiresAt: open.expiresAt };
-    const token = newToken();
-    const expiresAt = new Date(now + REVIEW_LINK_DAYS * DAY_MS).toISOString();
-    await ctx.db.insert("reviewRequests", { token, orderId, createdAt: nowIso(), expiresAt });
-    await audit(ctx, me, "review.requested", `Заказ №${o.number}: создана ссылка для оценки, действует до ${almatyStamp(expiresAt)}`, { entityId: orderId, meta: { expiresAt } });
-    return { url: reviewUrl(token), expiresAt };
+    return issueReviewLink(ctx, o, me);
   },
 });
 

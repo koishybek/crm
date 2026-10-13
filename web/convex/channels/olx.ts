@@ -145,7 +145,7 @@ async function markLost(ctx: MutationCtx, row: Doc<"integrations">): Promise<voi
     ctx,
     owners.filter((u) => u.active !== false).map((u) => u._id),
     "OLX отключился: доступ истёк или отозван. Подключите OLX заново в настройках — до этого новые сообщения с OLX не приходят.",
-    { link: "/settings", tone: "bad" },
+    { link: "/settings", tone: "bad", email: { kind: "channel_lost" } },
   );
   await audit(ctx, "OLX", "integration.expired", `Доступ к OLX${row.accountName ? ` (${row.accountName})` : ""} истёк или отозван — нужно подключить заново`, {
     meta: { provider: "olx", accountId: row.accountId },

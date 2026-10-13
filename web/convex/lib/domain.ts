@@ -4,6 +4,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { ACTIVE_STATUSES, ORDER_STATUS } from "../../src/data/catalog";
 import type { Actor, HistoryKind, OrderStatus } from "../../src/data/types";
+import { queueEmail, type EmailEvent } from "./mail";
 import type { TgButton } from "./tg";
 
 export const TENANT = "t-komfort";
@@ -46,21 +47,26 @@ export async function executorUser(ctx: QueryCtx, executorId: Id<"executors">): 
 
 export type { TgButton } from "./tg";
 
-/** Уведомление в колокольчик + копия в Telegram (если подключён). Отправка — после коммита, через планировщик. */
+/**
+ * Уведомление в колокольчик + копия в Telegram (если подключён) и на email (важное событие — opts.email, правило —
+ * lib/mail.ts). Отправка — после коммита, через планировщик.
+ */
 export async function notify(
   ctx: MutationCtx,
   userIds: (Id<"users"> | null | undefined)[],
   text: string,
-  opts: { link?: string; tone?: Doc<"notifications">["tone"]; except?: Id<"users">; buttons?: TgButton[][]; html?: string } = {},
+  opts: { link?: string; tone?: Doc<"notifications">["tone"]; except?: Id<"users">; buttons?: TgButton[][]; html?: string; email?: EmailEvent } = {},
 ) {
   const at = nowIso();
+  let emails = 0;
   for (const id of new Set(userIds.filter((x): x is Id<"users"> => !!x))) {
     if (id === opts.except) continue;
-    await ctx.db.insert("notifications", { userId: id, text, link: opts.link, at, read: false, tone: opts.tone ?? "info" });
+    const notificationId = await ctx.db.insert("notifications", { userId: id, text, link: opts.link, at, read: false, tone: opts.tone ?? "info" });
     const u = await ctx.db.get(id);
     if (u?.telegramChatId) {
       await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId, text, html: opts.html, link: opts.link, buttons: opts.buttons });
     }
+    if (u && opts.email && (await queueEmail(ctx, u, notificationId, { text, link: opts.link, event: opts.email }, emails))) emails++;
   }
 }
 

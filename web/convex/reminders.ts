@@ -25,7 +25,7 @@ export const run = internalMutation({
         if (t < now && !o.overdueNotified) {
           const escalated = [...new Set([...owners, ...staff])];
           await ctx.db.patch(o._id, { overdueNotified: true, soonNotified: true });
-          await notify(ctx, escalated, `Просрочка: заказ ${label}`, { link: `/orders/${o._id}`, tone: "bad" });
+          await notify(ctx, escalated, `Просрочка: заказ ${label}`, { link: `/orders/${o._id}`, tone: "bad", email: { kind: "order_overdue" } });
           if (ex) await notify(ctx, [ex], `Просрочен срок по заказу ${label} — сообщите оператору, когда закончите`, { link: `/w/orders/${o._id}`, tone: "bad" });
           // ТЗ п.15: эскалация — ключевое событие заказа; её делает система, а не сотрудник.
           await audit(ctx, "Система", "order.overdue", `Заказ №${o.number}: просрочен срок ${almatyStamp(o.deadline)} — уведомлены владелец и ответственные (${escalated.length})${ex ? " и исполнитель" : ""}`, {

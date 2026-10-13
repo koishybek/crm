@@ -10,6 +10,7 @@ import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { availabilityNote } from "./executors";
+import { orderNotice } from "./clientNotify";
 import { fitsOrder, payout } from "../src/data/logic";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { money, shortName } from "../src/lib/format";
@@ -133,7 +134,8 @@ export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id
   await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted" });
   await log(ctx, orderId, "taken", "Исполнитель взял заказ из ленты", userActor(me._id));
   await audit(ctx, me, "order.taken", `${shortName(ex.name)} взял заказ №${o.number} из ленты`, { entityId: orderId, meta: { executorId: ex._id } });
-  await notify(ctx, await staffIds(ctx, o.category), `${shortName(ex.name)} взял заказ №${o.number}`, { link: `/orders/${orderId}`, tone: "ok" });
+  await notify(ctx, await staffIds(ctx, o.category), `${shortName(ex.name)} взял заказ №${o.number}`, { link: `/orders/${orderId}`, tone: "ok", email: { kind: "order_assigned" } });
+  await orderNotice(ctx, orderId);
   return (await ctx.db.get(orderId))!;
 }
 
@@ -175,6 +177,7 @@ export async function actFor(ctx: MutationCtx, userId: Id<"users">, id: Id<"orde
   const tone = action === "decline" ? "warn" : action === "done" ? "ok" : "info";
   await notify(ctx, await staffIds(ctx, o.category), `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})`, { link: `/orders/${id}`, tone });
   const fresh = (await ctx.db.get(id))!;
+  await orderNotice(ctx, id);
   // Отказ вернул заказ в ленту — остальные подходящие мастера должны узнать, что он снова свободен.
   if (action === "decline") await announceOrder(ctx, fresh, (await suitableUsers(ctx, fresh)).filter((u) => u !== me._id), { again: true });
   return fresh;

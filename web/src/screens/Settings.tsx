@@ -11,7 +11,7 @@ import { phone } from "../lib/format";
 import type { User } from "../data/types";
 import { AccessModal } from "../components/AccessModal";
 import { CatalogEditor } from "./CatalogEditor";
-import { ApiAndSiteCard, OlxCard, WhatsAppCard } from "./ChannelCards";
+import { ApiAndSiteCard, NotifyCards, OlxCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 import { SystemCards } from "./SystemCards";
 
@@ -250,6 +250,7 @@ export default function Settings() {
       <div className="mt-4">
         <OlxCard />
       </div>
+      <NotifyCards />
 
       <div className="mt-4">
         <ApiAndSiteCard />

@@ -45,6 +45,7 @@ export const BACKUP_TABLES = [
   "audit",
   "conversations",
   "conversationMessages",
+  "clientNotices",
   "integrations",
   "apiKeys",
   "apiLeads",

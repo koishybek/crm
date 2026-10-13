@@ -10,6 +10,7 @@ import { suitableUsers } from "./lib/matching";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
+import { orderNotice } from "./clientNotify";
 import { fitsOrder, isOpenForFeed, margin, payout } from "../src/data/logic";
 import { catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money, shortName } from "../src/lib/format";
@@ -253,7 +254,7 @@ export const addPayment = mutation({
       meta: { paymentId: payment.id, amount: value, method, paid, clientPrice: o.clientPrice, ...(toPaid ? { status: { from: o.status, to: "paid" } } : {}) },
     });
     const owners = (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).collect()).map((u) => u._id);
-    await notify(ctx, owners, `Оплата по заказу №${o.number}: ${money(value)}`, { link: `/orders/${id}`, tone: "ok", except: me._id });
+    await notify(ctx, owners, `Оплата по заказу №${o.number}: ${money(value)}`, { link: `/orders/${id}`, tone: "ok", except: me._id, email: { kind: "payment" } });
   },
 });
 
@@ -308,6 +309,7 @@ export const changeStatus = mutation({
         meta: { from: o.status, to, ...(to === "awaiting_executor" ? { notified: recipients.length } : {}), ...(reasonOf ? { reason: reasonOf } : {}), ...(autoPaid ? { autoPayment: autoPaid } : {}) },
       },
     );
+    await orderNotice(ctx, id);
 
     if (to === "awaiting_executor") {
       await announceOrder(ctx, (await ctx.db.get(o._id))!, recipients);

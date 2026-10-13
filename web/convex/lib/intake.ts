@@ -115,7 +115,9 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
   await ctx.db.patch(client._id, { lastActivityAt: at });
 
   const what = svc.id === "other" ? "услугу уточнить" : svc.label;
-  await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number} ${a.via}: ${what} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info" });
+  const title = `Новая заявка №${number} ${a.via}: ${what}`;
+  // В письме — без имени клиента: письма хранит почтовый сервис за рубежом.
+  await notify(ctx, await staffIds(ctx, svc.category), `${title} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info", email: { kind: "lead_new", text: title } });
   await audit(ctx, a.actor, "lead.created", `Заявка №${number} ${a.via}: ${svc.label}`, {
     entityId: leadId,
     meta: { source: a.source, serviceId: svc.id, newClient, ...a.auditMeta },
