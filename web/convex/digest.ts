@@ -8,7 +8,8 @@ import { almatyDayStart, esc, whenAlmaty } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { ACTIVE_STATUSES, APP_NAME, FINISHED_STATUSES, SOURCES } from "../src/data/catalog";
-import { contactsOpen, margin, payout } from "../src/data/logic";
+import { sums } from "../src/data/analytics";
+import { contactsOpen, paidAmount, payout } from "../src/data/logic";
 import { money } from "../src/lib/format";
 
 async function activeOrders(ctx: QueryCtx) {
@@ -30,15 +31,16 @@ async function numbers(ctx: QueryCtx, me: Me, now: number) {
   const active = (await activeOrders(ctx)).filter((o) => inScope(scope, o.category));
   const bySource = new Map<string, number>();
   for (const l of leads) bySource.set(l.source, (bySource.get(l.source) ?? 0) + 1);
-  const debt = (await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "awaiting_payment")).collect())
-    .filter((o) => inScope(scope, o.category))
-    .reduce((s, o) => s + Math.max(0, o.clientPrice - o.payments.reduce((x, p) => x + p.amount, 0)), 0);
+  // Долг клиентов — по сданным работам, ещё не оплаченным полностью; сторнированные оплаты не считаются.
+  const unpaid = [...(await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "awaiting_payment")).collect()), ...(await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "done")).collect())];
+  const debt = unpaid.filter((o) => inScope(scope, o.category)).reduce((s, o) => s + Math.max(0, o.clientPrice - paidAmount(o)), 0);
+  const totals = sums(done);
   return {
     leads: leads.length,
     sources: [...bySource.entries()].sort((a, b) => b[1] - a[1]).map(([s, n]) => `${SOURCES[s as keyof typeof SOURCES]?.label ?? s} ${n}`),
     done: done.length,
-    revenue: done.reduce((s, o) => s + o.clientPrice, 0),
-    margin: done.reduce((s, o) => s + margin(o), 0),
+    revenue: totals.revenue,
+    margin: totals.margin,
     active: active.length,
     waiting: active.filter((o) => o.status === "awaiting_executor").length,
     fresh: active.filter((o) => o.status === "new").length,

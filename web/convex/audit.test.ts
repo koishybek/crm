@@ -186,7 +186,9 @@ describe("журнал: каждое ключевое действие — ро�
     const payment = await one(() => owner.mutation(api.orders.addPayment, { id: done, amount: 30000, method: "cash" }));
     expect(by(payment)).toMatchObject({ action: "order.payment", entityId: done });
     expect(payment.meta).toMatchObject({ amount: 30000, method: "cash", status: { from: "done", to: "paid" } });
-    const refund = await one(() => owner.mutation(api.orders.changeStatus, { id: done, to: "refund", reason: "Брак работы" }));
+    // Возврат — запись с суммой, способом и причиной (а не голый статус): одна запись журнала.
+    const refund = await one(() => owner.mutation(api.finance.addRefund, { id: done, amount: 30000, method: "cash", reason: "Брак работы" }));
+    expect(by(refund)).toMatchObject({ action: "order.refund", entityId: done });
     expect(refund.summary).toContain("Брак работы");
   });
 

@@ -26,8 +26,11 @@ export async function nextNumber(ctx: MutationCtx): Promise<number> {
   return c.value + 1;
 }
 
-export async function log(ctx: MutationCtx, orderId: Id<"orders">, kind: HistoryKind, text: string, actor: Actor) {
-  await ctx.db.insert("history", { orderId, kind, text, actor, at: nowIso() });
+/** Смена статуса для истории — откуда и куда. */
+export type StatusMove = { from: OrderStatus; to: OrderStatus };
+
+export async function log(ctx: MutationCtx, orderId: Id<"orders">, kind: HistoryKind, text: string, actor: Actor, move?: StatusMove) {
+  await ctx.db.insert("history", { orderId, kind, text, actor, at: nowIso(), ...move });
 }
 
 /** Кому слать события по заказу/заявке: владельцы, операторы и руководители этого направления. */
@@ -79,7 +82,7 @@ export async function setStatus(ctx: MutationCtx, o: Doc<"orders">, to: OrderSta
   if (to === "paid") patch.paidAt = at;
   if (to === "closed") patch.closedAt = at;
   await ctx.db.patch(o._id, patch);
-  await log(ctx, o._id, "status", text ?? `Статус изменён на «${ORDER_STATUS[to].label}»`, actor);
+  await log(ctx, o._id, "status", text ?? `Статус изменён на «${ORDER_STATUS[to].label}»`, actor, { from: o.status, to });
   await refreshClient(ctx, o.clientId);
 }
 

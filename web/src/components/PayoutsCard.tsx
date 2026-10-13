@@ -1,11 +1,11 @@
-// Выплаты исполнителям (ТЗ п.5 «Dashboard: выплаты», п.17): начислено и выплачено за период,
-// кому и сколько компания должна сейчас. Только владельцу — эти суммы сервер отдаёт одному OWNER.
+// Выплаты исполнителям (ТЗ п.5 «Dashboard: выплаты», п.17): начислено за период, выплачено мастерам по датам выплат
+// (реестр «Выплаты мастерам»), кому и сколько компания должна сейчас. Только владельцу — эти суммы сервер отдаёт одному OWNER.
 import { useQuery } from "convex/react";
 import { Wallet } from "lucide-react";
 import { Link } from "react-router";
 import { api } from "../../convex/_generated/api";
 import { cn, money, plural } from "../lib/format";
-import { Avatar, Card, Loading } from "./ui";
+import { Avatar, Card, Loading, TextLink } from "./ui";
 
 const TOP = 4;
 const orders = (n: number) => `${n} ${plural(n, "заказ", "заказа", "заказов")}`;
@@ -17,7 +17,7 @@ export function PayoutsCard({ from, period, className }: { from: number; period:
   const more = d ? d.owed.executors.length - TOP : 0;
 
   return (
-    <Card icon={Wallet} title="Выплаты исполнителям" className={cn("@container", className)}>
+    <Card icon={Wallet} title="Выплаты исполнителям" action={<TextLink to="/payouts">Выплаты мастерам</TextLink>} className={cn("@container", className)}>
       {!d ? (
         <Loading className="py-10" />
       ) : (
@@ -31,11 +31,11 @@ export function PayoutsCard({ from, period, className }: { from: number; period:
             </div>
             <dl className="mt-2.5 grid grid-cols-2 gap-3 text-[13.5px]">
               <div>
-                <dt className="text-muted">Выплачено</dt>
-                <dd className="font-semibold text-ok-ink tabular-nums">{money(d.period.paid)}</dd>
+                <dt className="text-muted">Выплачено мастерам {period}</dt>
+                <dd className="font-semibold text-ok-ink tabular-nums">{money(d.paidOut.amount)}</dd>
               </div>
               <div>
-                <dt className="text-muted">Ещё не выплачено</dt>
+                <dt className="text-muted">Из начисленного не выплачено</dt>
                 <dd className={cn("font-semibold tabular-nums", d.period.unpaid > 0 ? "text-warn-ink" : "text-ink")}>{money(d.period.unpaid)}</dd>
               </div>
             </dl>

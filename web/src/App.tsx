@@ -26,6 +26,7 @@ import { WorkerError } from "./screens/worker/WorkerError";
 
 const Analytics = lazy(() => import("./screens/Analytics"));
 const AuditLog = lazy(() => import("./screens/AuditLog"));
+const Payouts = lazy(() => import("./screens/Payouts"));
 const PublicReview = lazy(() => import("./screens/PublicReview"));
 
 // Кабинет мастера — один отдельный чанк: сотрудникам он не нужен. Suspense — в WorkerShell.
@@ -105,6 +106,11 @@ const lazyAudit = (
     <AuditLog />
   </Suspense>
 );
+const lazyPayouts = (
+  <Suspense fallback={<div className="py-20 text-center text-muted">Загружаем выплаты…</div>}>
+    <Payouts />
+  </Suspense>
+);
 const lazyReview = (
   <Suspense fallback={<Splash />}>
     <PublicReview />
@@ -141,6 +147,7 @@ const router = createBrowserRouter([
     children: [
       { path: "/analytics", element: lazyAnalytics },
       { path: "/audit", element: lazyAudit },
+      { path: "/payouts", element: lazyPayouts },
       { path: "/settings", element: <Settings /> },
     ],
   },

@@ -61,7 +61,8 @@ export default function ClientDetail() {
   const orders = d!.orders;
   const active = orders.filter(isActive);
   const past = orders.filter((o) => !isActive(o));
-  const payments = orders.flatMap((o) => o.payments);
+  // Сторнированные платежи — ошибочные: в счётчик оплат клиента не входят.
+  const payments = orders.flatMap((o) => o.payments.filter((p) => !p.voidedAt));
   const totalPaid = orders.reduce((s, o) => s + paidAmount(o), 0);
   const totalDebt = orders.reduce((s, o) => s + debt(o), 0);
   const touches = d!.interactions;

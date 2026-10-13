@@ -200,7 +200,11 @@ export const KANBAN: { id: string; label: string; tone: Tone; statuses: OrderSta
   { id: "done", label: "Завершено", tone: "green", statuses: FINISHED_STATUSES },
 ];
 
-/** Какие переходы доступны сотруднику (владелец/оператор). Исполнитель ходит по своим кнопкам. */
+/**
+ * Какие переходы доступны сотруднику (владелец/оператор). Исполнитель ходит по своим кнопкам.
+ * «Выполнен» дальше сам уходит в «Ожидает оплаты» или «Оплачен» — по деньгам; «Оплачен» — только когда оплачено всё;
+ * «Закрыт» с долгом или без выплаты исполнителю — только владелец и с причиной; «Возврат» — записью с суммой (convex/finance.ts).
+ */
 export const STAFF_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   new: ["awaiting_executor", "cancelled"],
   awaiting_executor: ["new", "cancelled"],
@@ -208,8 +212,8 @@ export const STAFF_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   accepted: ["in_progress", "awaiting_executor", "cancelled"],
   in_progress: ["awaiting_client", "done", "cancelled"],
   awaiting_client: ["in_progress", "done", "cancelled"],
-  done: ["awaiting_payment", "paid", "in_progress"],
-  awaiting_payment: ["paid"],
+  done: ["awaiting_payment", "paid", "in_progress", "closed"],
+  awaiting_payment: ["paid", "in_progress", "closed"],
   paid: ["closed", "refund"],
   closed: ["refund"],
   cancelled: ["new"],

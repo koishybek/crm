@@ -13,6 +13,7 @@ import { cn, money, moneyShort, plural } from "../../lib/format";
 import { Segmented } from "../../components/ui";
 import { Empty, ListSkeleton, MUTED, ScreenTitle } from "../../components/worker/kit";
 import { DoneRow } from "../../components/worker/parts";
+import { PayoutHistory } from "../../components/worker/PayoutHistory";
 
 export function Income() {
   const data = useQuery(api.worker.mine);
@@ -79,6 +80,8 @@ export function Income() {
           )}
         </section>
       </div>
+
+      <PayoutHistory now={now} />
 
       <p className={cn("mt-4 text-[13.5px]", MUTED)}>
         Выплаты делает офис. Вопросы по деньгам —{" "}

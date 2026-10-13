@@ -148,7 +148,7 @@ async function offer(ctx: MutationCtx, o: Doc<"orders">, e: Doc<"executors">, pi
   const offered = [...(o.autoOffered ?? []), e._id];
   await ctx.db.patch(o._id, { executorId: e._id, assignedAt: at, status: "assigned", autoAssignedAt: at, autoOffered: offered, autoExhaustedAt: undefined });
   const why = autoAssignWhy(pick);
-  await log(ctx, o._id, "assigned", `AI-подбор: назначен ${shortName(e.name)} — ${why}. Ждём подтверждения ${minutes} мин`, SYSTEM);
+  await log(ctx, o._id, "assigned", `AI-подбор: назначен ${shortName(e.name)} — ${why}. Ждём подтверждения ${minutes} мин`, SYSTEM, { from: o.status, to: "assigned" });
   await audit(ctx, "Система", "order.autoAssigned", `Заказ №${o.number}: AI-подбор назначил ${shortName(e.name)} (${why})`, {
     entityId: o._id,
     meta: { executorId: e._id, attempt: offered.length, state: pick.state, load: pick.load, rating: e.rating, minutes },

@@ -1,7 +1,7 @@
 // Аналитика владельца (ТЗ п.17): деньги, стоимость привлечения, работа операторов, выплаты исполнителям.
 // Чистые функции — общие для «Аналитики», «Главной» и сервера (convex/analytics.ts), чтобы цифры совпадали везде.
 import { SOURCE_IDS } from "./catalog";
-import { isFinished, margin, payout } from "./logic";
+import { isFinished, payout, revenueOf, type RevenueLike } from "./logic";
 import type { Lead, Order, SourceId } from "./types";
 
 /** Период в миллисекундах, обе границы включительно. */
@@ -22,14 +22,44 @@ const inSpan = (iso: string | undefined, s: Span): boolean => {
  */
 export const doneWithin = <O extends Pick<Order, "status" | "doneAt">>(orders: readonly O[], s: Span): O[] => orders.filter((o) => isFinished(o) && inSpan(o.doneAt, s));
 
-type Money = Pick<Order, "clientPrice" | "payoutMode" | "payoutValue">;
+type Money = RevenueLike & Pick<Order, "payoutMode" | "payoutValue">;
 
-/** Выручка, выплаты исполнителям, маржа, число заказов и средний чек. */
+/**
+ * Выручка, выплаты исполнителям, маржа, число заказов и средний чек. Выручка — за вычетом возвратов по этим заказам
+ * (частичный возврат уменьшает выручку и маржу; заказ с полным возвратом сюда не попадает вовсе — doneWithin).
+ */
 export const sums = (orders: readonly Money[]) => {
-  const revenue = orders.reduce((s, o) => s + o.clientPrice, 0);
+  const revenue = orders.reduce((s, o) => s + revenueOf(o), 0);
   const payouts = orders.reduce((s, o) => s + payout(o), 0);
-  return { revenue, payouts, margin: orders.reduce((s, o) => s + margin(o), 0), count: orders.length, avg: orders.length ? revenue / orders.length : 0 };
+  return { revenue, payouts, margin: revenue - payouts, count: orders.length, avg: orders.length ? revenue / orders.length : 0 };
 };
+
+// ── Деньги по датам: получено от клиентов и выплачено мастерам ───────────────
+
+type CashOrder = Pick<Order, "payments" | "refunds">;
+
+/**
+ * «Получено» за период — по датам оплат, а не по дате выполнения: оплаты (без сторнированных) минус возвраты,
+ * сделанные в этом периоде.
+ */
+export function receivedWithin(orders: readonly CashOrder[], s: Span): { received: number; refunded: number; net: number } {
+  let received = 0;
+  let refunded = 0;
+  for (const o of orders) {
+    for (const p of o.payments) if (!p.voidedAt && inSpan(p.at, s)) received += p.amount;
+    for (const r of o.refunds ?? []) if (inSpan(r.at, s)) refunded += r.amount;
+  }
+  return { received, refunded, net: received - refunded };
+}
+
+/** Строка реестра выплат: дата и сумма. */
+export interface PaidOutRow {
+  at: string;
+  amount: number;
+}
+
+/** «Выплачено мастерам» за период — по датам выплат из реестра. */
+export const paidOutWithin = (rows: readonly PaidOutRow[], s: Span): number => rows.reduce((sum, r) => (inSpan(r.at, s) ? sum + r.amount : sum), 0);
 
 type LeadLike = Pick<Lead, "id" | "source" | "status" | "createdAt" | "orderId" | "operatorId">;
 type OrderLike = Pick<Order, "id" | "source" | "status" | "doneAt" | "createdAt"> & Money;

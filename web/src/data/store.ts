@@ -6,7 +6,7 @@ import { ConvexError } from "convex/values";
 import { convex, run, type Result } from "./convex";
 import { confirmUpload, mimeOf, uploadLimitError } from "./files";
 import { digits } from "../lib/format";
-import type { AiSummary, Attachment, CategoryId, Client, Executor, LeadStatus, MessageChannel, Order, OrderStatus, PaymentMethod, SourceId, Urgency } from "./types";
+import type { AiSummary, Attachment, CategoryId, Client, Executor, LeadStatus, MessageChannel, Order, OrderStatus, SourceId, Urgency } from "./types";
 
 export type { Result };
 
@@ -83,11 +83,12 @@ export const convertLead = (id: string) => run(convex.mutation(api.leads.convert
 // ── Заказы ───────────────────────────────────────────────────────────────────
 export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority"> & { requiredSkills?: string[] }) =>
   run(convex.mutation(api.orders.updateInfo, { id: oid(id), ...a }));
-export const updateFinance = (id: string, f: { clientPrice: number; payoutMode: Order["payoutMode"]; payoutValue: number; payoutPaid: boolean }) =>
+export const updateFinance = (id: string, f: { clientPrice: number; payoutMode: Order["payoutMode"]; payoutValue: number }) =>
   run(convex.mutation(api.orders.updateFinance, { id: oid(id), ...f }));
-export const addPayment = (id: string, amount: number, method: PaymentMethod) => run(convex.mutation(api.orders.addPayment, { id: oid(id), amount, method }));
 export const changeStatus = (id: string, to: OrderStatus, reason?: string) => run(convex.mutation(api.orders.changeStatus, { id: oid(id), to, reason }));
-export const assignExecutor = (id: string, executorId: string) => run(convex.mutation(api.orders.assign, { id: oid(id), executorId: eid(executorId) }));
+/** expected — каким заказ был на экране: если его успели взять или сменился статус, сервер откажет. */
+export const assignExecutor = (id: string, executorId: string, expected: Pick<Order, "status" | "executorId">) =>
+  run(convex.mutation(api.orders.assign, { id: oid(id), executorId: eid(executorId), expectedStatus: expected.status, expectedExecutorId: expected.executorId ? eid(expected.executorId) : null }));
 
 /**
  * Файл → хранилище Convex → подтверждение на сервере (тип, размер и владелец проверяет сервер, convex/files.ts).

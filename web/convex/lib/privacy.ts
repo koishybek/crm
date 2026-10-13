@@ -104,7 +104,13 @@ export async function eraseClient(ctx: MutationCtx, c: Doc<"clients">, leads: re
   for (const l of leads) await ctx.db.patch(l._id, { clientName: ANON_NAME, clientPhone: "", description: ERASED_TEXT, comment: undefined, ai: undefined });
 
   for (const o of orders) {
-    await ctx.db.patch(o._id, { clientName: ANON_NAME, clientPhone: "", address: "", description: ERASED_TEXT });
+    // Комментарий к оплате — свободный текст («платила сестра с карты…»): суммы и даты остаются, слова — нет.
+    const payments = o.payments.map((p) => {
+      const { note, ...rest } = p;
+      void note;
+      return rest;
+    });
+    await ctx.db.patch(o._id, { clientName: ANON_NAME, clientPhone: "", address: "", description: ERASED_TEXT, payments });
     for (const h of await ctx.db
       .query("history")
       .withIndex("by_order", (q) => q.eq("orderId", o._id))

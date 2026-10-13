@@ -3,17 +3,18 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { EXECUTOR, requireRole } from "./lib/access";
 import { audit, lowerFirst } from "./lib/audit";
-import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor } from "./lib/domain";
+import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor, type StatusMove } from "./lib/domain";
 import { describeForExecutor, executorThread, toExecutor, toMessage, toWorkerOrder } from "./lib/dto";
 import { fileSigner } from "./lib/files";
 import { openOrdersFor, suitableUsers } from "./lib/matching";
+import { finishWork } from "./lib/money";
 import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { availabilityNote } from "./executors";
 import { orderNotice } from "./clientNotify";
 import { contactsOpen, fitsOrder, payout } from "../src/data/logic";
-import { ACTIVE_STATUSES } from "../src/data/catalog";
+import { ACTIVE_STATUSES, ORDER_STATUS } from "../src/data/catalog";
 import { money, shortName } from "../src/lib/format";
 
 async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
@@ -134,8 +135,9 @@ export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id
   if (!ex.available) throw new ConvexError("Сначала включите приём заказов в профиле");
   const fit = fitsOrder(ex, o);
   if (!fit.fits) throw new ConvexError(`Этот заказ вам не подходит (${fit.reasons.join("; ")})`);
-  await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted" });
-  await log(ctx, orderId, "taken", "Исполнитель взял заказ из ленты", userActor(me._id));
+  // acceptedPayout — сумма, за которую мастер взялся: дальше любая её правка приходит ему уведомлением (E7).
+  await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted", acceptedPayout: payout(o) });
+  await log(ctx, orderId, "taken", "Исполнитель взял заказ из ленты", userActor(me._id), { from: o.status, to: "accepted" });
   await audit(ctx, me, "order.taken", `${shortName(ex.name)} взял заказ №${o.number} из ленты`, { entityId: orderId, meta: { executorId: ex._id } });
   await notify(ctx, await staffIds(ctx, o.category), `${shortName(ex.name)} взял заказ №${o.number}`, { link: `/orders/${orderId}`, tone: "ok", email: { kind: "order_assigned" } });
   await orderNotice(ctx, orderId);
@@ -171,11 +173,17 @@ export async function actFor(ctx: MutationCtx, userId: Id<"users">, id: Id<"orde
   if (!ex || !o || o.executorId !== ex._id) throw new ConvexError("Это не ваш заказ");
   const step = FLOW[action];
   if (!(step.from as readonly string[]).includes(o.status)) throw new ConvexError("Статус уже изменился — обновите заказ");
-  const extra: Partial<Doc<"orders">> = action === "decline" ? { executorId: undefined, assignedAt: undefined } : {};
-  await setStatus(ctx, o, step.to, userActor(me._id), step.text, extra);
-  await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})`, {
+  // Подтвердил — фиксируем выплату, на которую он согласился; отказался — заказ снова ничей.
+  const extra: Partial<Doc<"orders">> =
+    action === "decline" ? { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined } : action === "accept" ? { acceptedPayout: payout(o) } : {};
+  const actor = userActor(me._id);
+  // «Работа выполнена»: клиенту — «заказ выполнен», статус сразу по деньгам — «Ожидает оплаты» или «Оплачен».
+  let settled: StatusMove | null = null;
+  if (action === "done") settled = (await finishWork(ctx, o, actor, step.text)).settled;
+  else await setStatus(ctx, o, step.to, actor, step.text, extra);
+  await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})${settled ? `, статус «${ORDER_STATUS[settled.to].label}»` : ""}`, {
     entityId: id,
-    meta: { from: o.status, to: step.to },
+    meta: { from: o.status, to: step.to, ...(settled ? { then: settled.to } : {}) },
   });
   const tone = action === "decline" ? "warn" : action === "done" ? "ok" : "info";
   await notify(ctx, await staffIds(ctx, o.category), `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})`, { link: `/orders/${id}`, tone });
