@@ -71,6 +71,9 @@ export interface WorkerProfile {
   rating: number;
   reviewsCount: number;
   available: boolean;
+  /** «Не принимаю до …» — в это время приём включится сам. */
+  unavailableUntil?: string;
+  unavailableReason?: string;
   cooperation: Executor["cooperation"];
   joinedAt: string;
   telegram: { enabled: boolean; linked: boolean };

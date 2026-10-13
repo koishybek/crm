@@ -12,13 +12,14 @@ import { useMe } from "../data/hooks";
 import type { CategoryId, Executor } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
 import { ExecutorReviews } from "../components/ExecutorReviews";
+import { ExecutorShiftCard } from "../components/ExecutorShift";
 import { ExecutorRating } from "../components/Rating";
 import { ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { textKey } from "../data/skills";
 import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, Input, KpiCard, Loading, Menu, MenuItem, Modal, PageHeader, Select, Toggle } from "../components/ui";
 import { OrdersTable } from "./ClientDetail";
-import { date, money, phone } from "../lib/format";
+import { date, dateTime, money, phone } from "../lib/format";
 
 const firstService = (c: CategoryId) => SERVICES.find((s) => s.category === c)!.id;
 
@@ -151,6 +152,7 @@ export default function Executors() {
                     </td>
                     <td>
                       <DotBadge tone={EXEC_STATE[state].tone}>{EXEC_STATE[state].label}</DotBadge>
+                      {e.unavailableUntil && <div className="mt-1 text-[12.5px] whitespace-nowrap text-muted">до {dateTime(e.unavailableUntil)}</div>}
                     </td>
                     <td className="whitespace-nowrap">
                       <ExecutorRating e={e} count={false} size={17} />
@@ -320,6 +322,7 @@ export function ExecutorDetail() {
         <KpiCard icon={TrendingUp} tone="violet" label="Доход за 30 дней" value={money(s.incomeMonth)} />
         <KpiCard icon={Wallet} tone="amber" label="К выплате" value={money(s.toPay)} caption="выполнено, ещё не выплачено" />
       </div>
+      <ExecutorShiftCard e={e} className="mt-4" />
       <ExecutorReviews e={e} className="mt-4" />
 
       <Modal open={!!creds} onClose={() => setCreds(null)} title="Новый пароль" width={440}>

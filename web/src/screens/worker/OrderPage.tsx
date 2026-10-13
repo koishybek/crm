@@ -42,6 +42,7 @@ import { toast } from "../../data/store";
 import type { WorkerOrder } from "../../data/types";
 import { isFresh } from "../../data/workerFeed";
 import { SUPPORT_PHONE, SUPPORT_TEL, telHref } from "../../data/workerLinks";
+import { maxActiveOf } from "../../data/logic";
 import { hasSkill } from "../../data/workerMatch";
 import { clientShortName } from "../../data/workerNames";
 import type { OrderChange } from "../../data/workerSeen";
@@ -135,6 +136,8 @@ function OrderScreen({ id }: { id: string }) {
 
   const ex = mine?.executor;
   const mode: Mode = view.state === "mine" ? "mine" : "feed";
+  // Лимит заказов в работе (ТЗ п.14): на лимите взять новый нельзя — сервер откажет, экран объясняет заранее.
+  const limited = !!ex && (mine?.orders.filter(isActiveWork).length ?? 0) >= maxActiveOf(ex);
   return (
     <OrderView
       mode={mode}
@@ -145,6 +148,7 @@ function OrderScreen({ id }: { id: string }) {
       publishedAt={view.state === "available" ? view.publishedAt : undefined}
       skills={ex?.skills ?? []}
       available={ex?.available ?? true}
+      limited={limited}
       sheet={sheet}
       setSheet={setSheet}
       onBack={() => back(mode === "mine" ? "/w/my" : "/w")}
@@ -164,6 +168,8 @@ interface OrderViewProps {
   publishedAt?: string;
   skills: string[];
   available: boolean;
+  /** У мастера уже столько заказов в работе, сколько можно взять одновременно. */
+  limited: boolean;
   sheet: SheetKind | null;
   setSheet: (s: SheetKind | null) => void;
   onBack: () => void;
@@ -182,7 +188,7 @@ interface Act {
   danger?: boolean;
 }
 
-function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skills, available, sheet, setSheet, onBack, onDeclined }: OrderViewProps) {
+function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skills, available, limited, sheet, setSheet, onBack, onDeclined }: OrderViewProps) {
   const now = useNow();
   const nav = useNavigate();
   const offline = useNet((s) => s.offline);
@@ -212,7 +218,8 @@ function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skil
   let note: ReactNode = null;
 
   if (!mineMode) {
-    primary = { label: "Взять заказ", busyText: "Берём заказ…", onClick: () => setSheet("take"), soft: !available, icon: available ? undefined : Lock };
+    const locked = !available || limited;
+    primary = { label: "Взять заказ", busyText: "Берём заказ…", onClick: () => setSheet("take"), soft: locked, icon: locked ? Lock : undefined };
     secondary = [office];
   } else if (o.status === "assigned") {
     primary = { label: "Подтвердить заказ", busyText: "Отправляем…", onClick: () => void step(o.id, "accept") };
@@ -358,6 +365,7 @@ function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skil
             {primaryButton}
             {!primary && note && <p className="text-[15px] text-ink-2">{note}</p>}
             {!mineMode && !available && <p className={cn("text-[14px]", MUTED)}>Сначала включите приём заказов — переключатель вверху экрана.</p>}
+            {!mineMode && available && limited && <p className={cn("text-[14px]", MUTED)}>У вас лимит заказов в работе — сначала сдайте текущий.</p>}
             {desktopActs.map((a) =>
               a.href ? (
                 <WLinkButton key={a.key} href={a.href} icon={a.icon} full {...(a.key === "route" ? { target: "_blank", rel: "noopener noreferrer" } : {})}>
@@ -376,6 +384,7 @@ function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skil
       {/* Нижняя панель действий (телефон). */}
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-white px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] lg:hidden">
         {!mineMode && !available && <p className={cn("mb-2 text-center text-[14px]", MUTED)}>Сначала включите приём заказов</p>}
+        {!mineMode && available && limited && <p className={cn("mb-2 text-center text-[14px]", MUTED)}>Лимит заказов — сначала сдайте текущий</p>}
         <div className="flex items-stretch gap-2">
           {acts.map((a) => (
             <SquareAct key={a.key} act={a} />
@@ -385,7 +394,7 @@ function OrderView({ mode, order: o, photos, documents, notes, publishedAt, skil
       </div>
 
       {route.sheet}
-      {sheet === "take" && <TakeSheet order={o} gone={mode !== "feed"} available={available} onClose={() => setSheet(null)} onTaken={() => setSheet(null)} />}
+      {sheet === "take" && <TakeSheet order={o} gone={mode !== "feed"} available={available} limited={limited} onClose={() => setSheet(null)} onTaken={() => setSheet(null)} />}
       {sheet === "decline" && <DeclineSheet order={o} onClose={() => setSheet(null)} onDeclined={onDeclined} />}
       {sheet === "pause" && <PauseSheet order={o} onClose={() => setSheet(null)} />}
       {sheet === "done" && <DoneSheet order={o} onClose={() => setSheet(null)} />}

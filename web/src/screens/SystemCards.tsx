@@ -12,6 +12,7 @@ import { backupNow, saveAutoAssign } from "../data/systemActions";
 import { fileSize, HEALTH_STATE, systemViews, type HealthState, type SubsystemView } from "../data/systemHealth";
 import { Badge, Button, Card, DotBadge, Input, Loading, Toggle } from "../components/ui";
 import { cn, dateTime, plural } from "../lib/format";
+import { EscalationsCard } from "./EscalationsCard";
 
 /** Только владелец: остальным эти карточки не показываем (и сервер им ничего не отдаст). */
 export function SystemCards() {
@@ -23,6 +24,7 @@ export function SystemCards() {
       <div className="flex min-w-0 flex-col gap-4">
         <BackupsCard />
         <AutoAssignCard />
+        <EscalationsCard />
       </div>
     </div>
   );

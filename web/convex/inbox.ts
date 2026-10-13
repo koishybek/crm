@@ -18,10 +18,10 @@ import { markChannelRead, replyBlock, replyMaxText, sendToChannel, ChannelError 
 import { contactPhone, findKzPhone, isClientPhone } from "./lib/phone";
 import { hitLimit } from "./lib/rateLimit";
 import { canExtract, extract, toSummary, type CatalogHint } from "./ai";
-import { aiSummary, channel, messageKind } from "./schema";
+import { aiDraft, aiSummary, channel, messageKind } from "./schema";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { phone as fmtPhone } from "../src/lib/format";
-import type { AiDraft, AiSummary, Channel, Conversation, ConversationDetail, ConversationDraft, ConversationMessage, MessageKind } from "../src/data/types";
+import type { AiDraft, AiSummary, Channel, Conversation, ConversationDetail, ConversationDraft, ConversationMessage, LeadOrigin, MessageKind } from "../src/data/types";
 
 const MAX_TEXT = 4000;
 const PREVIEW = 160;
@@ -473,14 +473,8 @@ export const _autoLeadJob = internalQuery({
   },
 });
 
-const draftValidator = v.object({
-  serviceId: v.optional(v.string()),
-  city: v.optional(v.string()),
-  address: v.optional(v.string()),
-  urgency: v.optional(v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"))),
-  clientName: v.optional(v.string()),
-  description: v.optional(v.string()),
-});
+/** Кто завёл заявку из диалога канала (E12): Telegram — бот, остальные — сам канал. */
+const CHANNEL_ORIGIN = { telegram: "bot", whatsapp: "whatsapp", olx: "olx", site: "site" } as const satisfies Record<Channel, LeadOrigin>;
 
 const errText = (e: unknown) => (e instanceof ConvexError && typeof e.data === "string" ? e.data : e instanceof Error ? e.name : "ошибка");
 
@@ -506,7 +500,7 @@ export const _autoLead = internalAction({
 });
 
 export const _autoLeadCreate = internalMutation({
-  args: { conversationId: v.id("conversations"), messageId: v.id("conversationMessages"), text: v.string(), ai: v.optional(aiSummary), draft: v.optional(draftValidator) },
+  args: { conversationId: v.id("conversations"), messageId: v.id("conversationMessages"), text: v.string(), ai: v.optional(aiSummary), draft: v.optional(aiDraft) },
   handler: async (ctx, a): Promise<Id<"leads"> | null> => {
     const c = await ctx.db.get(a.conversationId);
     // Пока шёл разбор, заявку мог создать оператор или другой разбор — проверяем ещё раз в транзакции.
@@ -514,12 +508,15 @@ export const _autoLeadCreate = internalMutation({
     const d = a.draft ?? {};
     const res = await intakeLead(ctx, {
       source: c.channel,
+      origin: CHANNEL_ORIGIN[c.channel],
       phone: c.contactPhone,
       name: d.clientName ?? c.contactName,
       fallbackName: `Клиент ${CHANNEL_FROM[c.channel]}`,
       serviceId: d.serviceId,
       city: d.city,
       address: d.address,
+      preferredTime: d.when,
+      budget: d.budget,
       urgency: d.urgency,
       description: d.description || a.text,
       comment: d.description ? `Сообщение клиента: ${a.text.slice(0, 1500)}` : undefined,
@@ -658,6 +655,9 @@ export const reply = mutation({
     const at = nowIso();
     const messageId = await ctx.db.insert("conversationMessages", { conversationId, direction: "out", kind: "text", text: body, at, authorId: me._id, status: "sending" });
     await ctx.db.patch(conversationId, { lastMessageAt: at, lastText: preview(body), lastDirection: "out", unread: 0, status: "open" });
+    // Ответ клиенту — первое действие по заявке из этого диалога: «заявка без ответа» по ней больше не эскалируется.
+    const lead = c.leadId ? await ctx.db.get(c.leadId) : null;
+    if (lead && !lead.firstActionAt) await ctx.db.patch(lead._id, { firstActionAt: at });
     await ctx.scheduler.runAfter(0, internal.inbox._deliver, { messageId });
     await audit(ctx, me, "conversation.reply", `Ответ клиенту ${CHANNEL_IN[c.channel]}: ${who(c)}`, { entityId: conversationId, meta: { channel: c.channel, length: body.length } });
     return { messageId };

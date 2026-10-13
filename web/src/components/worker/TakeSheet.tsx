@@ -1,5 +1,5 @@
 // «Взять заказ №…?» — шторка подтверждения. Исход решает сервер: успел, не успел (взял другой мастер),
-// приём выключен (включим и возьмём), заказ не подходит, нет связи. Данные заказа живые: если выплата
+// приём выключен (включим и возьмём), лимит заказов в работе, заказ не подходит, нет связи. Данные заказа живые: если выплата
 // изменилась, пока шторка открыта, показываем «было → стало» и на секунду блокируем кнопку.
 import { CircleCheck, CircleX, Lock, TriangleAlert } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -16,7 +16,7 @@ import { MUTED, WButton, busyLabel, useBusy } from "./kit";
 import { useNet } from "./net";
 import { Sheet } from "./Sheet";
 
-type Phase = "ask" | "ok" | "taken" | "not_fit";
+type Phase = "ask" | "ok" | "taken" | "not_fit" | "limit";
 
 export type TakeOrder = Pick<WorkerOrder, "id" | "number" | "serviceId" | "city" | "deadline" | "payout" | "priority">;
 
@@ -26,16 +26,19 @@ interface TakeSheetProps {
   gone: boolean;
   /** Мастер принимает заказы. */
   available: boolean;
+  /** У мастера уже столько заказов в работе, сколько можно взять одновременно (ТЗ п.14). */
+  limited?: boolean;
   onClose: () => void;
   /** Заказ стал вашим — перейти к нему. */
   onTaken: (id: string) => void;
 }
 
-export function TakeSheet({ order, gone, available, onClose, onTaken }: TakeSheetProps) {
+export function TakeSheet({ order, gone, available, limited, onClose, onTaken }: TakeSheetProps) {
   const now = useNow();
   const offline = useNet((s) => s.offline);
   const { busy, slow, run } = useBusy();
-  const [phase, setPhase] = useState<Phase>("ask");
+  // На лимите и на смене — сразу объясняем, почему взять нельзя (сервер всё равно откажет).
+  const [phase, setPhase] = useState<Phase>(limited && available ? "limit" : "ask");
   const [error, setError] = useState<string | null>(null);
   // Сервер сказал «приём выключен», хотя экран ещё не обновился, — тоже предлагаем включить.
   const [shiftOff, setShiftOff] = useState(false);
@@ -83,6 +86,7 @@ export function TakeSheet({ order, gone, available, onClose, onTaken }: TakeShee
         setPhase("ok");
       } else if (kind === "taken") setPhase("taken");
       else if (kind === "not_fit") setPhase("not_fit");
+      else if (kind === "limit") setPhase("limit");
       else if (kind === "off_shift") {
         setShiftOff(true);
         setError("Сейчас приём заказов выключен. Нажмите ещё раз — включим приём и возьмём заказ.");
@@ -108,6 +112,22 @@ export function TakeSheet({ order, gone, available, onClose, onTaken }: TakeShee
           <CircleX size={44} className="text-[#6b675f]" aria-hidden />
           <p className="mt-3 text-[16px] text-ink-2">{phase === "taken" ? "Этот заказ уже взял другой мастер." : "Заказ больше недоступен."}</p>
         </div>
+      </Sheet>
+    );
+
+  if (phase === "limit")
+    return (
+      <Sheet
+        open
+        onClose={onClose}
+        title="Лимит заказов"
+        footer={
+          <WButton size="lg" full onClick={onClose}>
+            Понятно
+          </WButton>
+        }
+      >
+        <p className="text-[16px] text-ink-2">У вас уже столько заказов в работе, сколько можно держать одновременно. Сдайте текущий заказ — и сможете взять новый. Если нужно больше, попросите офис увеличить лимит.</p>
       </Sheet>
     );
 

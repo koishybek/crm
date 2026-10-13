@@ -15,8 +15,8 @@ import { hitLimit } from "./lib/rateLimit";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
-import { aiSummary } from "./schema";
-import { CITIES } from "../src/data/catalog";
+import { aiDraft, aiSummary } from "./schema";
+import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
@@ -118,8 +118,9 @@ export const reprocess = mutation({
 });
 
 /**
- * Заявка создана из звонка вручную — связываем. Связь одна на звонок и одна на заявку:
- * чужую не перезаписываем, иначе звонок «переехал» бы к другой заявке без следа.
+ * Заявка создана из звонка вручную — связываем (E25). Связь одна на звонок и одна на заявку: чужую не перезаписываем,
+ * иначе звонок «переехал» бы к другой заявке без следа. Звонок клиента, которого система уже узнала, к заявке другого
+ * клиента не привязываем.
  */
 export const linkLead = mutation({
   args: { id: v.id("calls"), leadId: v.id("leads") },
@@ -132,6 +133,7 @@ export const linkLead = mutation({
     if (c.leadId === leadId && lead.callId === id) return;
     if (c.leadId && c.leadId !== leadId) throw new ConvexError("Звонок уже привязан к другой заявке");
     if (lead.callId && lead.callId !== id) throw new ConvexError("К заявке уже привязан другой звонок");
+    if (c.clientId && c.clientId !== lead.clientId) throw new ConvexError("Это звонок другого клиента — привяжите его к заявке этого клиента");
     await ctx.db.patch(id, { leadId, ...(c.clientId ? {} : { clientId: lead.clientId, clientName: lead.clientName }) });
     await ctx.db.patch(leadId, { callId: id });
     await audit(ctx, me, "call.linked", `Звонок ${almatyStamp(c.startedAt)} привязан к заявке №${lead.number}`, { entityId: id, meta: { leadId } });
@@ -145,11 +147,11 @@ export const _get = internalQuery({
   handler: async (ctx, { id }): Promise<Doc<"calls"> | null> => ctx.db.get(id),
 });
 
-async function ownerId(ctx: QueryCtx): Promise<Id<"users"> | null> {
-  return (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).first())?._id ?? null;
-}
-
-/** Заявка из звонка по черновику AI. Без валидного номера или услуги — не создаём (оператор доделает руками). */
+/**
+ * Заявка из звонка по черновику AI. Без валидного номера или услуги — не создаём (оператор доделает руками).
+ * Ведёт её тот, кто принял (или загрузил) звонок: он уже говорил с клиентом. Звонок без оператора — заявка ничья,
+ * пока её не возьмут в работу (E12): на владельца её не записываем.
+ */
 async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"leads"> | null> {
   const p = clientNumber(c);
   const serviceId = c.draft?.serviceId;
@@ -157,15 +159,13 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   const cat = await loadCatalog(ctx);
   const svc = cat.services.find((s) => s.id === serviceId);
   if (!svc) return null;
-  const city = c.draft?.city && CITIES.some((x) => x === c.draft!.city) ? c.draft.city : (c.draft?.city ?? env("COMPANY_CITY") ?? "Алматы");
+  const city = normalizeCity(c.draft?.city) || normalizeCity(env("COMPANY_CITY")) || "Алматы";
   let client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first();
   const newClient = !client;
   if (!client) {
     const id = await insertClient(ctx, { name: c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source: "phone" });
     client = (await ctx.db.get(id))!;
   }
-  const operatorId = c.operatorId ?? (await ownerId(ctx));
-  if (!operatorId) return null;
   const at = nowIso();
   const number = await nextNumber(ctx);
   const leadId = await ctx.db.insert("leads", {
@@ -180,12 +180,17 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
     description: c.draft?.description ?? c.ai?.summary ?? "Звонок клиента",
     urgency: c.draft?.urgency ?? "normal",
     status: "new",
-    operatorId,
+    operatorId: c.operatorId,
+    origin: "ai",
+    // Оператор звонка уже говорил с клиентом — первое действие было; без оператора заявку ещё никто не видел.
+    firstActionAt: c.operatorId ? at : undefined,
     createdAt: at,
-    // Адрес — не в описание (оно уходит мастерам в ленту, аудит H-3), а в служебный комментарий заявки.
-    comment: c.draft?.address ? `Адрес из звонка: ${c.draft.address.slice(0, 300)}` : undefined,
     ai: c.ai,
     callId: c._id,
+    // Адрес — не в описание (оно уходит мастерам в ленту, аудит H-3), а полем заявки: в заказ он перейдёт сам.
+    address: c.draft?.address?.slice(0, 300),
+    preferredTime: c.draft?.when?.slice(0, 120),
+    budget: c.draft?.budget,
   });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "call", channel: "phone", title: "Звонок · разобран AI", text: c.ai?.summary ?? "", at: c.startedAt });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: "phone", title: "Новая заявка", text: svc.label, at, leadId });
@@ -207,16 +212,7 @@ export const _saveAi = internalMutation({
     recordingId: v.optional(v.id("_storage")),
     transcript: v.optional(v.string()),
     ai: v.optional(aiSummary),
-    draft: v.optional(
-      v.object({
-        serviceId: v.optional(v.string()),
-        city: v.optional(v.string()),
-        address: v.optional(v.string()),
-        urgency: v.optional(v.union(v.literal("normal"), v.literal("high"), v.literal("urgent"))),
-        clientName: v.optional(v.string()),
-        description: v.optional(v.string()),
-      }),
-    ),
+    draft: v.optional(aiDraft),
     error: v.optional(v.string()),
     autoLead: v.optional(v.boolean()),
   },

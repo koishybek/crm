@@ -101,7 +101,7 @@ export async function eraseClient(ctx: MutationCtx, c: Doc<"clients">, leads: re
     anonymizedAt: nowIso(),
   });
 
-  for (const l of leads) await ctx.db.patch(l._id, { clientName: ANON_NAME, clientPhone: "", description: ERASED_TEXT, comment: undefined, ai: undefined });
+  for (const l of leads) await ctx.db.patch(l._id, { clientName: ANON_NAME, clientPhone: "", description: ERASED_TEXT, comment: undefined, ai: undefined, address: undefined, preferredTime: undefined });
 
   for (const o of orders) {
     await ctx.db.patch(o._id, { clientName: ANON_NAME, clientPhone: "", address: "", description: ERASED_TEXT });

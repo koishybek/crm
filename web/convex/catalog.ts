@@ -1,14 +1,16 @@
 // Справочник направлений и услуг. Пустая база → значения по умолчанию из src/data/catalog.ts (цены и доли — только
 // на сервере, lib/defaultPrices.ts); первая правка владельца переносит их в базу, дальше источник истины — таблицы.
 import { ConvexError, v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { currentUser, OWNER, requireRole } from "./lib/access";
+import { currentUser, OWNER, requireRole, type Me } from "./lib/access";
 import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
 import { withDefaultPrices } from "./lib/defaultPrices";
+import { log, userActor } from "./lib/domain";
 import { cleanMoney, cleanText } from "./lib/limits";
-import { CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type ServiceInfo, type Tone } from "../src/data/catalog";
-import { normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY } from "../src/data/skills";
+import { ACTIVE_STATUSES, CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type ServiceInfo, type Tone } from "../src/data/catalog";
+import { normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money } from "../src/lib/format";
 
 /**
@@ -146,6 +148,33 @@ export const saveCategory = mutation({
   },
 });
 
+/**
+ * Услугу перенесли в другое направление (E10): её активные заказы переходят вместе с ней — иначе они пропали бы
+ * из лент подходящих мастеров и из области руководителя нового направления. Требуемые навыки остаются только те,
+ * что есть в новом направлении. Заказам в ленте — «Новый заказ» мастерам нового направления (фоном).
+ */
+async function moveServiceOrders(ctx: MutationCtx, me: Me, serviceKey: string, from: string, to: Doc<"categories">): Promise<number> {
+  const fromLabel = (await ctx.db.query("categories").withIndex("by_key", (q) => q.eq("key", from)).unique())?.label ?? from;
+  const skills = skillsOf(to).map(textKey);
+  const inFeed: Id<"orders">[] = [];
+  let moved = 0;
+  for (const status of ACTIVE_STATUSES) {
+    for (const o of await ctx.db
+      .query("orders")
+      .withIndex("by_status", (q) => q.eq("status", status))
+      .collect()) {
+      if (o.serviceId !== serviceKey || o.category === to.key) continue;
+      const kept = (o.requiredSkills ?? []).filter((s) => skills.includes(textKey(s)));
+      await ctx.db.patch(o._id, { category: to.key, requiredSkills: kept.length ? kept : undefined });
+      await log(ctx, o._id, "edited", `Направление заказа: ${quote(fromLabel)} → ${quote(to.label)} — услугу перенесли в справочнике`, userActor(me._id));
+      if (o.status === "awaiting_executor" && !o.executorId) inFeed.push(o._id);
+      moved++;
+    }
+  }
+  if (inFeed.length) await ctx.scheduler.runAfter(0, internal.worker._announceMoved, { ids: inFeed, fromCategory: from });
+  return moved;
+}
+
 export const saveService = mutation({
   args: {
     id: v.optional(v.string()),
@@ -198,7 +227,11 @@ export const saveService = mutation({
       if (fields.active !== existing.active) log.add(fields.active ? "снова показывается в формах" : "скрыта из форм", "active", { from: existing.active, to: fields.active });
       if (log.empty) return existing.key;
       await ctx.db.patch(existing._id, fields);
-      await audit(ctx, me, "catalog.service", `Услуга «${fields.label}»: ${log.text()}`, { entityId: existing.key, meta: { changes: log.changes } });
+      const moved = fields.category !== existing.category ? await moveServiceOrders(ctx, me, existing.key, existing.category, category) : 0;
+      await audit(ctx, me, "catalog.service", `Услуга «${fields.label}»: ${log.text()}${moved ? `; активных заказов перенесено: ${moved}` : ""}`, {
+        entityId: existing.key,
+        meta: { changes: log.changes, ...(moved ? { ordersMoved: moved } : {}) },
+      });
       return existing.key;
     }
     const k = key("s");

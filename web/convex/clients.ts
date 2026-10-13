@@ -5,11 +5,12 @@ import { OWNER, requireRole, STAFF } from "./lib/access";
 import { audit, ChangeLog, listDiff, listDiffText, maskPhone, quote } from "./lib/audit";
 import { nowIso, TENANT } from "./lib/domain";
 import { toClient, toInteraction, toLead, toNote, toOrder } from "./lib/dto";
-import { cleanText } from "./lib/limits";
+import { cleanCity, cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
 import { assertCanErase, eraseClient } from "./lib/privacy";
 import { source } from "./schema";
 import { SOURCES } from "../src/data/catalog";
+import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
 
 const LIST_LIMIT = 1500;
@@ -144,7 +145,8 @@ export async function insertClient(ctx: MutationCtx, a: { name: string; kind?: D
     kind: a.kind ?? (/^(ТОО|ИП|АО|ЖК|ОСИ|КСК)\b/.test(name) ? "company" : "person"),
     phone: a.phone,
     email: a.email?.trim().slice(0, MAX.email) || undefined,
-    city: a.city.trim().slice(0, MAX.city),
+    // Город — в едином написании (E11): клиенты приходят и из каналов, где город — свободная строка.
+    city: (normalizeCity(a.city) || a.city.trim()).slice(0, MAX.city),
     address: a.address?.trim().slice(0, MAX.address) || undefined,
     source: a.source,
     preferredChannel: a.preferredChannel,
@@ -163,8 +165,7 @@ export const create = mutation({
     const me = await requireRole(ctx, STAFF);
     const name = cleanText(a.name, MAX.name, "Имя");
     if (!name) throw new ConvexError("Укажите имя или название компании");
-    const city = cleanText(a.city, MAX.city, "Город");
-    if (!city) throw new ConvexError("Укажите город");
+    const city = cleanCity(a.city);
     const phone = cleanPhone(a.phone);
     const dup = await ctx.db
       .query("clients")
@@ -200,8 +201,7 @@ export const update = mutation({
         .first();
       if (dup && dup._id !== id) throw new ConvexError("Клиент с таким телефоном уже есть");
     }
-    const city = cleanText(a.city, MAX.city, "Город");
-    if (!city) throw new ConvexError("Укажите город");
+    const city = cleanCity(a.city);
     const next = {
       name: cleanText(a.name, MAX.name, "Имя") || c.name,
       kind: a.kind ?? c.kind,

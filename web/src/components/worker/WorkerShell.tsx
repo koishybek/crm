@@ -51,20 +51,21 @@ interface Badges {
 }
 
 /** Счётчики вкладок: новые заказы ленты, заказы, которые ждут действия, неподключённый Telegram. */
-function useBadges(): { badges: Badges; available: boolean | undefined } {
+function useBadges(): { badges: Badges; available: boolean | undefined; until: string | undefined } {
   const now = useNow(60_000);
   const mine = useQuery(api.worker.mine);
   const extras = useFileQuery(api.executorApp.feedExtras, {});
   const tg = useQuery(api.telegram.status);
   const seenAt = useWorkerPrefs((s) => s.feedSeenAt);
   const available = mine?.executor.available;
+  const until = mine?.executor.unavailableUntil;
   const orders = mine?.orders;
   // С выключенным приёмом заказы взять нельзя — не зовём в ленту счётчиком.
   const feed = useMemo(() => (extras && available ? countUnseen(extras, seenAt, now) : 0), [extras, available, seenAt, now]);
   const my = useMemo(() => (orders ? needsAction(orders, now) : 0), [orders, now]);
   const profile = !!tg?.enabled && !tg.linked;
   const badges = useMemo(() => ({ feed, my, profile }), [feed, my, profile]);
-  return { available, badges };
+  return { available, until, badges };
 }
 
 function badgeLabel(tab: Tab, b: Badges): string {
@@ -149,7 +150,7 @@ function SideBar({ me, badges }: { me: User; badges: Badges }) {
 
 export function WorkerShell({ me, children }: { me: User; children?: ReactNode }) {
   const orderRoute = useMatch("/w/orders/:id") !== null;
-  const { badges, available } = useBadges();
+  const { badges, available, until } = useBadges();
   const countVisit = useWorkerPrefs((s) => s.countVisit);
   // Открытия кабинета: подсказку об установке на телефон показываем не с первого захода.
   useEffect(() => countVisit(), [countVisit]);
@@ -166,7 +167,7 @@ export function WorkerShell({ me, children }: { me: User; children?: ReactNode }
               <Link to="/w" aria-label="Заказы" className="inline-flex h-12 w-12 shrink-0 items-center justify-center lg:hidden">
                 <LogoMark size={30} />
               </Link>
-              {available !== undefined && <AvailabilityPill available={available} />}
+              {available !== undefined && <AvailabilityPill available={available} until={until} />}
               <div className="flex-1" />
               <WorkerBell />
               <Link to="/w/profile" aria-label="Профиль" className="hidden h-12 w-12 items-center justify-center rounded-full hover:bg-[#f4f2ec] lg:inline-flex">

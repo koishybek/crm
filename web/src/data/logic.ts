@@ -7,7 +7,9 @@ import {
   WORK_STATUSES,
   type Tone,
 } from "./catalog";
+import { cityKey } from "./cities";
 import { textKey } from "./skills";
+import { dateAlmaty, timeAlmaty } from "./workerTime";
 import type { Client, DB, Executor, Lead, Order, OrderStatus, User } from "./types";
 
 export const payout = (o: Pick<Order, "payoutMode" | "payoutValue" | "clientPrice">) =>
@@ -98,8 +100,12 @@ export const executorStats = (e: Executor, orders: Order[], now = Date.now()) =>
 
 // ── Подбор исполнителя (ТЗ п.11, п.12) ──────────────────────────────────────
 
+/** Сколько заказов в работе мастер держит одновременно, если владелец не задал ему другое число (ТЗ п.14, E9). */
+export const DEFAULT_MAX_ACTIVE = 3;
+export const maxActiveOf = (e: Pick<Executor, "maxActiveOrders">): number => e.maxActiveOrders ?? DEFAULT_MAX_ACTIVE;
+
 /** Что нужно знать о мастере для подбора: и документ базы, и DTO подходят. */
-export type FitExecutor = Pick<Executor, "available" | "city" | "categories" | "skills">;
+export type FitExecutor = Pick<Executor, "available" | "city" | "categories" | "skills"> & Partial<Pick<Executor, "maxActiveOrders" | "unavailableUntil">>;
 /** Что нужно знать о заказе для подбора. */
 export type FitOrder = Pick<Order, "category" | "city"> & { requiredSkills?: readonly string[] };
 
@@ -115,13 +121,16 @@ export interface Fit {
 
 /**
  * Единственное правило «заказ подходит мастеру»: лента, уведомление «Новый заказ», «Взять заказ»
- * и подбор при ручном назначении считают одинаково. Мастер на смене, город тот же,
- * направление заказа — его, и все требуемые навыки у него есть (сравнение без учёта регистра и пробелов).
+ * и подбор при ручном назначении считают одинаково. Мастер на смене (недоступность «до …» — тоже не на смене),
+ * город тот же (в любом написании: «г. Алматы» = «Алматы»), направление заказа — его, все требуемые навыки
+ * у него есть (сравнение без учёта регистра и пробелов). load — сколько заказов у мастера уже в работе: на лимите
+ * заказ ему не подходит; не передан — лимит не проверяем (лента показывает работу и мастеру на лимите).
  */
-export function fitsOrder(e: FitExecutor, o: FitOrder): Fit {
+export function fitsOrder(e: FitExecutor, o: FitOrder, load?: number): Fit {
   const reasons: string[] = [];
-  if (!e.available) reasons.push("выходной");
-  if (textKey(e.city) !== textKey(o.city)) reasons.push("другой город");
+  if (!e.available) reasons.push(e.unavailableUntil ? `недоступен до ${dateAlmaty(e.unavailableUntil)}, ${timeAlmaty(e.unavailableUntil)}` : "выходной");
+  if (load !== undefined && load >= maxActiveOf(e)) reasons.push(`лимит заказов: в работе ${load} из ${maxActiveOf(e)}`);
+  if (cityKey(e.city) !== cityKey(o.city)) reasons.push("другой город");
   if (!e.categories.includes(o.category)) reasons.push("другая специализация");
   const own = new Set(e.skills.map(textKey));
   const required = o.requiredSkills ?? [];
@@ -169,8 +178,8 @@ export interface Candidate {
 export function rankExecutors(o: FitOrder, executors: Executor[], orders: Load[]): Candidate[] {
   return executors
     .map((e): Candidate => {
-      const fit = fitsOrder(e, o);
       const load = orders.filter((x) => x.executorId === e.id && isInWork(x)).length;
+      const fit = fitsOrder(e, o, load);
       return { e, state: executorState(e, orders), load, fits: fit.fits, reasons: fit.reasons, matched: fit.matched };
     })
     .sort(

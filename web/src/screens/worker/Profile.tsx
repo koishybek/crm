@@ -76,7 +76,7 @@ export function Profile() {
         </div>
       </section>
 
-      <AvailabilitySwitch available={p.available} />
+      <AvailabilitySwitch available={p.available} until={p.unavailableUntil} reason={p.unavailableReason} />
 
       <Section title="Рейтинг">
         {p.reviewsCount > 0 ? (

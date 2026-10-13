@@ -20,6 +20,7 @@ const healthKey = v.union(
   v.literal("api"),
   v.literal("backup"),
   v.literal("reminders"),
+  v.literal("escalations"),
 );
 
 /** Для actions (у них нет ctx.db): отметить успех или ошибку подсистемы. */
@@ -82,6 +83,7 @@ export const overview = query({
     return {
       subsystems: [
         sub("reminders", true),
+        sub("escalations", true),
         sub("backup", true),
         sub("ai", canExtract(), {
           hint: "Не заданы ключи AI: LLM_API_KEY или AI_URL + AI_SECRET",

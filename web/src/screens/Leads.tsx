@@ -1,9 +1,11 @@
-import { CalendarDays, Ellipsis, FileText, Filter, MessageCircle, Phone, Users, ArrowRight, Ban, Inbox } from "lucide-react";
+import { CalendarDays, Ellipsis, FileText, Filter, Hand, MessageCircle, Phone, Users, ArrowRight, Ban, Inbox } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { SOURCES, SOURCE_IDS, serviceById } from "../data/catalog";
 import { useNow, useUi } from "../data/hooks";
 import { leadBadge, leadBucket, type LeadBucket } from "../data/logic";
+import { awaitsOperator } from "../data/leadRules";
+import { takeLead } from "../data/operationsActions";
 import { trend } from "../data/metrics";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -16,6 +18,8 @@ import { cn, dayDiff, phone, when } from "../lib/format";
 type Period = "today" | "yesterday" | "7d" | "30d" | "all";
 const PERIOD_LABEL: Record<Period, string> = { today: "Сегодня", yesterday: "Вчера", "7d": "Последние 7 дней", "30d": "Последние 30 дней", all: "За всё время" };
 const PER_PAGE = 10;
+/** Значение фильтра «Ответственный» для заявок, которые никто не взял в работу. */
+const NO_OPERATOR = "none";
 
 const TABS: { id: LeadBucket | "all"; label: string }[] = [
   { id: "all", label: "Все" },
@@ -67,7 +71,8 @@ export default function Leads() {
   const base = useMemo(
     () =>
       db.leads
-        .filter((l) => inPeriod(l.createdAt) && (!source || l.source === source) && (!operator || l.operatorId === operator))
+        // «Не взяты в работу» — заявки из каналов, которые ещё никто не ведёт (E12).
+        .filter((l) => inPeriod(l.createdAt) && (!source || l.source === source) && (!operator || (operator === NO_OPERATOR ? !l.operatorId : l.operatorId === operator)))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [db.leads, period, source, operator, now],
   );
@@ -145,6 +150,7 @@ export default function Leads() {
             <div className="mb-2 text-[13.5px] font-medium text-ink-2">Ответственный</div>
             <Select value={operator} onChange={(e) => setOperator(e.target.value)}>
               <option value="">Все операторы</option>
+              <option value={NO_OPERATOR}>Не взяты в работу</option>
               {operators.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
@@ -212,11 +218,17 @@ export default function Leads() {
                           <Badge tone={b.tone}>{b.label}</Badge>
                         </td>
                         <td>
-                          {op && (
+                          {op ? (
                             <span className="flex items-center gap-2">
                               <Avatar name={op.name} size={28} variant="person" />
                               <span className="text-ink-2">{op.name.split(" ")[0]}</span>
                             </span>
+                          ) : (
+                            awaitsOperator(l) && (
+                              <Badge tone="amber" size="sm">
+                                ждёт оператора
+                              </Badge>
+                            )
                           )}
                         </td>
                         <td className={cn("whitespace-nowrap", dayDiff(new Date(l.createdAt), new Date(now)) === 0 ? "text-ink-2" : "text-muted")}>{when(l.createdAt, new Date(now))}</td>
@@ -238,6 +250,11 @@ export default function Leads() {
                             >
                               {(close) => (
                                 <>
+                                  {awaitsOperator(l) && (
+                                    <MenuItem icon={Hand} onClick={async () => (close(), report(await takeLead(l.id), `Заявка №${l.number} в работе`))}>
+                                      Взять в работу
+                                    </MenuItem>
+                                  )}
                                   {order ? (
                                     <MenuItem icon={ArrowRight} onClick={() => (close(), nav(`/orders/${order.id}`))}>
                                       Открыть заказ №{order.number}

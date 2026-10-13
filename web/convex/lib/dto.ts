@@ -44,6 +44,9 @@ export const toExecutor = (e: Doc<"executors">): Executor => ({
   categories: e.categories,
   skills: e.skills,
   available: e.available,
+  unavailableUntil: e.unavailableUntil,
+  unavailableReason: e.unavailableReason,
+  maxActiveOrders: e.maxActiveOrders,
   rating: e.rating,
   reviews: e.reviews,
   cooperation: e.cooperation,
@@ -84,13 +87,19 @@ export const toLead = (l: Doc<"leads">): Lead => ({
   description: l.description,
   urgency: l.urgency,
   status: l.status,
-  operatorId: l.operatorId,
+  // Заявку из канала ещё никто не взял в работу — пустая строка (тип фронта: Lead.operatorId).
+  operatorId: l.operatorId ?? "",
+  origin: l.origin,
+  firstActionAt: l.firstActionAt,
   createdAt: l.createdAt,
   orderId: l.orderId,
   comment: l.comment,
   rejectReason: l.rejectReason,
   ai: l.ai,
   callId: l.callId,
+  address: l.address,
+  preferredTime: l.preferredTime,
+  budget: l.budget,
 });
 
 type StoredFile = Doc<"orders">["files"][number];

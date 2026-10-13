@@ -136,6 +136,7 @@ export const _createLead = internalMutation({
     }
     const res = await intakeLead(ctx, {
       source: a.source,
+      origin: "api",
       phone: a.phone,
       name: a.name,
       fallbackName: "Клиент (API)",

@@ -35,7 +35,7 @@ import { isActiveWork } from "../../data/workerStats";
 import { isOverdueWork, sortActive } from "../../data/workerStatus";
 import { dueLabel } from "../../data/workerTime";
 import { cn, plural } from "../../lib/format";
-import { OffShiftCard } from "../../components/worker/Availability";
+import { LimitCard, OffShiftCard } from "../../components/worker/Availability";
 import { FeedHint } from "../../components/worker/FeedHints";
 import { Chip, Empty, ListSkeleton, MUTED, ScreenTitle, WButton, WLinkButton } from "../../components/worker/kit";
 import { useNet } from "../../components/worker/net";
@@ -142,7 +142,9 @@ export function Feed() {
 
   if (data === undefined) return <ListSkeleton />;
   const ex = data.executor;
-  const mode: TakeMode = offline ? "offline" : ex.available ? "ready" : "off_shift";
+  // Лимит заказов в работе (ТЗ п.14): ленту видно, но взять новый заказ можно, когда сдадите текущий.
+  const atLimit = data.load.active >= data.load.max;
+  const mode: TakeMode = offline ? "offline" : !ex.available ? "off_shift" : atLimit ? "limit" : "ready";
   const cats = ex.categories;
   const subtitle = [ex.city, cats.map((c) => categoryById(c).label).join(", ")].filter(Boolean).join(" · ");
 
@@ -151,10 +153,11 @@ export function Feed() {
       <ScreenTitle title="Заказы" subtitle={subtitle} />
 
       <div className="flex flex-col gap-3">
-        {!ex.available && <OffShiftCard />}
+        {!ex.available && <OffShiftCard until={ex.unavailableUntil} reason={ex.unavailableReason} />}
+        {ex.available && atLimit && <LimitCard active={data.load.active} max={data.load.max} />}
         <ActiveStrip orders={mine?.orders} now={now} />
-        {/* Подсказки (Telegram, «Как брать заказы», установка) — одна за раз и не поверх карточки «приём выключен». */}
-        {ex.available && <FeedHint hasOrders={items.length > 0} ownOrders={mine?.orders.length} now={now} />}
+        {/* Подсказки (Telegram, «Как брать заказы», установка) — одна за раз и не поверх карточек «приём выключен» и «лимит». */}
+        {ex.available && !atLimit && <FeedHint hasOrders={items.length > 0} ownOrders={mine?.orders.length} now={now} />}
       </div>
 
       {items.length > 0 && (
@@ -215,7 +218,7 @@ export function Feed() {
 
       {list.length === 0 && <FeedEmpty hasOrders={items.length > 0} available={ex.available} city={ex.city} noServices={cats.length === 0} onReset={() => setFilter(NO_FILTER)} />}
 
-      {take && <TakeSheet order={allById.get(take.id) ?? take} gone={!allById.has(take.id)} available={ex.available} onClose={() => setTake(null)} onTaken={onTaken} />}
+      {take && <TakeSheet order={allById.get(take.id) ?? take} gone={!allById.has(take.id)} available={ex.available} limited={atLimit} onClose={() => setTake(null)} onTaken={onTaken} />}
 
       <Sheet open={sorting} onClose={() => setSorting(false)} title="Сортировка">
         <div className="flex flex-col gap-1" role="radiogroup" aria-label="Сортировка">
