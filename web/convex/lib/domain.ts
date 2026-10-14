@@ -6,6 +6,7 @@ import { ACTIVE_STATUSES, ORDER_STATUS } from "../../src/data/catalog";
 import type { Actor, HistoryKind, OrderStatus } from "../../src/data/types";
 import { queueEmail, type EmailEvent } from "./mail";
 import { orderTouched } from "./stats";
+import { queuePush } from "./push";
 import type { TgButton } from "./tg";
 import { emitEvent } from "./webhookEvents";
 
@@ -86,8 +87,8 @@ export async function executorUser(ctx: QueryCtx, executorId: Id<"executors">): 
 export type { TgButton } from "./tg";
 
 /**
- * Уведомление в колокольчик + копия в Telegram (если подключён) и на email (важное событие — opts.email, правило —
- * lib/mail.ts). Отправка — после коммита, через планировщик.
+ * Уведомление в колокольчик + копия в Telegram (если подключён), на телефон (web push, если включён — lib/push.ts)
+ * и на email (важное событие — opts.email, правило — lib/mail.ts). Отправка — после коммита, через планировщик.
  */
 export async function notify(
   ctx: MutationCtx,
@@ -107,6 +108,7 @@ export async function notify(
       await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId, text, html: opts.html, link: opts.link, buttons: opts.buttons });
     }
     if (opts.email && (await queueEmail(ctx, u, notificationId, { text, link: opts.link, event: opts.email }, emails))) emails++;
+    await queuePush(ctx, id, text, opts.link);
   }
 }
 

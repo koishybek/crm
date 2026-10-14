@@ -40,6 +40,8 @@ import type { User } from "../data/types";
 import { cn, whenShort } from "../lib/format";
 import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui";
 import { EmailToggle } from "./EmailToggle";
+import { PushToggle } from "./PushToggle";
+import { pushBeforeSignOut } from "../data/pushActions";
 import { ChangePasswordModal } from "./PasswordChange";
 import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
@@ -332,6 +334,7 @@ function UserMenu({ me }: { me: User }) {
                 </MenuItem>
               )}
               <EmailToggle />
+              <PushToggle />
               <MenuItem icon={KeyRound} onClick={() => (close(), setPassword(true))}>
                 Сменить пароль
               </MenuItem>
@@ -344,6 +347,7 @@ function UserMenu({ me }: { me: User }) {
                 icon={LogOut}
                 onClick={async () => {
                   close();
+                  await pushBeforeSignOut();
                   await signOut();
                   nav("/login");
                 }}

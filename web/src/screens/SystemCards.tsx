@@ -13,6 +13,7 @@ import { fileSize, HEALTH_STATE, systemViews, type HealthState, type SubsystemVi
 import { Badge, Button, Card, DotBadge, Input, Loading, Toggle } from "../components/ui";
 import { cn, dateTime, plural } from "../lib/format";
 import { EscalationsCard } from "./EscalationsCard";
+import { ClientErrorsList, OffsitePanel, RetentionCard } from "./ReliabilityCards";
 
 /** Только владелец: остальным эти карточки не показываем (и сервер им ничего не отдаст). */
 export function SystemCards() {
@@ -25,6 +26,7 @@ export function SystemCards() {
         <BackupsCard />
         <AutoAssignCard />
         <EscalationsCard />
+        <RetentionCard />
       </div>
     </div>
   );
@@ -61,6 +63,7 @@ function SystemHealthCard() {
           ))}
         </ul>
       )}
+      <ClientErrorsList />
       <p className="mt-3 text-[12.5px] text-muted">Красное — не работает сейчас, жёлтое — работает не полностью или ещё не запускалось, серое — не подключено. Обновляется само.</p>
     </Card>
   );
@@ -140,6 +143,11 @@ function BackupsCard() {
                       {fileSize(x.size)} · {x.docs} {plural(x.docs, "запись", "записи", "записей")}
                     </div>
                   </div>
+                  {x.offsite && (
+                    <Badge tone="green" size="sm">
+                      во внешнем хранилище
+                    </Badge>
+                  )}
                   {x.url && (
                     <a href={x.url} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1.5 text-[13.5px] font-semibold text-brand-ink hover:underline">
                       <Download size={15} aria-hidden /> Скачать
@@ -151,7 +159,8 @@ function BackupsCard() {
           )}
         </>
       )}
-      <p className="mt-3 text-[12.5px] text-muted">Копии лежат в том же облаке, что и система. Раз в неделю скачивайте свежую и храните отдельно — на случай, если пропадёт доступ к облаку.</p>
+      <OffsitePanel />
+      <p className="mt-3 text-[12.5px] text-muted">Восстановление из файла копии — скрипт scripts/restore.ts (инструкция в README). Пока внешнее хранилище не подключено, раз в неделю скачивайте свежую копию и храните отдельно.</p>
     </Card>
   );
 }

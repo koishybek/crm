@@ -84,7 +84,7 @@ describe("резервная копия", () => {
     await t.action(internal.backup.run, {});
     const { raw, json, docs, size } = await latestBackup(t);
 
-    expect(json.version).toBe(1);
+    expect(json.version).toBe(2);
     expect(Number.isNaN(Date.parse(json.createdAt))).toBe(false);
     expect(json.tables.clients?.[0]?.name).toBe("Айгуль Сапарова");
     expect(json.tables.orders?.[0]?.clientPrice).toBe(30000);

@@ -5,6 +5,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { convex } from "./data/convex";
+import { installErrorReporting } from "./data/errorReporting";
+
+// Ошибки интерфейса — в «Состояние системы» владельца, без данных людей (ТЗ п.26.5). Service worker и уведомления
+// на телефон регистрируются после входа (src/data/serviceWorker.ts, Guard в App.tsx).
+installErrorReporting();
 
 // После выкатки старые файлы удаляются: если вкладка открыта давно и не может догрузить экран,
 // один раз перезагружаем страницу (не чаще раза в 30 секунд — без бесконечного цикла).

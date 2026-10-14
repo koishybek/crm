@@ -5,6 +5,10 @@
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 
+# Service worker (уведомления на телефон, офлайн-экран): браузер должен сразу видеть новую версию.
+/sw.js
+  Cache-Control: no-cache
+
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://fleet-weasel-433.convex.cloud https://dependable-sheep-588.convex.cloud https://fleet-weasel-433.convex.site https://dependable-sheep-588.convex.site; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' https://fleet-weasel-433.convex.cloud wss://fleet-weasel-433.convex.cloud https://fleet-weasel-433.convex.site https://dependable-sheep-588.convex.cloud wss://dependable-sheep-588.convex.cloud https://dependable-sheep-588.convex.site; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Frame-Options: DENY

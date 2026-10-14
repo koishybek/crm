@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internalMutation, query } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { markError, markOk, type HealthKey } from "./lib/health";
+import { s3Missing } from "./lib/s3";
 import { integrationsKeyIssue } from "./lib/secretBox";
 import { canExtract, canTranscribe } from "./ai";
 import { configured as whatsappConfigured, missingEnv as whatsappMissing } from "./channels/whatsapp";
@@ -21,6 +22,7 @@ const healthKey = v.union(
   v.literal("backup"),
   v.literal("reminders"),
   v.literal("escalations"),
+  v.literal("offsite"),
 );
 
 /** Для actions (у них нет ctx.db): отметить успех или ошибку подсистемы. */
@@ -85,6 +87,7 @@ export const overview = query({
         sub("reminders", true),
         sub("escalations", true),
         sub("backup", true),
+        sub("offsite", s3Missing().length === 0, { hint: `Внешнее хранилище не подключено — не заданы: ${s3Missing().join(", ")}` }),
         sub("ai", canExtract(), {
           hint: "Не заданы ключи AI: LLM_API_KEY или AI_URL + AI_SECRET",
           warning: canTranscribe() ? undefined : "Разбор текста работает, расшифровка звонков не настроена (STT_API_KEY или AI_URL + AI_SECRET)",

@@ -690,6 +690,9 @@ export default defineSchema({
     okNote: v.optional(v.string()),
     errorAt: v.optional(v.string()),
     error: v.optional(v.string()),
+    /** Оповещения владельцу (convex/alerts.ts, ТЗ п.26.5): когда ушло последнее «сбой» и в каком состоянии подсистема для них. */
+    alertAt: v.optional(v.string()),
+    alertState: v.optional(v.union(v.literal("down"), v.literal("up"))),
   }).index("by_key", ["key"]),
 
   /**
@@ -729,7 +732,48 @@ export default defineSchema({
   }).index("by_expires", ["expiresAt"]),
 
   /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
-  backups: defineTable({ at: v.string(), fileId: v.id("_storage"), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) }).index("by_at", ["at"]),
+  backups: defineTable({
+    at: v.string(),
+    fileId: v.id("_storage"),
+    size: v.number(),
+    docs: v.number(),
+    by: v.optional(v.id("users")),
+    /** Когда та же копия легла во внешнее хранилище (offsite.ts). */
+    offsiteAt: v.optional(v.string()),
+  }).index("by_at", ["at"]),
+
+  /** Файлы, уже скопированные во внешнее хранилище (offsite.ts, по настройке владельца): копируются один раз. */
+  offsiteFiles: defineTable({ storageId: v.id("_storage"), key: v.string(), size: v.number(), at: v.string() }).index("by_storage", ["storageId"]),
+
+  /** Подписки web push (ТЗ п.23.6): браузер сотрудника или мастера; endpoint и ключи шифрования выдаёт браузер. */
+  pushSubscriptions: defineTable({
+    userId: v.id("users"),
+    endpoint: v.string(),
+    p256dh: v.string(),
+    auth: v.string(),
+    createdAt: v.string(),
+    lastOkAt: v.optional(v.string()),
+  })
+    .index("by_user", ["userId"])
+    .index("by_endpoint", ["endpoint"]),
+
+  /**
+   * Ошибки интерфейса (ТЗ п.26.5): без данных людей — текст ошибки, путь без параметров, версия сборки, роль.
+   * Одинаковые за сутки — одна строка со счётчиком; старше двух недель уборка удаляет.
+   */
+  clientErrors: defineTable({
+    sig: v.string(),
+    message: v.string(),
+    path: v.string(),
+    build: v.string(),
+    kind: v.union(v.literal("error"), v.literal("rejection")),
+    role: v.optional(v.string()),
+    count: v.number(),
+    firstAt: v.string(),
+    lastAt: v.string(),
+  })
+    .index("by_sig", ["sig", "lastAt"])
+    .index("by_last", ["lastAt"]),
 
   /**
    * Кто загрузил файл (аудит M-10): прикрепить к заказу или звонку можно только свою подтверждённую загрузку и один раз.

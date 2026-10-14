@@ -3,7 +3,7 @@
 // которое экран обновляет сам.
 import type { Tone } from "./catalog";
 
-export type SubsystemKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations";
+export type SubsystemKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite";
 
 /** Отметки подсистемы: когда последний раз отработала и последняя ошибка. */
 export interface HealthMark {
@@ -38,6 +38,8 @@ export interface BackupItem {
   /** Запущена владельцем вручную, а не ночным расписанием. */
   manual: boolean;
   url?: string;
+  /** Та же копия есть во внешнем хранилище. */
+  offsite?: boolean;
 }
 
 export interface BackupList {
@@ -60,14 +62,15 @@ const MIN = 60_000;
 
 /** Подписи подсистем; staleMs — для регулярных задач: дольше без успешного запуска — сбой. */
 export const SUBSYSTEMS: Record<SubsystemKey, { label: string; staleMs?: number; idle: string }> = {
-  reminders: { label: "Напоминания о сроках", staleMs: 45 * MIN, idle: "Ещё не запускались" },
+  reminders: { label: "Напоминания о сроках", staleMs: 30 * MIN, idle: "Ещё не запускались" },
   escalations: { label: "Эскалации и автораспределение", staleMs: 20 * MIN, idle: "Ещё не запускались" },
   backup: { label: "Резервные копии", staleMs: 26 * 60 * MIN, idle: "Копий ещё нет — первая будет ночью" },
+  offsite: { label: "Внешнее хранилище копий", idle: "Копий во внешнем хранилище ещё нет — первая уйдёт ночью" },
   ai: { label: "AI: расшифровка и разбор", idle: "Ещё не использовался" },
   pbx: { label: "Телефония (АТС)", idle: "Событий от АТС ещё не было" },
   telegram: { label: "Telegram-бот", idle: "Ответов клиентам через бота ещё не было" },
   whatsapp: { label: "WhatsApp", idle: "Вебхуков от Meta ещё не было" },
-  olx: { label: "OLX", idle: "Синхронизаций ещё не было" },
+  olx: { label: "OLX", staleMs: 45 * MIN, idle: "Синхронизаций ещё не было" },
   email: { label: "Email", idle: "Писем ещё не было" },
   site: { label: "Форма заявки на сайте", idle: "Заявок с сайта ещё не было" },
   api: { label: "Публичный API", idle: "Запросов к API ещё не было" },

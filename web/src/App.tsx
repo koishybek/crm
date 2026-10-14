@@ -10,6 +10,7 @@ import { LogoMark } from "./components/icons";
 import { Button } from "./components/ui";
 import { useMe } from "./data/hooks";
 import { can, type Permission } from "./data/permissions";
+import { useServiceWorker } from "./data/serviceWorker";
 import type { Role } from "./data/types";
 import CatalogScreen from "./screens/CatalogScreen";
 import ClientDetail from "./screens/ClientDetail";
@@ -77,6 +78,7 @@ function Guard({ roles, perm }: { roles: Role[]; perm?: Permission }) {
   // Справочник услуг из базы — до первого экрана, чтобы подписи и формы были актуальными.
   const catalog = useQuery(api.catalog.list, me && !forced ? {} : "skip");
   useMemo(() => catalog && setCatalog(catalog.categories, catalog.services), [catalog]);
+  useServiceWorker(!!me && !forced);
   if (isLoading || (isAuthenticated && me === undefined) || (me && !forced && catalog === undefined)) return <Splash />;
   if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
   if (!me) return <Blocked />;

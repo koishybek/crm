@@ -144,7 +144,7 @@ async function markLost(ctx: MutationCtx, row: Doc<"integrations">, why?: string
     refreshLeaseUntil: undefined,
     syncLeaseUntil: undefined,
   });
-  await markError(ctx, "olx", text);
+  await markError(ctx, "olx", text, { ownerNotified: true });
   const owners = await ctx.db
     .query("users")
     .withIndex("by_role", (q) => q.eq("role", "owner"))
