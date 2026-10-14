@@ -320,7 +320,7 @@ export const _forChat = internalQuery({
       what === "feed"
         ? await openOrdersFor(ctx, ex)
         : await activeOrdersOf(ctx, ex._id);
-    rows.sort((a, b) => a.deadline.localeCompare(b.deadline));
+    rows.sort((a, b) => a.deadline.localeCompare(b.deadline) || a.number - b.number);
     return {
       role: u.role,
       name: u.name ?? "",

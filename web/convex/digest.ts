@@ -81,7 +81,7 @@ export const run = internalMutation({
         if (!u.executorId) continue;
         const mine = (await activeOrdersOf(ctx, u.executorId)).filter((o) => Date.parse(o.deadline) < endOfToday);
         if (!mine.length) continue;
-        mine.sort((a, b) => a.deadline.localeCompare(b.deadline));
+        mine.sort((a, b) => a.deadline.localeCompare(b.deadline) || a.number - b.number);
         // Адрес — по тому же правилу, что в кабинете: у ещё не подтверждённого заказа его нет (аудит L-5).
         const list = mine.map((o) => `• №${o.number} — ${esc(whenAlmaty(o.deadline, now))}, ${esc(o.city)}${o.address && contactsOpen(o) ? `, ${esc(o.address)}` : ""} · ${esc(money(payout(o)))}`);
         const html = [`<b>☀️ Доброе утро! Заказы на сегодня: ${mine.length}</b>`, "", ...list, "", "Кнопки по каждому — команда /orders"].join("\n");
