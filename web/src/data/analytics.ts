@@ -125,16 +125,20 @@ export interface AdSpendRow {
  * засчитывается целиком (и сегодняшний тоже): за 7 дней октября — 7/31 октябрьской суммы.
  */
 export function spendWithin(rows: readonly AdSpendRow[], s: Span): Partial<Record<SourceId, number>> {
-  const first = almatyDay(s.from);
-  const last = almatyDay(s.to);
   const out: Partial<Record<SourceId, number>> = {};
   for (const r of rows) {
-    const m = monthDays(r.month);
-    const overlap = Math.min(last, m.last) - Math.max(first, m.first) + 1;
-    if (overlap <= 0 || m.days === 0 || r.amount <= 0) continue;
-    out[r.source] = (out[r.source] ?? 0) + (r.amount * overlap) / m.days;
+    const share = monthShare(r.month, s);
+    if (share <= 0 || r.amount <= 0) continue;
+    out[r.source] = (out[r.source] ?? 0) + r.amount * share;
   }
   return out;
+}
+
+/** Какая доля месяца (YYYY-MM) попадает в период — по дням по Алматы, день периода целиком (расходы кампаний тоже). */
+export function monthShare(month: string, s: Span): number {
+  const m = monthDays(month);
+  const overlap = Math.min(almatyDay(s.to), m.last) - Math.max(almatyDay(s.from), m.first) + 1;
+  return overlap <= 0 || m.days === 0 ? 0 : overlap / m.days;
 }
 
 /** Стоимость заявки (CPL), заказа (CPO) и окупаемость рекламы ROMI = (маржа − расходы) / расходы. null — нет расходов или делить не на что. */

@@ -15,7 +15,7 @@ function assertSeedAllowed() {
   if (env("ALLOW_SEED") !== "1") throw new ConvexError("Загрузка демо-данных выключена: на деплойменте не задан ALLOW_SEED=1");
 }
 
-const SEED_TABLES = ["executors", "users", "clients", "leads", "orders", "messages", "history", "interactions", "clientNotes", "notifications", "counters", "calls", "conversations", "conversationMessages", "audit", "reviews", "adSpend", "payouts"] as const;
+const SEED_TABLES = ["executors", "users", "clients", "leads", "orders", "messages", "history", "interactions", "clientNotes", "notifications", "counters", "calls", "conversations", "conversationMessages", "audit", "reviews", "adSpend", "payouts", "campaignSpend"] as const;
 // settings и integrations не трогаем: это настройки и подключения (ключ АТС, OLX), а не демо-данные.
 const WIPE_TABLES = [
   ...SEED_TABLES,
@@ -32,6 +32,8 @@ const WIPE_TABLES = [
   "uploads",
   "escalations",
   "exports",
+  "webhooks",
+  "webhookDeliveries",
   "categories",
   "services",
   "authAccounts",

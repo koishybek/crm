@@ -1,12 +1,15 @@
 // Публичный REST API (ТЗ п.20 «REST API», п.26 «API-first»): сайт компании, партнёры и рекламные сервисы
-// создают заявки и узнают их статус. Ключ — Authorization: Bearer hms_…, 120 запросов в минуту на ключ, ошибки — JSON { error }.
-//   POST /api/v1/leads            { name, phone, serviceId?, city?, description, source?, externalId? } → 201 { number, id }
-//   GET  /api/v1/leads/{number}   → { number, status, createdAt, orderNumber?, orderStatus? } — только заявки этого ключа, без персональных данных
+// создают заявки и узнают их статус. Ключ — Authorization: Bearer hms_…, 120 запросов в минуту на ключ, права ключа (scopes) — src/data/apiScopes.ts,
+// ошибки — JSON { error }. Описание для разработчиков — GET /api/v1/openapi.json (lib/openapi.ts).
+//   POST /api/v1/leads            leads:write   { name, phone, serviceId?, city?, description, source?, externalId?, utm?, campaign? } → 201 { number, id }
+//   GET  /api/v1/leads/{number}   leads:read    → { number, status, createdAt, orderNumber?, orderStatus? } — только заявки этого ключа
+//   GET  /api/v1/orders/{number}  orders:read   → статус и даты заказа — без клиента, адреса и денег
+//   GET  /api/v1/services         services:read → справочник направлений и услуг; цены — только если владелец включил
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { httpAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
-import { INVALID_KEY, KEY_PATTERN } from "./apiKeys";
+import { API_PRICES_SETTING, INVALID_KEY, KEY_PATTERN } from "./apiKeys";
 import { sha256Hex } from "./lib/crypto";
 import { nowIso } from "./lib/domain";
 import { markOk } from "./lib/health";
@@ -14,7 +17,11 @@ import { json, readJson, str } from "./lib/httpUtil";
 import { intakeLead } from "./lib/intake";
 import { kzPhone } from "./lib/phone";
 import { loadCatalog } from "./catalog";
-import { source } from "./schema";
+import { env } from "./env";
+import { source, utm } from "./schema";
+import { openApiDoc } from "./lib/openapi";
+import type { ApiScope } from "../src/data/apiScopes";
+import { campaignOf, cleanUtmValue, utmFromRecord, type Utm } from "../src/data/utm";
 import { LEAD_STATUS, ORDER_STATUS, SOURCE_IDS } from "../src/data/catalog";
 import type { LeadStatus, OrderStatus, SourceId } from "../src/data/types";
 
@@ -28,6 +35,8 @@ export interface ApiLead {
   description: string;
   source: SourceId;
   externalId?: string;
+  utm?: Utm;
+  campaign?: string;
 }
 
 /** Проверка тела запроса (без базы). Ключ идемпотентности — externalId в теле или заголовок Idempotency-Key. */
@@ -52,21 +61,25 @@ export function parseApiLead(body: Record<string, unknown>, idempotencyKey: stri
   if (!description.value) return { ok: false, error: "description: обязательное поле" };
   const sourceId = (src.value ?? "site") as SourceId;
   if (!SOURCE_IDS.includes(sourceId)) return { ok: false, error: `source: одно из ${SOURCE_IDS.join(", ")}` };
+  if (body.campaign !== undefined && body.campaign !== null && typeof body.campaign !== "string") return { ok: false, error: "campaign: ожидалась строка" };
+  if (body.utm !== undefined && body.utm !== null && (typeof body.utm !== "object" || Array.isArray(body.utm))) return { ok: false, error: "utm: ожидался объект { source, medium, campaign, content, term }" };
+  const marks = utmFromRecord(body);
+  const campaign = campaignOf(marks, cleanUtmValue(body.campaign));
   const header = idempotencyKey?.trim();
   if (header && header.length > 100) return { ok: false, error: "Idempotency-Key: не длиннее 100 символов" };
-  return { ok: true, data: { name: name.value, phone, serviceId: serviceId.value, city: city.value, description: description.value, source: sourceId, externalId: ext.value ?? (header || undefined) } };
+  return { ok: true, data: { name: name.value, phone, serviceId: serviceId.value, city: city.value, description: description.value, source: sourceId, externalId: ext.value ?? (header || undefined), ...(marks ? { utm: marks } : {}), ...(campaign ? { campaign } : {}) } };
 }
 
 const apiError = (status: number, error: string, headers: Record<string, string> = {}) => json(status, { error }, headers);
 
 /** Ключ из заголовка → проверка по хэшу и лимит. Ответ-ошибка, если не пускаем. */
-async function authorize(ctx: ActionCtx, request: Request): Promise<{ ok: true; keyId: Id<"apiKeys">; prefix: string } | { ok: false; response: Response }> {
+async function authorize(ctx: ActionCtx, request: Request, scope: ApiScope): Promise<{ ok: true; keyId: Id<"apiKeys">; prefix: string } | { ok: false; response: Response }> {
   const m = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.get("authorization") ?? "");
   if (!m) return { ok: false, response: apiError(401, "Нужен заголовок Authorization: Bearer <ключ API>", { "WWW-Authenticate": "Bearer" }) };
   const key = m[1]!;
   if (!KEY_PATTERN.test(key)) return { ok: false, response: apiError(401, INVALID_KEY, { "WWW-Authenticate": "Bearer" }) };
-  const r = await ctx.runMutation(internal.apiKeys._authorize, { hash: sha256Hex(key) });
-  if (!r.ok) return { ok: false, response: apiError(r.status, r.error, r.status === 429 ? { "Retry-After": "60" } : { "WWW-Authenticate": "Bearer" }) };
+  const r = await ctx.runMutation(internal.apiKeys._authorize, { hash: sha256Hex(key), scope });
+  if (!r.ok) return { ok: false, response: apiError(r.status, r.error, r.status === 429 ? { "Retry-After": "60" } : r.status === 401 ? { "WWW-Authenticate": "Bearer" } : {}) };
   return { ok: true, keyId: r.keyId, prefix: r.prefix };
 }
 
@@ -78,7 +91,7 @@ const failure = async (ctx: ActionCtx, where: string, e: unknown) => {
 };
 
 export const createLeadHttp = httpAction(async (ctx, request) => {
-  const auth = await authorize(ctx, request);
+  const auth = await authorize(ctx, request, "leads:write");
   if (!auth.ok) return auth.response;
   const body = await readJson(request, MAX_BODY);
   if (!body.ok) return apiError(body.status, body.error);
@@ -94,7 +107,7 @@ export const createLeadHttp = httpAction(async (ctx, request) => {
 });
 
 export const getLeadHttp = httpAction(async (ctx, request) => {
-  const auth = await authorize(ctx, request);
+  const auth = await authorize(ctx, request, "leads:read");
   if (!auth.ok) return auth.response;
   const m = /^\/api\/v1\/leads\/(\d{1,9})\/?$/.exec(new URL(request.url).pathname);
   if (!m) return apiError(400, "Номер заявки — число: /api/v1/leads/1024");
@@ -119,6 +132,8 @@ export const _createLead = internalMutation({
     description: v.string(),
     source,
     externalId: v.optional(v.string()),
+    utm: v.optional(utm),
+    campaign: v.optional(v.string()),
   },
   handler: async (ctx, a): Promise<CreateResult> => {
     // Повтор запроса с тем же ключом идемпотентности — та же заявка, без дубля.
@@ -143,6 +158,8 @@ export const _createLead = internalMutation({
       serviceId: a.serviceId,
       city: a.city,
       description: a.description,
+      utm: a.utm,
+      campaign: a.campaign,
       message: { title: "Заявка через API", text: a.description },
       actor: "API",
       via: "через API",
@@ -184,4 +201,104 @@ export const _leadStatus = internalQuery({
       ...(order ? { orderNumber: order.number, orderStatus: order.status, orderStatusLabel: ORDER_STATUS[order.status].label } : {}),
     };
   },
+});
+
+// ── Заказы, справочник, описание API ─────────────────────────────────────────
+
+export interface OrderStatusDto {
+  number: number;
+  status: OrderStatus;
+  statusLabel: string;
+  serviceId: string;
+  service: string;
+  category: string;
+  city: string;
+  createdAt: string;
+  deadline: string;
+  doneAt?: string;
+  paidAt?: string;
+  closedAt?: string;
+}
+
+/** Статус заказа по номеру — без клиента, адреса, описания, цены и выплаты (ТЗ п.26.7). */
+export const _orderStatus = internalQuery({
+  args: { number: v.number() },
+  handler: async (ctx, { number }): Promise<OrderStatusDto | null> => {
+    const o = await ctx.db
+      .query("orders")
+      .withIndex("by_number", (q) => q.eq("number", number))
+      .first();
+    if (!o) return null;
+    const cat = await loadCatalog(ctx);
+    return {
+      number: o.number,
+      status: o.status,
+      statusLabel: ORDER_STATUS[o.status].label,
+      serviceId: o.serviceId,
+      service: cat.label(o.serviceId),
+      category: o.category,
+      city: o.city,
+      createdAt: o.createdAt,
+      deadline: o.deadline,
+      ...(o.doneAt ? { doneAt: o.doneAt } : {}),
+      ...(o.paidAt ? { paidAt: o.paidAt } : {}),
+      ...(o.closedAt ? { closedAt: o.closedAt } : {}),
+    };
+  },
+});
+
+export interface ServicesDto {
+  categories: { id: string; label: string }[];
+  services: { id: string; label: string; category: string; priceMin?: number; priceMax?: number }[];
+}
+
+export const _services = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<ServicesDto> => {
+    const [c, prices] = await Promise.all([
+      loadCatalog(ctx),
+      ctx.db
+        .query("settings")
+        .withIndex("by_key", (q) => q.eq("key", API_PRICES_SETTING))
+        .unique(),
+    ]);
+    const withPrices = prices?.value === "on";
+    const categories = c.categories.filter((x) => x.active !== false);
+    const open = new Set(categories.map((x) => x.id));
+    return {
+      categories: categories.map((x) => ({ id: x.id, label: x.label })),
+      services: c.services
+        .filter((s) => s.active !== false && open.has(s.category))
+        .map((s) => ({ id: s.id, label: s.label, category: s.category, ...(withPrices ? { priceMin: s.price[0], priceMax: s.price[1] } : {}) })),
+    };
+  },
+});
+
+export const getOrderHttp = httpAction(async (ctx, request) => {
+  const auth = await authorize(ctx, request, "orders:read");
+  if (!auth.ok) return auth.response;
+  const m = /^\/api\/v1\/orders\/(\d{1,9})\/?$/.exec(new URL(request.url).pathname);
+  if (!m) return apiError(400, "Номер заказа — число: /api/v1/orders/1024");
+  try {
+    const r = await ctx.runQuery(internal.publicApi._orderStatus, { number: Number(m[1]) });
+    return r ? json(200, r) : apiError(404, "Заказ не найден");
+  } catch (e) {
+    return failure(ctx, "статус заказа", e);
+  }
+});
+
+export const servicesHttp = httpAction(async (ctx, request) => {
+  const auth = await authorize(ctx, request, "services:read");
+  if (!auth.ok) return auth.response;
+  try {
+    return json(200, await ctx.runQuery(internal.publicApi._services, {}));
+  } catch (e) {
+    return failure(ctx, "справочник услуг", e);
+  }
+});
+
+/** Описание API в формате OpenAPI 3.1 — без ключа: в нём нет данных, только схема. */
+export const openApiHttp = httpAction(async (_ctx, request) => {
+  const base = (env("CONVEX_SITE_URL") ?? new URL(request.url).origin).replace(/\/+$/, "");
+  return json(200, openApiDoc(base), { "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" });
 });

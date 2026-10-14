@@ -13,11 +13,13 @@ import { useNow } from "../data/hooks";
 import { sendTestEmail, setClientNotify } from "../data/notifyActions";
 import { EMAIL_KINDS, type EmailSettings } from "../data/notifyRules";
 import { disconnectOlx, olxReturnMessage, startOlxConnect, syncOlxNow } from "../data/olx";
-import { createApiKey, revokeApiKey, saveSiteOrigins, siteUrl } from "../data/publicApi";
+import { createApiKey, revokeApiKey, saveSiteOrigins, setApiServicePrices, siteUrl } from "../data/publicApi";
+import { API_SCOPE_LABEL, API_SCOPES, LEGACY_SCOPES, type ApiScope } from "../data/apiScopes";
 import { report, toast } from "../data/store";
 import type { ApiKeyInfo, OlxSettings, WhatsAppSettings } from "../data/types";
 import { dateTime, phone } from "../lib/format";
 import { copy, CopyRow } from "./Integrations";
+import { CheckOptions, WebhooksSection } from "./WebhooksSection";
 
 /** Встраивание формы: iframe + скрипт, который передаёт рекламные метки страницы и подгоняет высоту. */
 const embedCode = (formUrl: string, origin: string) => `<iframe id="hms-form" src="${formUrl}?embed=1" title="Заявка" loading="lazy"
@@ -43,6 +45,12 @@ const curlGet = (base: string) => `curl ${base}/api/v1/leads/1024 -H "Authorizat
 
 # 200 → {"number":1024,"status":"converted","statusLabel":"Заказ создан","createdAt":"…",
 #        "orderNumber":1024,"orderStatus":"in_progress","orderStatusLabel":"В работе"}`;
+
+const curlMore = (base: string) => `curl ${base}/api/v1/orders/1024 -H "Authorization: Bearer hms_ВАШ_КЛЮЧ"
+# 200 → {"number":1024,"status":"in_progress","statusLabel":"В работе","service":"…","deadline":"…"}
+
+curl ${base}/api/v1/services -H "Authorization: Bearer hms_ВАШ_КЛЮЧ"
+# 200 → {"categories":[…],"services":[{"id":"ac-clean","label":"…","category":"ac"}]}`;
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
   return (
@@ -104,6 +112,9 @@ export function ApiAndSiteCard() {
 
         <section className="min-w-0 space-y-3">
           <ApiKeys keys={keys?.keys} />
+          {keys && (
+            <Toggle checked={keys.servicePrices} onChange={(v) => void setApiServicePrices(v).then((r) => report(r, v ? "Справочник в API — с ценами" : "Справочник в API — без цен"))} label="Цены услуг в /api/v1/services" />
+          )}
           <details className="group rounded-[12px] border border-line">
             <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Примеры запросов к API</summary>
             <div className="space-y-3 border-t border-line px-3.5 py-3 text-[13px] text-ink-2">
@@ -114,12 +125,16 @@ export function ApiAndSiteCard() {
               <CodeBlock code={curlCreate(base)} label="Создать заявку" />
               <p>Статус заявки — только заявок, созданных этим ключом, и без персональных данных:</p>
               <CodeBlock code={curlGet(base)} label="Статус заявки" />
+              <p>Статус заказа (право «Статус заказов») и справочник услуг (право «Справочник услуг») — без контактов клиента и денег:</p>
+              <CodeBlock code={curlMore(base)} label="Заказ и справочник" />
               <p className="text-[12.5px] text-muted">
                 Поля: <code>name</code>, <code>phone</code> (казахстанский номер), <code>description</code> — обязательные; <code>serviceId</code>, <code>city</code>, <code>source</code> (olx, phone, whatsapp, telegram, site,
-                instagram, referral; по умолчанию site), <code>externalId</code> — по желанию.
+                instagram, referral; по умолчанию site), <code>externalId</code>, метки рекламы <code>utm</code> (<code>{'{"source":"instagram","campaign":"ac-oct"}'}</code>) и <code>campaign</code> — по желанию.
               </p>
+              <CopyRow label="Описание API (OpenAPI 3.1) — для разработчиков" value={`${base}/api/v1/openapi.json`} />
             </div>
           </details>
+          <WebhooksSection />
         </section>
       </div>
     </Card>
@@ -170,6 +185,7 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{ key: string; name: string } | null>(null);
+  const [scopes, setScopes] = useState<ApiScope[]>([...LEGACY_SCOPES]);
   const [confirm, setConfirm] = useState<string | null>(null);
   useEffect(() => {
     if (!confirm) return;
@@ -179,7 +195,7 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
 
   const create = async () => {
     setBusy(true);
-    const r = await createApiKey(name);
+    const r = await createApiKey(name, scopes);
     setBusy(false);
     if (!report(r)) return;
     setCreated({ key: r.value.key, name: name.trim() });
@@ -194,6 +210,7 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
     setCreating(false);
     setCreated(null);
     setName("");
+    setScopes([...LEGACY_SCOPES]);
   };
 
   return (
@@ -224,6 +241,13 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
                     </Badge>
                   )}
                 </div>
+                <div className="mt-0.5 flex flex-wrap gap-1">
+                  {k.scopes.map((x) => (
+                    <Badge key={x} tone="gray" size="sm">
+                      {API_SCOPE_LABEL[x].label}
+                    </Badge>
+                  ))}
+                </div>
                 <div className="text-[12.5px] text-muted">
                   создан {dateTime(k.createdAt)}
                   {k.createdBy ? ` · ${k.createdBy}` : ""} · {k.lastUsedAt ? `последний запрос ${dateTime(k.lastUsedAt)}` : "ещё не использовался"}
@@ -252,7 +276,7 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
               <Button variant="ghost" onClick={close}>
                 Отмена
               </Button>
-              <Button icon={KeyRound} disabled={busy || !name.trim()} onClick={() => void create()}>
+              <Button icon={KeyRound} disabled={busy || !name.trim() || !scopes.length} onClick={() => void create()}>
                 {busy ? "Создаём…" : "Создать"}
               </Button>
             </>
@@ -268,19 +292,25 @@ function ApiKeys({ keys }: { keys: ApiKeyInfo[] | undefined }) {
             <CopyRow label="Ключ API" value={created.key} />
           </div>
         ) : (
-          <FormRow label="Название" required hint="Чтобы потом понять, где используется ключ">
-            {(id) => (
-              <Input
-                id={id}
-                autoFocus
-                maxLength={60}
-                placeholder="Сайт, рекламный кабинет, партнёр…"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && name.trim() && !busy && void create()}
-              />
-            )}
-          </FormRow>
+          <div className="space-y-3">
+            <FormRow label="Название" required hint="Чтобы потом понять, где используется ключ">
+              {(id) => (
+                <Input
+                  id={id}
+                  autoFocus
+                  maxLength={60}
+                  placeholder="Сайт, рекламный кабинет, партнёр…"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && name.trim() && !busy && void create()}
+                />
+              )}
+            </FormRow>
+            <div>
+              <div className="mb-1 text-[12.5px] font-medium text-muted">Что может ключ</div>
+              <CheckOptions options={API_SCOPES.map((x) => ({ value: x, label: API_SCOPE_LABEL[x].label, hint: API_SCOPE_LABEL[x].hint }))} value={scopes} onChange={setScopes} />
+            </div>
+          </div>
         )}
       </Modal>
     </>

@@ -100,6 +100,7 @@ export const toLead = (l: Doc<"leads">): Lead => ({
   address: l.address,
   preferredTime: l.preferredTime,
   budget: l.budget,
+  campaign: l.campaign,
 });
 
 type StoredFile = Doc<"orders">["files"][number];
@@ -187,6 +188,7 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   cancelReason: o.cancelReason,
   requiredSkills: o.requiredSkills,
   files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, forExecutor: f.forExecutor === true })),
+  campaign: o.campaign,
 });
 
 /**

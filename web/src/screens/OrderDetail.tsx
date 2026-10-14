@@ -224,6 +224,7 @@ export default function OrderDetail() {
               </InfoRow>
               <InfoRow icon={<Link2 size={20} className="text-muted" />} label="Источник">
                 <Source source={o.source} className="font-medium" />
+                {o.campaign && <span className="font-normal text-muted"> · кампания «{o.campaign}»</span>}
               </InfoRow>
             </dl>
           </Card>

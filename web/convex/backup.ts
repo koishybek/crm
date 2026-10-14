@@ -53,6 +53,8 @@ export const BACKUP_TABLES = [
   "reviewRequests",
   "adSpend",
   "payouts",
+  "campaignSpend",
+  "webhooks",
 ] as const satisfies readonly TableNames[];
 export type BackupTable = (typeof BACKUP_TABLES)[number];
 
@@ -62,7 +64,7 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
  * отметки эскалаций (живут неделю-две и после восстановления не нужны) и выгрузки CSV (временные файлы на сутки) —
  * их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports"] as const satisfies readonly TableNames[];
+const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;
@@ -74,6 +76,7 @@ const SECRET_FIELDS: Partial<Record<BackupTable, readonly string[]>> = {
   users: ["telegramLinkCode", "telegramLinkExpiresAt"],
   apiKeys: ["hash"],
   reviewRequests: ["token"],
+  webhooks: ["secret"],
 };
 /** Настройки-секреты (ключ АТС и т.п.) не копируются целиком. */
 const SECRET_SETTING = /secret|token|key/i;

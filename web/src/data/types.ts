@@ -113,6 +113,8 @@ export interface Lead {
   preferredTime?: string;
   /** Бюджет, который назвал клиент, ₸ — только для сотрудников, в цену заказа сам не попадает. */
   budget?: number;
+  /** Рекламная кампания (utm_campaign или поле API) — src/data/utm.ts. */
+  campaign?: string;
 }
 
 export type CallStatus = "ringing" | "answered" | "missed" | "completed";
@@ -229,6 +231,8 @@ export interface Order {
   /** Навыки, без которых заказ мастеру не показывается. */
   requiredSkills?: string[];
   files: Attachment[];
+  /** Рекламная кампания — из заявки. */
+  campaign?: string;
 }
 
 /** Заказ глазами исполнителя: без цены клиента и маржи; адрес и контакты — после подтверждения. */
@@ -469,6 +473,8 @@ export interface ApiKeyInfo {
   createdBy?: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  /** Права ключа (src/data/apiScopes.ts). */
+  scopes: import("./apiScopes").ApiScope[];
 }
 
 /** Карточка «WhatsApp» у владельца: что настроено и доходят ли вебхуки. Значений секретов здесь нет — только имена недостающих переменных. */

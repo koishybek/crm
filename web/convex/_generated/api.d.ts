@@ -18,6 +18,7 @@ import type * as autoAssign from "../autoAssign.js";
 import type * as backup from "../backup.js";
 import type * as bot from "../bot.js";
 import type * as calls from "../calls.js";
+import type * as campaigns from "../campaigns.js";
 import type * as catalog from "../catalog.js";
 import type * as channels_olx from "../channels/olx.js";
 import type * as channels_whatsapp from "../channels/whatsapp.js";
@@ -60,6 +61,7 @@ import type * as lib_matching from "../lib/matching.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_olx from "../lib/olx.js";
 import type * as lib_olxApi from "../lib/olxApi.js";
+import type * as lib_openapi from "../lib/openapi.js";
 import type * as lib_orderArchive from "../lib/orderArchive.js";
 import type * as lib_outbound from "../lib/outbound.js";
 import type * as lib_phone from "../lib/phone.js";
@@ -68,10 +70,12 @@ import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_safeFetch from "../lib/safeFetch.js";
 import type * as lib_secretBox from "../lib/secretBox.js";
 import type * as lib_tg from "../lib/tg.js";
+import type * as lib_webhookEvents from "../lib/webhookEvents.js";
 import type * as lib_whatsapp from "../lib/whatsapp.js";
 import type * as maintenance from "../maintenance.js";
 import type * as metrics from "../metrics.js";
 import type * as notifications from "../notifications.js";
+import type * as orderClientChat from "../orderClientChat.js";
 import type * as orders from "../orders.js";
 import type * as payouts from "../payouts.js";
 import type * as publicApi from "../publicApi.js";
@@ -83,6 +87,7 @@ import type * as seed from "../seed.js";
 import type * as site from "../site.js";
 import type * as telegram from "../telegram.js";
 import type * as users from "../users.js";
+import type * as webhooks from "../webhooks.js";
 import type * as worker from "../worker.js";
 
 import type {
@@ -102,6 +107,7 @@ declare const fullApi: ApiFromModules<{
   backup: typeof backup;
   bot: typeof bot;
   calls: typeof calls;
+  campaigns: typeof campaigns;
   catalog: typeof catalog;
   "channels/olx": typeof channels_olx;
   "channels/whatsapp": typeof channels_whatsapp;
@@ -144,6 +150,7 @@ declare const fullApi: ApiFromModules<{
   "lib/money": typeof lib_money;
   "lib/olx": typeof lib_olx;
   "lib/olxApi": typeof lib_olxApi;
+  "lib/openapi": typeof lib_openapi;
   "lib/orderArchive": typeof lib_orderArchive;
   "lib/outbound": typeof lib_outbound;
   "lib/phone": typeof lib_phone;
@@ -152,10 +159,12 @@ declare const fullApi: ApiFromModules<{
   "lib/safeFetch": typeof lib_safeFetch;
   "lib/secretBox": typeof lib_secretBox;
   "lib/tg": typeof lib_tg;
+  "lib/webhookEvents": typeof lib_webhookEvents;
   "lib/whatsapp": typeof lib_whatsapp;
   maintenance: typeof maintenance;
   metrics: typeof metrics;
   notifications: typeof notifications;
+  orderClientChat: typeof orderClientChat;
   orders: typeof orders;
   payouts: typeof payouts;
   publicApi: typeof publicApi;
@@ -167,6 +176,7 @@ declare const fullApi: ApiFromModules<{
   site: typeof site;
   telegram: typeof telegram;
   users: typeof users;
+  webhooks: typeof webhooks;
   worker: typeof worker;
 }>;
 

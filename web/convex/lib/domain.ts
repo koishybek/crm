@@ -6,6 +6,7 @@ import { ACTIVE_STATUSES, ORDER_STATUS } from "../../src/data/catalog";
 import type { Actor, HistoryKind, OrderStatus } from "../../src/data/types";
 import { queueEmail, type EmailEvent } from "./mail";
 import type { TgButton } from "./tg";
+import { emitEvent } from "./webhookEvents";
 
 export const TENANT = "t-komfort";
 export const nowIso = () => new Date().toISOString();
@@ -31,6 +32,8 @@ export type StatusMove = { from: OrderStatus; to: OrderStatus };
 
 export async function log(ctx: MutationCtx, orderId: Id<"orders">, kind: HistoryKind, text: string, actor: Actor, move?: StatusMove) {
   await ctx.db.insert("history", { orderId, kind, text, actor, at: nowIso(), ...move });
+  // Каждая смена статуса проходит через историю — и через setStatus, и через назначение/взятие: здесь и событие вебхука.
+  if (move && move.from !== move.to) await emitEvent(ctx, "order.status_changed", { orderId, from: move.from });
 }
 
 /** Сотрудники для рассылок по заказам, прочитанные один раз (E22): в цикле по заказам состав не перечитывается. */
