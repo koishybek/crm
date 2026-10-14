@@ -94,6 +94,11 @@ wrangler в зависимостях проекта нет — `npx wrangler` (�
 3. Перевод бота с демо: `CONVEX_DEPLOY_KEY=… node scripts/setup-telegram.mjs` (вебхук переедет на боевую базу).
 4. Скрипты с ключом деплоя (`seed-convex.ts`, `restore.ts`) — с явным `CONVEX_URL=https://blissful-giraffe-614.eu-west-1.convex.cloud`: адрес с регионом из ключа не выводится.
 
+## Почта и внешние копии (без Resend и R2)
+
+- **Почта через обычный ящик:** `node scripts/setup-email.mjs [--prod] <host> <port> <логин>` — пароль приложения спросит скрипт и в консоль не выведет (`EMAIL_SMTP_HOST/PORT/USER/PASS`, отправитель — `EMAIL_FROM` или сам ящик). Gmail/Яндекс/Mail.ru: порт 465 и пароль приложения. Если задан `EMAIL_API_KEY` — письма идут через Resend.
+- **Внешние копии в Cloudflare KV:** Worker `backup-worker/` (`homemax-backup`, KV `BACKUPS` уже создан и вписан в `wrangler.jsonc`). Выкладка — `cd backup-worker && npx wrangler deploy`, секрет — `npx wrangler secret put BACKUP_SECRET`; в Convex — `BACKUP_WORKER_URL=https://homemax-backup.koishybek-o.workers.dev` и тот же `BACKUP_WORKER_SECRET`. Подключено к боевой базе; демо — только копии в Convex. Файл больше 25 МБ в KV не помещается — пропускается с пометкой.
+
 ## Боевой запуск у заказчика
 
 1. Отдельный деплоймент, где демо-данные никогда не заливались (или очистка: временно `ALLOW_SEED=1`, `CONVEX_DEPLOY_KEY='prod:…' npm run seed -- --wipe`, прервать после «Очищаю базу…», затем `npx convex env remove ALLOW_SEED --prod`).
