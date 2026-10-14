@@ -15,6 +15,7 @@ import { fitsProfile } from "../src/data/workerMatch";
 import { executorStats, type EarningOrder } from "../src/data/workerStats";
 import { firstName } from "../src/lib/format";
 import type { FeedExtra, WorkerFile, WorkerNote, WorkerOrderView, WorkerPhoto, WorkerProfile, WorkerReview } from "../src/data/workerTypes";
+import { recentOrdersOf } from "./lib/executorOrders";
 
 /** Фото в галерее заказа — не больше. */
 const GALLERY_LIMIT = 12;
@@ -166,10 +167,7 @@ export const profile = query({
   handler: async (ctx): Promise<WorkerProfile> => {
     const { me, ex } = await myExecutor(ctx);
     const catalog = await loadCatalog(ctx);
-    const orders = await ctx.db
-      .query("orders")
-      .withIndex("by_executor", (q) => q.eq("executorId", ex._id))
-      .collect();
+    const orders = await recentOrdersOf(ctx, ex._id);
     const reviewDocs = await ctx.db
       .query("reviews")
       .withIndex("by_executor", (q) => q.eq("executorId", ex._id))

@@ -13,6 +13,7 @@ import { sums } from "../src/data/analytics";
 import { contactsOpen, paidAmount, payout } from "../src/data/logic";
 import { money } from "../src/lib/format";
 import { perTenant } from "./lib/tenant";
+import { activeOrdersOf } from "./lib/executorOrders";
 
 async function activeOrders(ctx: QueryCtx) {
   const out: Doc<"orders">[] = [];
@@ -78,9 +79,7 @@ export const run = internalMutation({
     for (const u of users as Me[]) {
       if (u.role === "executor") {
         if (!u.executorId) continue;
-        const mine = (await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", u.executorId)).collect()).filter(
-          (o) => ACTIVE_STATUSES.includes(o.status) && Date.parse(o.deadline) < endOfToday,
-        );
+        const mine = (await activeOrdersOf(ctx, u.executorId)).filter((o) => Date.parse(o.deadline) < endOfToday);
         if (!mine.length) continue;
         mine.sort((a, b) => a.deadline.localeCompare(b.deadline));
         // Адрес — по тому же правилу, что в кабинете: у ещё не подтверждённого заказа его нет (аудит L-5).

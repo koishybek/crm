@@ -16,9 +16,10 @@ import { env } from "./env";
 import { applyShift, shiftArgs } from "./executors";
 import { orderNotice } from "./clientNotify";
 import { contactsOpen, fitsOrder, maxActiveOf, payout, payoutFor } from "../src/data/logic";
-import { ACTIVE_STATUSES, ORDER_STATUS } from "../src/data/catalog";
+import { ORDER_STATUS } from "../src/data/catalog";
 import { districtLabel } from "../src/data/cities";
 import { money, plural, shortName } from "../src/lib/format";
+import { activeOrdersOf, recentOrdersOf } from "./lib/executorOrders";
 
 async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
   const me = await requireRole(ctx, EXECUTOR);
@@ -49,7 +50,7 @@ export const mine = query({
   args: {},
   handler: async (ctx) => {
     const { ex } = await myExecutor(ctx);
-    const rows = await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", ex._id)).collect();
+    const rows = await recentOrdersOf(ctx, ex._id);
     return {
       executor: toExecutor(ex),
       orders: rows.map((o) => toWorkerOrder(o, { contacts: contactsOpen(o) })),
@@ -318,7 +319,7 @@ export const _forChat = internalQuery({
     const rows =
       what === "feed"
         ? await openOrdersFor(ctx, ex)
-        : (await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", ex._id)).collect()).filter((o) => ACTIVE_STATUSES.includes(o.status));
+        : await activeOrdersOf(ctx, ex._id);
     rows.sort((a, b) => a.deadline.localeCompare(b.deadline));
     return {
       role: u.role,

@@ -355,3 +355,20 @@ describe("деньги мастера: формулы", () => {
     expect(missingSkills(ex, ["Монтаж сплит‑систем", "чистка кондиционеров"])).toEqual(["Монтаж сплит‑систем"]);
   });
 });
+
+describe("«Мои заказы» — без чтения всей истории мастера", () => {
+  test("активные — все, завершённые — последние 100 по статусу", async () => {
+    const { t, ids, as } = await setup();
+    const before = (await as(ids.a.user).query(api.worker.mine, {})).orders.length;
+    await t.run(async (ctx) => {
+      const tpl = (await ctx.db.get(ids.assignedToA))!;
+      const { _id, _creationTime, ...base } = tpl;
+      for (let i = 0; i < 130; i++) await ctx.db.insert("orders", { ...base, number: 5000 + i, status: "paid", doneAt: new Date(Date.UTC(2026, 8, 1) + i * 3600_000).toISOString() });
+    });
+    const mine = (await as(ids.a.user).query(api.worker.mine, {})).orders;
+    expect(mine.length).toBe(before + 100);
+    // Из сданных пришли самые свежие.
+    const paid = mine.filter((o) => o.number >= 5000).map((o) => o.number);
+    expect(Math.min(...paid)).toBe(5030);
+  });
+});
