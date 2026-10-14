@@ -13,7 +13,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const DAY = 86400_000;
 const HOUR = 3600_000;
 const iso = (t: number) => new Date(t).toISOString();

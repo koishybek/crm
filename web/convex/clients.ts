@@ -1,9 +1,9 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./lib/functions";
 import { inScope, OWNER, requirePerm, requireRole, scopeOf } from "./lib/access";
 import { audit, ChangeLog, listDiff, listDiffText, maskPhone, quote } from "./lib/audit";
-import { nowIso, TENANT } from "./lib/domain";
+import { nowIso } from "./lib/domain";
 import { orderFor, toClient, toInteraction, toLead, toNote } from "./lib/dto";
 import { cleanCity, cleanText } from "./lib/limits";
 import { clientPhone, normalizePhone } from "./lib/phone";
@@ -12,6 +12,7 @@ import { source } from "./schema";
 import { SOURCES } from "../src/data/catalog";
 import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
+import { tenantOf } from "./lib/tenantDb";
 
 const LIST_LIMIT = 1500;
 /** Границы полей карточки клиента. */
@@ -139,7 +140,7 @@ export async function insertClient(ctx: MutationCtx, a: { name: string; kind?: D
   const at = nowIso();
   const name = a.name.trim().slice(0, MAX.name);
   return ctx.db.insert("clients", {
-    tenantId: TENANT,
+    tenantId: tenantOf(ctx),
     name,
     kind: a.kind ?? (/^(ТОО|ИП|АО|ЖК|ОСИ|КСК)\b/.test(name) ? "company" : "person"),
     phone: a.phone,

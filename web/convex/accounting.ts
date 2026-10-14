@@ -5,7 +5,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalQuery, type ActionCtx, type QueryCtx } from "./_generated/server";
+import { internalQuery, type ActionCtx, type QueryCtx } from "./lib/functions";
 import { loadCatalog } from "./catalog";
 import { commerceMl, type CmlDocument } from "./lib/commerceml";
 import type { Cell, ExportRange, ExportRow } from "./lib/exportRows";

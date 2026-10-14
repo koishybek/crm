@@ -3,7 +3,7 @@
 // Ничего не удаляется: сторнированный платёж остаётся в списке с причиной, возврат — отдельной записью с суммой,
 // способом, датой и причиной. Статус по деньгам и выручка пересчитываются сами (lib/money.ts, src/data/money.ts).
 import { ConvexError, v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation } from "./lib/functions";
 import { assertScope, requirePerm } from "./lib/access";
 import { almatyStamp, audit, lowerFirst } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, uid, userActor } from "./lib/domain";

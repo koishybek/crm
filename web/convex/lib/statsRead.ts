@@ -1,6 +1,6 @@
 // Чтение предрасчёта аналитики (convex/stats.ts, ТЗ §26.6): итоги за период по дням или по месяцам — O(дней × разрезов).
 import type { Doc } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { DAILY_SERIES_MAX, daysBetween, matchesFilter, monthBounds, monthOfDay, shiftDay, shiftMonth, summarize, type Cell, type Counts, type StatsFilter, type TotalKey } from "../../src/data/dailyStats";
 
 export const rowsOf = (ctx: QueryCtx, grain: Doc<"dailyStats">["grain"], from: string, to: string) =>

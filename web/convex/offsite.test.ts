@@ -49,7 +49,7 @@ describe("SigV4 — официальные тест-векторы AWS", () => {
 
 // ── Хранилище-заглушка: PUT / DELETE / ListObjectsV2 по path-style адресам ────
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 type Req = { method: string; url: URL; headers: Headers };
 let bucket: Map<string, number>;

@@ -1,7 +1,7 @@
 // Аналитика владельца (ТЗ п.17): деньги, стоимость привлечения, работа операторов, выплаты исполнителям.
 // Чистые функции — общие для «Аналитики», «Главной» и сервера (convex/analytics.ts), чтобы цифры совпадали везде.
 import { SOURCE_IDS } from "./catalog";
-import { isFinished, payout, revenueOf, type RevenueLike } from "./logic";
+import { isFinished, payout, platformFeeOf, revenueOf, type RevenueLike } from "./logic";
 import type { Lead, Order, SourceId } from "./types";
 
 /** Период в миллисекундах, обе границы включительно. */
@@ -22,7 +22,7 @@ const inSpan = (iso: string | undefined, s: Span): boolean => {
  */
 export const doneWithin = <O extends Pick<Order, "status" | "doneAt">>(orders: readonly O[], s: Span): O[] => orders.filter((o) => isFinished(o) && inSpan(o.doneAt, s));
 
-type Money = RevenueLike & Pick<Order, "payoutMode" | "payoutValue">;
+type Money = RevenueLike & Pick<Order, "payoutMode" | "payoutValue"> & { platformFee?: number };
 
 /**
  * Выручка, выплаты исполнителям, маржа, число заказов и средний чек. Выручка — за вычетом возвратов по этим заказам
@@ -33,10 +33,14 @@ export const sums = (orders: readonly Money[]) =>
     orders.reduce((s, o) => s + revenueOf(o), 0),
     orders.reduce((s, o) => s + payout(o), 0),
     orders.length,
+    orders.reduce((s, o) => s + platformFeeOf(o), 0),
   );
 
-/** Маржа и средний чек из готовых сумм — одни для сырых заказов и для предрасчёта по дням (./dailyStats). */
-export const sumsOf = (revenue: number, payouts: number, count: number) => ({ revenue, payouts, margin: revenue - payouts, count, avg: count ? revenue / count : 0 });
+/**
+ * Маржа и средний чек из готовых сумм — одни для сырых заказов и для предрасчёта по дням (./dailyStats).
+ * fee — комиссия платформы (ТЗ §24.2): расход компании, в маржу не входит.
+ */
+export const sumsOf = (revenue: number, payouts: number, count: number, fee = 0) => ({ revenue, payouts, fee, margin: revenue - payouts - fee, count, avg: count ? revenue / count : 0 });
 
 // ── Деньги по датам: получено от клиентов и выплачено мастерам ───────────────
 
@@ -181,11 +185,12 @@ export interface SourceCounts {
   done: number;
   revenue: number;
   payouts: number;
+  fee?: number;
 }
 
 /** Строка источника из готовых счётчиков — одна формула для сырых данных и для предрасчёта. */
 export function sourceRow(source: SourceId, c: SourceCounts, spent: number): SourceRow {
-  const money = sumsOf(c.revenue, c.payouts, c.done);
+  const money = sumsOf(c.revenue, c.payouts, c.done, c.fee);
   return {
     source,
     leads: c.leads,
@@ -211,7 +216,7 @@ export function sourceRows(leads: readonly LeadLike[], orders: readonly OrderLik
     SOURCE_IDS.map((source): SourceRow => {
       const mine = periodLeads.filter((l) => l.source === source);
       const money = sums(done.filter((o) => o.source === source));
-      const counts = { leads: mine.length, converted: mine.filter((l) => l.status === "converted").length, done: money.count, revenue: money.revenue, payouts: money.payouts };
+      const counts = { leads: mine.length, converted: mine.filter((l) => l.status === "converted").length, done: money.count, revenue: money.revenue, payouts: money.payouts, fee: money.fee };
       return sourceRow(source, counts, spend[source] ?? 0);
     }),
   );
@@ -255,12 +260,13 @@ export interface OperatorCounts {
   converted: number;
   revenue: number;
   payouts: number;
+  fee?: number;
   waits: readonly number[];
 }
 
 /** Строка оператора из готовых счётчиков — одна формула для сырых данных и для предрасчёта. */
 export function operatorRowOf(userId: string | undefined, c: OperatorCounts): OperatorRow {
-  const money = sumsOf(c.revenue, c.payouts, 0);
+  const money = sumsOf(c.revenue, c.payouts, 0, c.fee);
   return {
     userId,
     leads: c.leads,

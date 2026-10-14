@@ -2,11 +2,12 @@
 // audit() вызывается в той же мутации, что и само действие: запись и изменение атомарны —
 // нет действия без следа и следа без действия.
 import type { Infer } from "convex/values";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import type { Id } from "../_generated/dataModel";
 import type { auditEntity } from "../schema";
 import type { SystemActor } from "../../src/data/audit";
-import { TENANT, nowIso } from "./domain";
+import { nowIso } from "./domain";
+import { tenantOf } from "./tenantDb";
 
 export type AuditEntity = Infer<typeof auditEntity>;
 /** Действие — «сущность.что»: «order.status», «order.finance», «user.access», «integration.connected». */
@@ -33,7 +34,7 @@ export async function audit(ctx: MutationCtx, actor: AuditActor, action: AuditAc
   const entity = action.slice(0, action.indexOf(".")) as AuditEntity;
   const human = typeof actor === "string" ? null : actor;
   await ctx.db.insert("audit", {
-    tenantId: TENANT,
+    tenantId: tenantOf(ctx),
     at: nowIso(),
     actorId: human?._id,
     actorName: human ? human.name || "Сотрудник" : (actor as string),

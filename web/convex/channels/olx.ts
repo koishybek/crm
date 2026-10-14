@@ -7,7 +7,7 @@
 import { ConvexError, v, type Infer } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import { httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "../_generated/server";
+import { httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "../lib/functions";
 import { env } from "../env";
 import { externalKey, ingestMessage } from "../inbox";
 import { OWNER, requireRole } from "../lib/access";
@@ -70,6 +70,8 @@ import {
   type TokenLease,
 } from "../lib/olxApi";
 import { hitLimit } from "../lib/rateLimit";
+import { actionHasModule, perTenantAction, requireModule } from "../lib/tenant";
+import { bindTenant, tenantOfDoc, unscopedDb } from "../lib/tenantDb";
 import { integrationsKeyIssue, isSealed, sealSecret } from "../lib/secretBox";
 import { safeFileName, storageMime } from "../lib/whatsapp";
 import type { OlxSettings } from "../../src/data/types";
@@ -203,6 +205,7 @@ export const connectUrl = mutation({
   args: {},
   handler: async (ctx): Promise<string> => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "olx");
     const cfg = olxConfig();
     if (!cfg) throw new ConvexError("OLX ещё не настроен: на сервере нет ключей приложения (OLX_CLIENT_ID и OLX_CLIENT_SECRET)");
     // Токены OLX храним только зашифрованными: без ключа подключение бессмысленно — говорим об этом до страницы OLX.
@@ -220,11 +223,11 @@ export const connectUrl = mutation({
 export const syncNow = mutation({
   args: {},
   handler: async (ctx): Promise<void> => {
-    await requireRole(ctx, OWNER);
+    const me = await requireRole(ctx, OWNER);
     const row = await olxIntegration(ctx);
     if (!olxConfig() || !row || row.status !== "connected") throw new ConvexError("OLX не подключён");
     if (row.backoffUntil && Date.parse(row.backoffUntil) > Date.now()) throw new ConvexError("OLX временно ограничил запросы — синхронизация продолжится сама, когда пауза закончится");
-    if (!(await hitLimit(ctx, "olx:syncNow", 1, 60_000))) throw new ConvexError("Синхронизация уже запущена — подождите минуту");
+    if (!(await hitLimit(ctx, `olx:syncNow:${me.tenantId}`, 1, 60_000))) throw new ConvexError("Синхронизация уже запущена — подождите минуту");
     await ctx.scheduler.runAfter(0, internal.channels.olx.sync, {});
   },
 });
@@ -259,11 +262,13 @@ export const _takeState = internalMutation({
   handler: async (ctx, { state }): Promise<{ ok: true; userId: Id<"users"> } | { ok: false; reason: "state" | "expired" }> => {
     // Адрес открыт всем — перебор state ограничиваем.
     if (!state || !(await hitLimit(ctx, "olx:callback", 30, 60_000))) return { ok: false, reason: "state" };
-    const row = await ctx.db
+    // Вход без пользователя: state ищем среди всех компаний и дальше работаем в компании, которая его выдала.
+    const row = await unscopedDb(ctx)
       .query("oauthStates")
       .withIndex("by_state", (q) => q.eq("state", state))
       .first();
     if (!row || row.provider !== "olx") return { ok: false, reason: "state" };
+    bindTenant(ctx, tenantOfDoc(row));
     await ctx.db.delete(row._id);
     if (Date.now() - Date.parse(row.createdAt) > STATE_TTL_MS) return { ok: false, reason: "expired" };
     const user = await ctx.db.get(row.userId);
@@ -771,42 +776,47 @@ async function syncAll(run: Run): Promise<{ threads: number; added: number; comp
 
 /** Cron раз в минуту (и «Синхронизировать сейчас»): без подключения ничего не делает и в OLX не ходит. */
 export const sync = internalAction({
-  args: {},
-  handler: async (ctx): Promise<void> => {
-    const cfg = olxConfig();
-    if (!cfg) return;
-    // Без ключа шифрования токены не открыть и новые не сохранить: в OLX не ходим, токены не трогаем — с ключом всё продолжится.
-    // Причину владелец видит в карточке OLX и в «Состоянии системы» (там она считается по окружению).
-    if (integrationsKeyIssue()) return;
-    const start = await ctx.runMutation(internal.channels.olx._syncStart, {});
-    if (!start) return;
-    const cursor = readCursor(start.cursor);
-    const run: Run = {
-      ctx,
-      cfg,
-      cursor,
-      initial: !cursor.ready,
-      liveSince: start.liveSince,
-      session: olxSession(ctx, cfg, { budget: RUN_BUDGET, until: Date.now() + RUN_TIME_MS }),
-      adverts: new Map(),
-      downloads: 0,
-    };
-    let result = { threads: 0, added: 0 };
-    let failure: OlxFailure | undefined;
-    try {
-      const r = await syncAll(run);
-      result = r;
-      if (r.complete) cursor.ready = true;
-      else failure = { kind: "budget" };
-    } catch (e) {
-      failure = failureOf(e);
-      if (!(e instanceof OlxError)) console.error(`olx: сбой синхронизации: ${e instanceof Error ? e.name : "ошибка"}`);
-      else if (failure.kind === "blocked") console.warn(`olx: CloudFront заблокировал запросы, Request ID ${failure.requestId ?? "—"}`);
-      else console.warn(`olx: синхронизация прервана (${failure.kind})`);
-    }
-    await ctx.runMutation(internal.channels.olx._syncFinish, { cursor: writeCursor(cursor), threads: result.threads, added: result.added, failure });
-  },
+  args: { tenantId: v.optional(v.string()) },
+  handler: (cronCtx, { tenantId }): Promise<void> => perTenantAction(cronCtx, tenantId, internal.channels.olx.sync, syncTenant),
 });
+
+/** Синхронизация OLX одной компании: у каждой своё подключение (integrations) и свой курсор. */
+async function syncTenant(ctx: ActionCtx): Promise<void> {
+  const cfg = olxConfig();
+  if (!cfg) return;
+  // Модуль OLX выключен у компании (ТЗ §24.3) — её подключение не синхронизируем.
+  if (!(await actionHasModule(ctx, "olx"))) return;
+  // Без ключа шифрования токены не открыть и новые не сохранить: в OLX не ходим, токены не трогаем — с ключом всё продолжится.
+  // Причину владелец видит в карточке OLX и в «Состоянии системы» (там она считается по окружению).
+  if (integrationsKeyIssue()) return;
+  const start = await ctx.runMutation(internal.channels.olx._syncStart, {});
+  if (!start) return;
+  const cursor = readCursor(start.cursor);
+  const run: Run = {
+    ctx,
+    cfg,
+    cursor,
+    initial: !cursor.ready,
+    liveSince: start.liveSince,
+    session: olxSession(ctx, cfg, { budget: RUN_BUDGET, until: Date.now() + RUN_TIME_MS }),
+    adverts: new Map(),
+    downloads: 0,
+  };
+  let result = { threads: 0, added: 0 };
+  let failure: OlxFailure | undefined;
+  try {
+    const r = await syncAll(run);
+    result = r;
+    if (r.complete) cursor.ready = true;
+    else failure = { kind: "budget" };
+  } catch (e) {
+    failure = failureOf(e);
+    if (!(e instanceof OlxError)) console.error(`olx: сбой синхронизации: ${e instanceof Error ? e.name : "ошибка"}`);
+    else if (failure.kind === "blocked") console.warn(`olx: CloudFront заблокировал запросы, Request ID ${failure.requestId ?? "—"}`);
+    else console.warn(`olx: синхронизация прервана (${failure.kind})`);
+  }
+  await ctx.runMutation(internal.channels.olx._syncFinish, { cursor: writeCursor(cursor), threads: result.threads, added: result.added, failure });
+}
 
 // ── «Прочитано» на OLX ───────────────────────────────────────────────────────
 

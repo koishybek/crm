@@ -53,7 +53,7 @@ afterEach(() => {
 
 async function setup() {
   const t = convexTest(schema, modules);
-  const owner = await t.run((ctx) => ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-test", active: true }));
+  const owner = await t.run((ctx) => ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-komfort", active: true }));
   const as = (id: Id<"users">) => t.withIdentity({ subject: `${id}|s` });
   return { t, owner, as, ownerApi: as(owner) };
 }

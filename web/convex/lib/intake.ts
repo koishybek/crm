@@ -2,7 +2,7 @@
 // (WhatsApp, OLX): клиент по телефону (найти или создать) → заявка → история клиента → уведомление команде → журнал.
 // Заявку из канала никто не ведёт, пока оператор не возьмёт её в работу (E12): на владельца её не записываем.
 import type { Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import type { AiSummary, LeadOrigin, SourceId, Urgency } from "../../src/data/types";
 import { CITIES } from "../../src/data/catalog";
 import { normalizeCity } from "../../src/data/cities";
@@ -13,8 +13,9 @@ import { audit, type AuditActor } from "./audit";
 import { districtOrNone } from "./districts";
 import { emitEvent } from "./webhookEvents";
 import { campaignOf, type Utm } from "../../src/data/utm";
-import { nextNumber, notify, nowIso, staffIds, TENANT } from "./domain";
+import { nextNumber, notify, nowIso, staffIds } from "./domain";
 import { queueStats } from "./stats";
+import { tenantOf } from "./tenantDb";
 
 /** Каналы, в которых клиенту удобно отвечать сообщением, — они становятся «предпочитаемым каналом» нового клиента. */
 const MESSENGERS: SourceId[] = ["telegram", "whatsapp", "olx", "instagram"];
@@ -102,7 +103,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
   const at = nowIso();
   const number = await nextNumber(ctx);
   const leadId = await ctx.db.insert("leads", {
-    tenantId: TENANT,
+    tenantId: tenantOf(ctx),
     number,
     clientId: client._id,
     clientName: client.name,

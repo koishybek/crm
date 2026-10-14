@@ -11,7 +11,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const RESEND = "https://api.resend.com/emails";
 type Mail = { to: string[]; subject: string; html: string; text: string; from: string; reply_to?: string; tags?: { name: string; value: string }[] };
 type Call = { headers: Headers; mail: Mail; raw: string };

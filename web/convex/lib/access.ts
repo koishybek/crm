@@ -1,19 +1,25 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
+import { assertTenantActive } from "./tenant";
+import { bindTenant, tenantOfDoc, unscopedDb } from "./tenantDb";
 import { can as hasPermission, PERMISSION_INFO, type Permission, type PermissionHolder } from "../../src/data/permissions";
 import type { Role } from "../../src/data/types";
 
-export type Me = Doc<"users"> & { role: Role };
+/** Вошедший пользователь; tenantId — его компания (у пользователей до SaaS поля нет — компания по умолчанию). */
+export type Me = Doc<"users"> & { role: Role; tenantId: string };
 
 /** Вошедший и не отключённый пользователь — даже с временным паролем. Только для users.me (экран «Смените пароль»). */
 export async function signedInUser(ctx: QueryCtx): Promise<Me | null> {
   const id = await getAuthUserId(ctx);
   if (!id) return null;
-  const user = await ctx.db.get(id);
+  const user = await unscopedDb(ctx).get(id);
   if (!user || !user.role || user.active === false) return null;
-  return user as Me;
+  const tenantId = tenantOfDoc(user);
+  // Все чтения и записи этой функции — только в компании пользователя (lib/tenantDb.ts).
+  bindTenant(ctx, tenantId);
+  return { ...user, role: user.role, tenantId };
 }
 
 /**
@@ -31,6 +37,7 @@ export async function requireRole(ctx: QueryCtx, roles: Role[]): Promise<Me> {
   if (!me) throw new ConvexError("Нужно войти");
   if (me.mustChangePassword) throw new ConvexError("Сначала смените временный пароль");
   if (!roles.includes(me.role)) throw new ConvexError("Нет доступа");
+  await assertTenantActive(ctx, me.tenantId);
   return me;
 }
 

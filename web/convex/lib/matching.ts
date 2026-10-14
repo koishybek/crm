@@ -1,7 +1,7 @@
 // Подбор на сервере (ТЗ п.11, п.12): кому подходит заказ и какие заказы подходят мастеру.
 // Само правило — fitsOrder из src/data/logic.ts, одно на ленту, уведомления, «Взять заказ» и экран назначения.
 import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { loadOf } from "./load";
 import { feedFor, fitsOrder, type FitOrder } from "../../src/data/logic";
 import { executorUser } from "./domain";

@@ -1,3 +1,4 @@
+import { internal } from "./_generated/api";
 // Автораспределение заказов (ТЗ п.23 «Автоматическое распределение») — «Автоподбор по правилам», без AI: AI только
 // советует в карточке заказа (convex/aiMatch.ts), решает человек. Заказ N минут лежит в ленте и его никто не взял —
 // система назначает лучшего подходящего мастера по тем же правилам, что и подбор при ручном назначении: fitsOrder
@@ -8,7 +9,7 @@
 // (escalations.ts) тем же людям про тот же эпизод второй раз не пишет. Запускается из escalations.run — до эскалаций.
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { executorUser, log, notify, nowIso } from "./lib/domain";
@@ -22,6 +23,7 @@ import { WORK_STATUSES } from "../src/data/catalog";
 import { payout, payoutFor, rankExecutors, type Candidate, type FitOrder, type Load, type RateOrder } from "../src/data/logic";
 import type { Actor, Executor } from "../src/data/types";
 import { shortName } from "../src/lib/format";
+import { perTenant } from "./lib/tenant";
 
 const KEY = { enabled: "autoAssign.enabled", minutes: "autoAssign.minutes" } as const;
 const SYSTEM: Actor = { type: "system" };
@@ -184,7 +186,7 @@ async function exhausted(ctx: MutationCtx, o: Doc<"orders">): Promise<void> {
 /** Cron раз в 5 минут. Выключено — ничего не делает, в том числе не снимает уже назначенных. */
 export const run = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ assigned: number; returned: number; exhausted: number }> => {
+  handler: async (cronCtx): Promise<{ assigned: number; returned: number; exhausted: number }> => perTenant(cronCtx, internal.autoAssign.run, { assigned: 0, returned: 0, exhausted: 0 }, async (ctx) => {
     const out = { assigned: 0, returned: 0, exhausted: 0 };
     const cfg = await readAutoAssign(ctx);
     if (!cfg.enabled) return out;
@@ -218,5 +220,5 @@ export const run = internalMutation({
       }
     }
     return out;
-  },
+  }),
 });

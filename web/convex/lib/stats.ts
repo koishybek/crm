@@ -1,7 +1,7 @@
 // Одна точка после любого изменения заказа (её зовёт log() из lib/domain.ts — запись в историю идёт за каждой правкой
 // заказа): счётчик заказов в работе у мастера и очередь пересчёта показателей (convex/stats.ts, ТЗ §26.6).
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { WORK_STATUSES } from "../../src/data/catalog";
 import { loadOf } from "./load";
 

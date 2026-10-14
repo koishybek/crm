@@ -8,7 +8,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalAction, query, type ActionCtx } from "./_generated/server";
+import { action, internalAction, query, type ActionCtx } from "./lib/functions";
 import { currentUser } from "./lib/access";
 import { fetchPublicFile } from "./lib/safeFetch";
 import { env } from "./env";
@@ -16,6 +16,7 @@ import { URGENCY } from "../src/data/catalog";
 import { canonicalDistrict, districtsOf, findDistrict, fromDistrictList, normalizeCity, type DistrictList, type DistrictMap } from "../src/data/cities";
 import { money } from "../src/lib/format";
 import type { AiDraft, AiSummary, Urgency } from "../src/data/types";
+import { actionHasModule, requireModuleAction } from "./lib/tenant";
 
 export interface Extraction {
   summary: string;
@@ -390,6 +391,7 @@ export const parseText = action({
   args: { text: v.string() },
   handler: async (ctx, { text }): Promise<{ ai: AiSummary; draft: AiDraft }> => {
     await staffOnly(ctx);
+    await requireModuleAction(ctx, "ai");
     if (text.trim().length < 5) throw new ConvexError("Вставьте текст обращения");
     if (text.length > 20_000) throw new ConvexError("Слишком длинный текст — оставьте главное");
     if (!canExtract()) throw new ConvexError("AI не подключён");
@@ -430,7 +432,8 @@ export const processCall = internalAction({
     const c: Doc<"calls"> | null = await ctx.runQuery(internal.calls._get, { id: callId });
     if (!c) return;
     const save = (a: { status: "done" | "failed" | "none"; error?: string; recordingId?: Id<"_storage"> }) => ctx.runMutation(internal.calls._saveAi, { id: callId, ...a });
-    if (!canTranscribe() || !canExtract()) return void (await save({ status: "none" }));
+    // Без AI на сервере или без модуля «AI-помощник» у компании (ТЗ §24.3) звонок остаётся без разбора.
+    if (!canTranscribe() || !canExtract() || !(await actionHasModule(ctx, "ai"))) return void (await save({ status: "none" }));
 
     let recordingId: Id<"_storage"> | undefined = c.recordingId;
     let audio: Blob | null = null;

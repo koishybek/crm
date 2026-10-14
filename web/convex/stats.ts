@@ -5,7 +5,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";
 import { can, OWNER, requirePerm, requireRole, scopeOf, TEAM } from "./lib/access";
@@ -47,6 +47,7 @@ import {
   type StatsReport,
   type TotalKey,
 } from "../src/data/dailyStats";
+import { perTenant } from "./lib/tenant";
 
 // ── Факты сущностей ──────────────────────────────────────────────────────────
 
@@ -298,7 +299,7 @@ export const flush = internalMutation({
 /** Крон раз в минуту: первый запуск — полный пересчёт; оборвавшийся пересчёт — заново; иначе — очередь. */
 export const tick = internalMutation({
   args: {},
-  handler: async (ctx): Promise<void> => {
+  handler: async (cronCtx): Promise<void> => perTenant(cronCtx, internal.stats.tick, undefined, async (ctx) => {
     const s = await stateOf(ctx);
     if (s?.rebuild) {
       if (Date.now() - Date.parse(s.rebuild.at) > STALE_REBUILD_MS) await startRebuild(ctx, s.rebuild.by);
@@ -306,15 +307,15 @@ export const tick = internalMutation({
     }
     if (!s?.builtAt) return startRebuild(ctx);
     if (await flushBatch(ctx)) await ctx.scheduler.runAfter(0, internal.stats.flush, {});
-  },
+  }),
 });
 
 /** Ночная сверка счётчиков заказов в работе у мастеров — на случай правки заказа мимо log() (загрузка демо-данных и т.п.). */
 export const reconcileLoads = internalMutation({
   args: {},
-  handler: async (ctx): Promise<void> => {
+  handler: async (cronCtx): Promise<void> => perTenant(cronCtx, internal.stats.reconcileLoads, undefined, async (ctx) => {
     for (const e of await ctx.db.query("executors").collect()) await recountLoad(ctx, e._id);
-  },
+  }),
 });
 
 /** Владелец: пересчитать все показатели заново (после восстановления копии, переноса услуг между направлениями). */

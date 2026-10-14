@@ -5,7 +5,7 @@
 // (lib/secretBox.ts): расшифровываем здесь, внутри actions, перед самим запросом к OLX.
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
+import type { ActionCtx, MutationCtx, QueryCtx } from "./functions";
 import { env } from "../env";
 import { REPLY_BLOCK } from "./chat";
 import {
@@ -32,6 +32,7 @@ import {
   type OlxToken,
 } from "./olx";
 import { hitLimit } from "./rateLimit";
+import { tenantOf } from "./tenantDb";
 import { integrationsKeyIssue, openSecret, sealSecret, SecretBoxError, type SecretPurpose } from "./secretBox";
 
 /** Адрес возврата после входа в OLX — он же зарегистрирован в приложении на developer.olx.kz. */
@@ -325,6 +326,6 @@ export async function olxReplyBlock(ctx: QueryCtx): Promise<string | null> {
  */
 export async function scheduleOlxRead(ctx: MutationCtx, conversationId: Id<"conversations">): Promise<void> {
   if (!olxConfig() || (await olxIntegration(ctx))?.status !== "connected") return;
-  if (!(await hitLimit(ctx, `olx:read:${conversationId}`, 1, 60_000)) || !(await hitLimit(ctx, "olx:read", 30, 60_000))) return;
+  if (!(await hitLimit(ctx, `olx:read:${conversationId}`, 1, 60_000)) || !(await hitLimit(ctx, `olx:read:${tenantOf(ctx)}`, 30, 60_000))) return;
   await ctx.scheduler.runAfter(0, internal.channels.olx.markThreadRead, { conversationId });
 }

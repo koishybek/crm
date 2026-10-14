@@ -2,7 +2,7 @@
 // Храним только SHA-256 ключа и первые 8 символов (чтобы узнать ключ в списке). Сам ключ владелец видит один раз — при создании.
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { randomToken, safeEqual, sha256Hex } from "./lib/crypto";
@@ -11,6 +11,9 @@ import { hitLimit } from "./lib/rateLimit";
 import { env } from "./env";
 import type { ApiKeyInfo } from "../src/data/types";
 import { API_SCOPE_LABEL, isApiScope, LEGACY_SCOPES, scopesOf, type ApiScope } from "../src/data/apiScopes";
+import { hasModule, requireModule } from "./lib/tenant";
+import { bindTenant, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
+import { lockText } from "../src/data/plans";
 
 /** «hms_» + 32 случайных байта в base64url. */
 export const KEY_PATTERN = /^hms_[A-Za-z0-9_-]{43}$/;
@@ -65,6 +68,7 @@ export const create = mutation({
   args: { name: v.string(), scopes: v.optional(v.array(v.string())) },
   handler: async (ctx, { name, scopes: wanted }): Promise<{ id: Id<"apiKeys">; key: string; prefix: string }> => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "api");
     const title = name.trim().slice(0, 60);
     if (!title) throw new ConvexError("Назовите ключ — например, «Сайт» или «Рекламный кабинет»");
     const active = (await ctx.db.query("apiKeys").collect()).filter((k) => !k.revokedAt).length;
@@ -107,7 +111,7 @@ export const setServicePrices = mutation({
   },
 });
 
-export type AuthResult = { ok: true; keyId: Id<"apiKeys">; prefix: string } | { ok: false; status: 401 | 403 | 429; error: string };
+export type AuthResult = { ok: true; keyId: Id<"apiKeys">; prefix: string; tenantId: string } | { ok: false; status: 401 | 403 | 429; error: string };
 
 export const INVALID_KEY = "Неверный или отозванный ключ API";
 
@@ -118,14 +122,18 @@ export const INVALID_KEY = "Неверный или отозванный клю�
 export const _authorize = internalMutation({
   args: { hash: v.string(), scope: v.string() },
   handler: async (ctx, { hash, scope }): Promise<AuthResult> => {
-    const row = await ctx.db
+    // Ключ — вход без пользователя: ищем среди всех компаний, дальше запрос работает в компании ключа (ТЗ §2.5).
+    const row = await unscopedDb(ctx)
       .query("apiKeys")
       .withIndex("by_hash", (q) => q.eq("hash", hash))
       .unique();
     if (!row || !safeEqual(row.hash, hash) || row.revokedAt) return { ok: false, status: 401, error: INVALID_KEY };
+    const tenantId = tenantOfDoc(row);
+    bindTenant(ctx, tenantId);
+    if (!(await hasModule(ctx, tenantId, "api"))) return { ok: false, status: 403, error: lockText("api") };
     if (!isApiScope(scope) || !scopesOf(row.scopes).includes(scope)) return { ok: false, status: 403, error: `У ключа нет права ${scope}: ${isApiScope(scope) ? API_SCOPE_LABEL[scope].label.toLowerCase() : "неизвестное право"}` };
     if (!(await hitLimit(ctx, `api:${row._id}`, REQUESTS_PER_MIN, 60_000))) return { ok: false, status: 429, error: `Слишком много запросов — не больше ${REQUESTS_PER_MIN} в минуту` };
     if (!row.lastUsedAt || Date.now() - Date.parse(row.lastUsedAt) > TOUCH_EVERY_MS) await ctx.db.patch(row._id, { lastUsedAt: nowIso() });
-    return { ok: true, keyId: row._id, prefix: row.prefix };
+    return { ok: true, keyId: row._id, prefix: row.prefix, tenantId };
   },
 });

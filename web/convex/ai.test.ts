@@ -60,9 +60,9 @@ afterEach(() => {
 async function setup() {
   const t = convexTest(schema, modules);
   const { owner, exUser } = await t.run(async (ctx) => {
-    const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-test", active: true });
-    const ex = await ctx.db.insert("executors", { tenantId: "t-test", name: "Мастер", phone: "77000000009", city: "Алматы", categories: ["ac"], skills: [], available: true, rating: 5, reviews: 0, cooperation: "freelance", joinedAt: new Date().toISOString() });
-    const exUser = await ctx.db.insert("users", { name: "Мастер", email: "77000000009", role: "executor", executorId: ex, tenantId: "t-test", active: true });
+    const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-komfort", active: true });
+    const ex = await ctx.db.insert("executors", { tenantId: "t-komfort", name: "Мастер", phone: "77000000009", city: "Алматы", categories: ["ac"], skills: [], available: true, rating: 5, reviews: 0, cooperation: "freelance", joinedAt: new Date().toISOString() });
+    const exUser = await ctx.db.insert("users", { name: "Мастер", email: "77000000009", role: "executor", executorId: ex, tenantId: "t-komfort", active: true });
     return { owner, exUser };
   });
   return { t, owner: t.withIdentity({ subject: `${owner}|s` }), executor: t.withIdentity({ subject: `${exUser}|s` }) };

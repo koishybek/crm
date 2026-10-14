@@ -22,7 +22,10 @@ const validPhone = (masked: string) => /^7[67]\d{9}$/.test(digits(masked));
 export default function PublicRequest() {
   const [params] = useSearchParams();
   const embed = params.get("embed") === "1";
-  const catalog = useQuery(api.catalog.publicList);
+  // Форма общая для всех компаний платформы: чья — по ?c=<адрес компании>.
+  const company = params.get("c") ?? undefined;
+  const list = useQuery(api.catalog.publicList, { company });
+  const catalog = list ?? undefined;
   const [startedAt, setStartedAt] = useState(() => Date.now());
   const [name, setName] = useState("");
   const [ph, setPh] = useState("");
@@ -80,7 +83,7 @@ export default function PublicRequest() {
     setSending(true);
     // Метки рекламы — из адреса формы; во встроенной форме сниппет передаёт сюда адрес страницы сайта.
     const utm = utmParams(utmFromSearch(params.toString()));
-    const r = await submitPublicLead({ name: name.trim(), phone: ph, serviceId: serviceId || undefined, city, description: description.trim(), consent, startedAt, website, utm });
+    const r = await submitPublicLead({ name: name.trim(), phone: ph, serviceId: serviceId || undefined, city, description: description.trim(), consent, startedAt, website, utm, company });
     setSending(false);
     if (!r.ok) return setFormError(r.error);
     setDone(r.value.number);
@@ -104,7 +107,11 @@ export default function PublicRequest() {
       )}
       <main className={cn("mx-auto w-full max-w-[560px]", embed ? "p-1" : "px-4 pt-3 pb-10")}>
         <div className={cn("card", embed ? "p-5" : "p-5 sm:p-7")}>
-          {done !== null ? (
+          {list === null ? (
+            <p className="py-6 text-center text-[15px] text-ink-2" role="status">
+              Форма не найдена — проверьте ссылку или позвоните в компанию.
+            </p>
+          ) : done !== null ? (
             <div className="flex flex-col items-center py-6 text-center" role="status">
               <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-ok-bg text-ok">
                 <CircleCheck size={34} aria-hidden />

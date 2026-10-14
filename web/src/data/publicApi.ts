@@ -27,6 +27,8 @@ export interface PublicLeadInput {
   /** Поле-ловушка: человек его не видит и не заполняет. */
   website: string;
   utm: Record<string, string>;
+  /** Адрес компании (?c=… в ссылке на форму); нет — первая компания платформы. */
+  company?: string;
 }
 
 const errorOf = (body: unknown): string | null =>
@@ -36,9 +38,9 @@ const errorOf = (body: unknown): string | null =>
 export async function submitPublicLead(input: PublicLeadInput): Promise<Result<{ number: number }>> {
   const base = siteUrl();
   if (!base) return { ok: false, error: "Форма временно недоступна — позвоните нам, пожалуйста" };
-  const { utm, ...fields } = input;
+  const { utm, company, ...fields } = input;
   try {
-    const res = await fetch(`${base}/public/lead`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...fields, ...utm }) });
+    const res = await fetch(`${base}/public/lead${company ? `?c=${encodeURIComponent(company)}` : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...fields, ...utm }) });
     const body: unknown = await res.json().catch(() => null);
     const number = body && typeof body === "object" ? (body as { number?: unknown }).number : undefined;
     if (res.ok && typeof number === "number") return { ok: true, value: { number } };

@@ -1,5 +1,8 @@
 import { ArrowRight, Briefcase, ChartNoAxesColumn, Clock, Eye, EyeOff, FileText, Headset, House, Lock, Mail, ShieldCheck, UserRound, Users } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { useQuery } from "convex/react";
+import { Link } from "react-router";
+import { api } from "../../convex/_generated/api";
 import { APP_NAME, ROLE_LABEL } from "../data/catalog";
 import { toast } from "../data/store";
 import { errorText } from "../data/convex";
@@ -74,6 +77,7 @@ function HeroMock() {
 
 export default function Login() {
   const { signIn } = useAuthActions();
+  const signup = useQuery(api.tenants.signupStatus);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
@@ -180,6 +184,14 @@ export default function Login() {
                 Если у вас нет доступа к системе,
                 <br />
                 обратитесь к администратору вашей компании.
+                {signup?.open && (
+                  <>
+                    <br />
+                    <Link to="/register" className="mt-2 inline-block font-medium text-brand-ink hover:text-brand-deep">
+                      Зарегистрировать компанию
+                    </Link>
+                  </>
+                )}
               </div>
             </form>
 

@@ -5,7 +5,7 @@ import { textKey } from "./skills";
 import type { AuditEntity, AuditEntry, Role } from "./types";
 
 /** Автоматические авторы записей: действовал не сотрудник, а система, AI или канал. */
-export const AUDIT_SYSTEM_ACTORS = ["Система", "AI", "Telegram", "WhatsApp", "OLX", "Сайт", "API", "АТС"] as const;
+export const AUDIT_SYSTEM_ACTORS = ["Система", "AI", "Telegram", "WhatsApp", "OLX", "Сайт", "API", "АТС", "Платформа"] as const;
 export type SystemActor = (typeof AUDIT_SYSTEM_ACTORS)[number];
 export const isSystemActor = (s: string): s is SystemActor => (AUDIT_SYSTEM_ACTORS as readonly string[]).includes(s);
 

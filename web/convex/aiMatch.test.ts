@@ -12,7 +12,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const LLM_URL = "https://llm.test/v1/chat/completions";
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 

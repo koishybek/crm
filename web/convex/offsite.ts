@@ -6,7 +6,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
@@ -14,6 +14,7 @@ import { markError, markOk } from "./lib/health";
 import { s3Config, s3Delete, s3List, s3Missing, s3Put, S3Error, type S3Config } from "./lib/s3";
 import { backupName } from "./backup";
 import type { OffsiteStatus } from "../src/data/offsite";
+import { DEFAULT_TENANT, tenantOfDoc } from "./lib/tenantDb";
 
 /** Сколько копий храним во внешнем хранилище. */
 export const KEEP_OFFSITE = 30;
@@ -21,6 +22,11 @@ export const BACKUP_PREFIX = "backups/";
 export const FILES_PREFIX = "files/";
 /** Только наши копии: чужие объекты в том же бакете не трогаем. */
 const OUR_BACKUP = /^backups\/homemax-backup-\d{4}-\d{2}-\d{2}-\d{4}\.json$/;
+/**
+ * Папка компании в бакете (ТЗ §2.5): у компании по умолчанию — корень (как до SaaS: прежние копии на месте),
+ * у остальных — t/<компания>/. Удаление старых копий и файлов не выходит за папку своей компании.
+ */
+export const tenantPrefix = (tenantId: string): string => (tenantId === DEFAULT_TENANT ? "" : `t/${tenantId}/`);
 const COPY_FILES_KEY = "offsiteCopyFiles";
 
 /** За одну ночь файлов — не больше этого (и не дольше FILES_TIME_MS): остальное — следующей ночью. */
@@ -43,13 +49,15 @@ export const _backup = internalQuery({
   args: { backupId: v.id("backups") },
   handler: async (ctx, { backupId }) => {
     const b = await ctx.db.get(backupId);
-    return b ? { fileId: b.fileId, at: b.at, copyFiles: await copyFilesOn(ctx) } : null;
+    return b ? { fileId: b.fileId, at: b.at, copyFiles: await copyFilesOn(ctx), tenantId: tenantOfDoc(b) } : null;
   },
 });
 
 /** Копии сверх 30 последних — удалить (только наши имена). Возвращает, сколько удалено. */
-export async function pruneBackups(cfg: S3Config): Promise<number> {
-  const ours = (await s3List(cfg, BACKUP_PREFIX)).filter((o) => OUR_BACKUP.test(o.key)).map((o) => o.key);
+export async function pruneBackups(cfg: S3Config, prefix = ""): Promise<number> {
+  const ours = (await s3List(cfg, `${prefix}${BACKUP_PREFIX}`))
+    .filter((o) => o.key.startsWith(prefix) && OUR_BACKUP.test(o.key.slice(prefix.length)))
+    .map((o) => o.key);
   // Имя содержит дату и время — сортировка по имени = по времени.
   const old = ours.sort().reverse().slice(KEEP_OFFSITE);
   for (const key of old) await s3Delete(cfg, key);
@@ -113,7 +121,7 @@ export interface FilesSync {
 }
 
 /** Инкрементальная синхронизация файлов: удалённые у нас — удалить там, новые — скопировать (с потолком на ночь). */
-export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.now()): Promise<FilesSync> {
+export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.now(), prefix = ""): Promise<FilesSync> {
   let removed = 0;
   for (let cursor: string | null = null; ; ) {
     const page: { items: { id: Id<"offsiteFiles">; key: string }[]; cursor: string; isDone: boolean } = await ctx.runQuery(internal.offsite._gone, { cursor });
@@ -135,7 +143,7 @@ export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.
       }
       const blob = await ctx.storage.get(f.storageId);
       if (!blob) continue;
-      const key = `${FILES_PREFIX}${f.storageId}`;
+      const key = `${prefix}${FILES_PREFIX}${f.storageId}`;
       await s3Put(cfg, key, blob, f.contentType ?? "application/octet-stream");
       done.push({ storageId: f.storageId, key, size: f.size });
       copied++;
@@ -161,9 +169,10 @@ export const push = internalAction({
     try {
       const blob = await ctx.storage.get(b.fileId);
       if (!blob) throw new Error("файл копии не найден в хранилище");
-      await s3Put(cfg, `${BACKUP_PREFIX}${backupName(b.at)}`, blob, "application/json");
-      const pruned = await pruneBackups(cfg);
-      const files = b.copyFiles ? await syncFiles(ctx, cfg, started) : null;
+      const prefix = tenantPrefix(b.tenantId);
+      await s3Put(cfg, `${prefix}${BACKUP_PREFIX}${backupName(b.at)}`, blob, "application/json");
+      const pruned = await pruneBackups(cfg, prefix);
+      const files = b.copyFiles ? await syncFiles(ctx, cfg, started, prefix) : null;
       await ctx.runMutation(internal.offsite._pushed, { backupId, pruned, files: files ?? undefined });
     } catch (e) {
       const reason = errorText(e);

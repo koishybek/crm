@@ -3,7 +3,7 @@
 // Вся переписка параллельно ложится в «Сообщения» (inbox.ts), заявка связывается с диалогом.
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation, internalQuery } from "./lib/functions";
 import { notify, nowIso, staffIds } from "./lib/domain";
 import { intakeLead } from "./lib/intake";
 import { normalizeLogin } from "./lib/login";

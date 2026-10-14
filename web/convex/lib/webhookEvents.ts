@@ -4,7 +4,7 @@
 // Отправка, подпись и повторы — convex/webhooks.ts.
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { hmacSha256Hex, randomToken, safeEqual } from "./crypto";
 import type { LeadStatus, OrderStatus } from "../../src/data/types";
 import type { WebhookEvent, WebhookEventOrTest } from "../../src/data/webhookEvents";

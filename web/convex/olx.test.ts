@@ -33,7 +33,7 @@ type Rec = Record<string, unknown>;
 const newTest = () => convexTest(schema, modules);
 type TestEnv = ReturnType<typeof newTest>;
 
-const T = "t-test";
+const T = "t-komfort";
 const SITE = "https://demo-123.convex.site";
 const APP = "https://app.test";
 const CALLBACK = `${SITE}/olx/callback`;

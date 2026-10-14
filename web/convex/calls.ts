@@ -3,10 +3,10 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requirePerm, requireRole } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
-import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
+import { nextNumber, notify, nowIso, staffIds } from "./lib/domain";
 import { queueStats } from "./lib/stats";
 import { toCall } from "./lib/dto";
 import { markError, markOk } from "./lib/health";
@@ -24,6 +24,9 @@ import type { DialResult } from "../src/data/pbx";
 import { aiDraft, aiSummary } from "./schema";
 import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
+import { boundTenant, tenantOf, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
+import { hasModule, requireModule } from "./lib/tenant";
+import { safeEqual } from "./lib/crypto";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
 const clientNumber = (c: Pick<Doc<"calls">, "direction" | "from" | "to">) => (c.direction === "in" ? c.from : c.to);
@@ -89,7 +92,7 @@ export const upload = mutation({
     const p = normPhone(phone);
     const client = validPhone(p) ? await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first() : null;
     const id = await ctx.db.insert("calls", {
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       direction: "in",
       from: p,
       to: "",
@@ -176,7 +179,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   const at = nowIso();
   const number = await nextNumber(ctx);
   const leadId = await ctx.db.insert("leads", {
-    tenantId: TENANT,
+    tenantId: tenantOf(ctx),
     number,
     clientId: client._id,
     clientName: client.name,
@@ -273,7 +276,7 @@ export const _ingest = internalMutation({
       const p = direction === "in" ? from : to;
       const client = validPhone(p) ? await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first() : null;
       const id = await ctx.db.insert("calls", {
-        tenantId: TENANT,
+        tenantId: tenantOf(ctx),
         externalId: a.externalId,
         direction,
         from,
@@ -342,9 +345,20 @@ export const dial = action({
 
 const pbxSecretOf = async (ctx: QueryCtx): Promise<string | null> => (await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique())?.value ?? null;
 
-export const _pbxSecret = internalQuery({
-  args: {},
-  handler: (ctx) => pbxSecretOf(ctx),
+/**
+ * Компания события АТС по ключу (ТЗ §2.5): у каждой компании свой ключ — ищем его среди всех компаний
+ * (сравнение за постоянное время). configured — ключ выпущен хоть у одной; locked — у компании нет модуля «Телефония».
+ */
+export const _pbxTenant = internalQuery({
+  args: { given: v.string() },
+  handler: async (ctx, { given }): Promise<{ configured: boolean; tenantId: string | null; locked: boolean }> => {
+    const rows = await unscopedDb(ctx).query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).collect();
+    if (!rows.length) return { configured: false, tenantId: null, locked: false };
+    const match = given ? rows.find((r) => safeEqual(given, r.value)) : undefined;
+    if (!match) return { configured: true, tenantId: null, locked: false };
+    const tenantId = tenantOfDoc(match);
+    return { configured: true, tenantId, locked: !(await hasModule(ctx, tenantId, "telephony")) };
+  },
 });
 
 /**
@@ -354,8 +368,10 @@ export const _pbxSecret = internalQuery({
 export const _pbxRejected = internalMutation({
   args: { via: v.union(v.literal("header"), v.literal("query"), v.literal("none")) },
   handler: async (ctx, { via }): Promise<void> => {
+    // Чужой ключ не указывает на компанию: отметить некому, пока компаний на платформе несколько.
+    if (!boundTenant(ctx)) return;
     await markError(ctx, "pbx", "АТС прислала событие без ключа или с неверным ключом");
-    if (!(await hitLimit(ctx, "pbx:rejected", 1, 10 * 60_000))) return;
+    if (!(await hitLimit(ctx, `pbx:rejected:${tenantOf(ctx)}`, 1, 10 * 60_000))) return;
     await audit(ctx, "АТС", "integration.pbxRejected", "Телефония: событие отклонено — ключ не передан или неверный", { entityId: "pbx", meta: { via } });
   },
 });
@@ -387,6 +403,7 @@ export const regeneratePbxSecret = mutation({
   args: {},
   handler: async (ctx) => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "telephony");
     const value = Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, "0")).join("");
     const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique();
     if (row) await ctx.db.patch(row._id, { value });

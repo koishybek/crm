@@ -4,7 +4,7 @@
 // (браузер → «Сохранить как PDF»). Клиенту — ссылка /d/<токен> на страницу только для чтения: в базе хэш токена и срок.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requirePerm, requireRole, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { randomToken, sha256Hex } from "./lib/crypto";
@@ -35,6 +35,8 @@ import {
 import { netReceived } from "../src/data/money";
 import type { OrderClientSend } from "../src/data/orderClientChat";
 import { money } from "../src/lib/format";
+import { unscopedDb } from "./lib/tenantDb";
+import { requireModule } from "./lib/tenant";
 
 const REQUISITES_KEY = "company.requisites";
 /** Ссылок клиенту на сотрудника в час. */
@@ -157,6 +159,7 @@ export const issue = mutation({
   args: { orderId: v.id("orders"), kind: documentKind, reissue: v.optional(v.boolean()) },
   handler: async (ctx, { orderId, kind, reissue }): Promise<Id<"documents">> => {
     const me = await requirePerm(ctx, "money.view", STAFF);
+    await requireModule(ctx, me.tenantId, "documents");
     const o = await ctx.db.get(orderId);
     if (!o) throw new ConvexError("Заказ не найден");
     if (kind === "act" && !ACT_STATUSES.includes(o.status)) throw new ConvexError(`Акт выпускают, когда работа сдана, а заказ — «${ORDER_STATUS[o.status].label}»`);
@@ -215,6 +218,7 @@ export const share = mutation({
   args: { id: v.id("documents"), send: v.boolean() },
   handler: async (ctx, { id, send }): Promise<{ url: string; delivery: OrderClientSend | null }> => {
     const me = await requirePerm(ctx, "money.view", STAFF);
+    await requireModule(ctx, me.tenantId, "documents");
     const d = await ctx.db.get(id);
     if (!d) throw new ConvexError("Документ не найден");
     if (d.replacedAt) throw new ConvexError("Документ заменён новым — отправьте актуальный");
@@ -249,7 +253,8 @@ export const publicView = query({
   args: { token: v.string() },
   handler: async (ctx, { token }): Promise<DocumentSnapshot | null> => {
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return null;
-    const d = await ctx.db
+    // Ссылка открывается без входа: документ ищем среди всех компаний — по неугадываемому токену.
+    const d = await unscopedDb(ctx)
       .query("documents")
       .withIndex("by_public_token", (q) => q.eq("publicTokenHash", sha256Hex(token)))
       .unique();

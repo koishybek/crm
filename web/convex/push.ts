@@ -5,7 +5,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./lib/functions";
 import { currentUser } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";

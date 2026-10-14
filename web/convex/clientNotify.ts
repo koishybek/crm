@@ -5,7 +5,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit, lowerFirst } from "./lib/audit";
 import { log, nowIso } from "./lib/domain";

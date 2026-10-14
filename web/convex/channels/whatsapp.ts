@@ -6,7 +6,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import { httpAction, internalAction, internalMutation, internalQuery, query, type ActionCtx, type QueryCtx } from "../_generated/server";
+import { httpAction, internalAction, internalMutation, internalQuery, query, type ActionCtx, type QueryCtx } from "../lib/functions";
 import { canTranscribe, transcribe } from "../ai";
 import { env } from "../env";
 import { OWNER, requireRole } from "../lib/access";
@@ -37,6 +37,7 @@ import {
 } from "../lib/whatsapp";
 import { phone as fmtPhone } from "../../src/lib/format";
 import type { MessageKind, WhatsAppSettings } from "../../src/data/types";
+import { actionFor, DEFAULT_TENANT } from "../lib/tenantDb";
 
 // ── Настройки ────────────────────────────────────────────────────────────────
 
@@ -511,7 +512,9 @@ export const whatsappVerify = httpAction(async (_ctx, request) => {
  * POST: события. Подпись — по сырым байтам до разбора JSON. Обработка (файлы, расшифровка, запись) — фоном,
  * Meta отвечаем сразу: иначе она повторяет доставку до 7 дней.
  */
-export const whatsappWebhook = httpAction(async (ctx, request) => {
+export const whatsappWebhook = httpAction(async (base, request) => {
+  // Номер из окружения (WHATSAPP_PHONE_NUMBER_ID) — номер компании по умолчанию: его клиенты — её клиенты (ТЗ §2.5).
+  const ctx = actionFor(base, DEFAULT_TENANT);
   const secrets = [env("WHATSAPP_APP_SECRET"), env("WHATSAPP_APP_SECRET_PREVIOUS")].filter((s): s is string => !!s);
   const phoneNumberId = env("WHATSAPP_PHONE_NUMBER_ID");
   if (!secrets.length || !phoneNumberId) return plain(503, "not configured");

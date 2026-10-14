@@ -5,11 +5,12 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { dropFile } from "./lib/files";
 import { RETENTION_DEFAULT_DAYS, retentionLabel, retentionProblem, type RetentionSettings } from "../src/data/retention";
+import { perTenant } from "./lib/tenant";
 
 type Kind = "recordings" | "transcripts";
 const DAYS_KEY: Record<Kind, string> = { recordings: "retentionRecordingsDays", transcripts: "retentionTranscriptsDays" };
@@ -93,7 +94,7 @@ async function sweep(ctx: MutationCtx, kind: Kind, nowMs: number): Promise<{ rem
 /** Раз в сутки (crons.ts); большие хвосты — пачками по 100, следующая пачка — сразу следом. */
 export const run = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ recordings: number; transcripts: number }> => {
+  handler: async (cronCtx): Promise<{ recordings: number; transcripts: number }> => perTenant(cronCtx, internal.retention.run, { recordings: 0, transcripts: 0 }, async (ctx) => {
     const now = Date.now();
     const rec = await sweep(ctx, "recordings", now);
     const tr = await sweep(ctx, "transcripts", now);
@@ -103,5 +104,5 @@ export const run = internalMutation({
     }
     if (rec.more || tr.more) await ctx.scheduler.runAfter(0, internal.retention.run, {});
     return { recordings: rec.removed, transcripts: tr.removed };
-  },
+  }),
 });

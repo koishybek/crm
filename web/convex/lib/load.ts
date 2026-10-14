@@ -1,6 +1,6 @@
 // Загрузка мастера (ТЗ п.14, E9): сколько заказов у него в работе — назначен, принят, в работе, ждёт клиента.
 import type { Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { WORK_STATUSES } from "../../src/data/catalog";
 
 /** Заказов в работе у одного мастера — по его индексу, без перебора чужих заказов. */

@@ -1,7 +1,7 @@
 // Справочник районов на сервере (ТЗ п.12.3): хранится в settings («districts», JSON), пока владелец его не правил —
 // районы по умолчанию из src/data/cities.ts. Район заказа, заявки и мастера — только из справочника его города.
 import { ConvexError } from "convex/values";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { canonicalDistrict, DEFAULT_DISTRICTS, districtKey, districtsOf, DISTRICT_LIMITS, normalizeCity, type DistrictMap } from "../../src/data/cities";
 
 export const DISTRICTS_KEY = "districts";

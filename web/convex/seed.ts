@@ -5,10 +5,12 @@
 import { ConvexError, v } from "convex/values";
 import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./lib/functions";
 import { normalizeLogin } from "./lib/login";
 import { env } from "./env";
 import { createLogin } from "./users";
+import { DEFAULT_TENANT, forTenant, unscopedDb } from "./lib/tenantDb";
+import { MODULES } from "../src/data/plans";
 import { passwordProblem } from "../src/data/passwordRules";
 
 export function assertSeedAllowed(): void {
@@ -51,6 +53,7 @@ const WIPE_TABLES = [
   "authVerificationCodes",
   "authVerifiers",
   "authRateLimits",
+  "tenants",
 ] as const;
 const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));
 
@@ -67,8 +70,10 @@ async function resetStats(ctx: MutationCtx, table: string): Promise<void> {
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
 export const ingest = internalMutation({
   args: { table: tableArg, rows: v.array(v.any()) },
-  handler: async (ctx, { table, rows }) => {
+  handler: async (base, { table, rows }) => {
     assertSeedAllowed();
+    // Демо-данные — компании по умолчанию (t-komfort, «Home Max Service»).
+    const ctx = forTenant(base, DEFAULT_TENANT);
     const ids: string[] = [];
     for (const r of rows) ids.push(await ctx.db.insert(table, r));
     await resetStats(ctx, table);
@@ -78,8 +83,9 @@ export const ingest = internalMutation({
 
 export const patchMany = internalMutation({
   args: { table: tableArg, patches: v.array(v.object({ id: v.string(), fields: v.any() })) },
-  handler: async (ctx, { table, patches }) => {
+  handler: async (base, { table, patches }) => {
     assertSeedAllowed();
+    const ctx = forTenant(base, DEFAULT_TENANT);
     for (const p of patches) {
       const id = ctx.db.normalizeId(table, p.id);
       if (id) await ctx.db.patch(id, p.fields);
@@ -93,8 +99,10 @@ export const wipe = internalMutation({
   args: { table: v.union(...WIPE_TABLES.map((t) => v.literal(t))) },
   handler: async (ctx, { table }) => {
     assertSeedAllowed();
-    const rows = await ctx.db.query(table as TableNames).take(400);
-    for (const r of rows) await ctx.db.delete(r._id);
+    // «--wipe» очищает демо-деплоймент целиком — все компании.
+    const db = unscopedDb(ctx);
+    const rows = await db.query(table as TableNames).take(400);
+    for (const r of rows) await db.delete(r._id);
     return rows.length;
   },
 });
@@ -115,7 +123,7 @@ export const telegramLinks = internalQuery({
   args: {},
   handler: async (ctx) => {
     assertSeedAllowed();
-    const users = await ctx.db.query("users").collect();
+    const users = await unscopedDb(ctx).query("users").collect();
     return users.filter((u) => u.telegramChatId && u.email).map((u) => ({ login: u.email!, name: u.name ?? "", chatId: u.telegramChatId! }));
   },
 });
@@ -134,6 +142,21 @@ export const processCalls = internalMutation({
   handler: async (ctx, { ids }) => {
     assertSeedAllowed();
     for (const callId of ids) await ctx.scheduler.runAfter(0, internal.ai.processCall, { callId });
+  },
+});
+
+/** Строка демо-компании: тариф «Про», все модули, без комиссии платформы — демо работает как до SaaS. */
+export const tenant = internalMutation({
+  args: { name: v.string() },
+  handler: async (ctx, { name }): Promise<void> => {
+    assertSeedAllowed();
+    const row = await ctx.db
+      .query("tenants")
+      .withIndex("by_slug", (q) => q.eq("slug", DEFAULT_TENANT))
+      .unique();
+    const fields = { name, plan: "pro" as const, modules: [...MODULES], status: "active" as const, migratedAt: new Date().toISOString() };
+    if (row) await ctx.db.patch(row._id, fields);
+    else await ctx.db.insert("tenants", { slug: DEFAULT_TENANT, createdAt: new Date().toISOString(), ...fields });
   },
 });
 
@@ -159,7 +182,7 @@ export const bootstrapOwner = internalAction({
     if (problem) throw new ConvexError(problem);
     const login = normalizeLogin(a.login);
     if (!a.name.trim() || !login) throw new ConvexError("Укажите имя и логин");
-    await ctx.runMutation(internal.users._insertUser, { name: a.name.trim(), login, role: "owner", phone: login.includes("@") ? undefined : login, firstOwner: true });
+    await ctx.runMutation(internal.users._insertUser, { name: a.name.trim(), login, role: "owner", phone: login.includes("@") ? undefined : login, firstOwner: true, tenantId: DEFAULT_TENANT });
     await createLogin(ctx, login, a.password);
     return login;
   },

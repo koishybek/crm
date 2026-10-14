@@ -3,7 +3,7 @@
 // ограничения длины. Повторная отправка той же заявки в течение 10 минут возвращает тот же номер — без дубля.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { httpAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { httpAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { markOk } from "./lib/health";
@@ -11,6 +11,8 @@ import { json, readJson, str, type HeaderMap } from "./lib/httpUtil";
 import { intakeLead } from "./lib/intake";
 import { kzPhone } from "./lib/phone";
 import { hitLimit } from "./lib/rateLimit";
+import { publicTenant } from "./lib/tenant";
+import { actionFor, tenantOf } from "./lib/tenantDb";
 import { ingestMessage, linkConversation } from "./inbox";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -122,8 +124,19 @@ export function originAllowed(origin: string | null, cfg: { app: string | null; 
 
 const cors = (origin: string | null): HeaderMap => (origin ? { "Access-Control-Allow-Origin": origin, Vary: "Origin" } : {});
 
+/** Компания формы (ТЗ §2.5): ?c=<адрес компании> в адресе запроса или company в теле; без них — первая компания платформы. */
+export const _publicTenant = internalQuery({
+  args: { company: v.optional(v.string()) },
+  handler: (ctx, { company }): Promise<string | null> => publicTenant(ctx, company?.slice(0, 60)),
+});
+
+const companyOf = (request: Request): string | undefined => new URL(request.url).searchParams.get("c") ?? undefined;
+
 /** Preflight браузера перед POST с JSON. */
-export const leadOptions = httpAction(async (ctx, request) => {
+export const leadOptions = httpAction(async (raw, request) => {
+  const tenantId = await raw.runQuery(internal.site._publicTenant, { company: companyOf(request) });
+  if (!tenantId) return new Response(null, { status: 404 });
+  const ctx = actionFor(raw, tenantId);
   const origin = request.headers.get("origin");
   if (!originAllowed(origin, await ctx.runQuery(internal.site._origins, {}))) return new Response(null, { status: 403 });
   return new Response(null, {
@@ -132,11 +145,15 @@ export const leadOptions = httpAction(async (ctx, request) => {
   });
 });
 
-export const leadPost = httpAction(async (ctx, request) => {
+export const leadPost = httpAction(async (raw, request) => {
+  const body = await readJson(request, MAX_BODY);
+  const company = companyOf(request) ?? (body.ok && typeof body.value.company === "string" ? body.value.company : undefined);
+  const tenantId = await raw.runQuery(internal.site._publicTenant, { company });
+  if (!tenantId) return json(404, { error: "Компания не найдена — проверьте ссылку на форму" });
+  const ctx = actionFor(raw, tenantId);
   const origin = request.headers.get("origin");
   if (!originAllowed(origin, await ctx.runQuery(internal.site._origins, {}))) return json(403, { error: "Этот сайт не подключён к приёму заявок" });
   const headers = cors(origin);
-  const body = await readJson(request, MAX_BODY);
   if (!body.ok) return json(body.status, { error: body.error }, headers);
   const parsed = parseSiteLead(body.value, Date.now());
   if (!parsed.ok) return json(400, { error: parsed.error }, headers);
@@ -178,13 +195,13 @@ export const _submit = internalMutation({
   args: { name: v.string(), phone: v.string(), serviceId: v.optional(v.string()), city: v.optional(v.string()), description: v.string(), utm: v.optional(utmValidator) },
   handler: async (ctx, a): Promise<SubmitResult> => {
     const now = Date.now();
-    if (!(await hitLimit(ctx, "site:all", GLOBAL_PER_MIN, 60_000))) return { ok: false, status: 429, error: "Сейчас слишком много заявок — попробуйте через минуту" };
+    if (!(await hitLimit(ctx, `site:all:${tenantOf(ctx)}`, GLOBAL_PER_MIN, 60_000))) return { ok: false, status: 429, error: "Сейчас слишком много заявок — попробуйте через минуту" };
     const cat = await loadCatalog(ctx);
     const svc = cat.services.find((s) => s.id === a.serviceId && s.active !== false);
     const serviceId = svc?.id ?? (cat.services.some((s) => s.id === "other") ? "other" : (cat.services[0]?.id ?? "other"));
     const dup = await sameRecentLead(ctx, a, serviceId, now);
     if (dup !== null) return { ok: true, number: dup, duplicate: true };
-    if (!(await hitLimit(ctx, `site:phone:${a.phone}`, PHONE_PER_HOUR, 3600_000))) return { ok: false, status: 429, error: "С этого номера уже есть заявки — мы скоро перезвоним" };
+    if (!(await hitLimit(ctx, `site:phone:${tenantOf(ctx)}:${a.phone}`, PHONE_PER_HOUR, 3600_000))) return { ok: false, status: 429, error: "С этого номера уже есть заявки — мы скоро перезвоним" };
 
     const description = a.description || "Заявка с сайта";
     const res = await intakeLead(ctx, {
@@ -217,10 +234,12 @@ export const _submit = internalMutation({
 
 export const settings = query({
   args: {},
-  handler: async (ctx): Promise<{ origins: string[]; appUrl: string | null; endpoint: string | null }> => {
-    await requireRole(ctx, OWNER);
+  handler: async (ctx): Promise<{ origins: string[]; appUrl: string | null; endpoint: string | null; company: string }> => {
+    const me = await requireRole(ctx, OWNER);
     const site = env("CONVEX_SITE_URL")?.replace(/\/+$/, "");
-    return { origins: await siteOrigins(ctx), appUrl: appOrigin(), endpoint: site ? `${site}/public/lead` : null };
+    // Адрес компании в ссылке формы и эндпоинте: форма и эндпоинт общие для платформы.
+    const company = encodeURIComponent(me.tenantId);
+    return { origins: await siteOrigins(ctx), appUrl: appOrigin(), endpoint: site ? `${site}/public/lead?c=${company}` : null, company: me.tenantId };
   },
 });
 

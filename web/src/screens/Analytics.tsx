@@ -19,6 +19,7 @@ import { ExportButton } from "../components/ExportButton";
 import { Card, KpiCard, Loading, PageHeader } from "../components/ui";
 import { PayoutsCard } from "../components/PayoutsCard";
 import { AnalyticsCampaigns } from "./AnalyticsCampaigns";
+import { ModuleGate } from "../components/ModuleGate";
 import { CashFlowRow } from "../components/CashFlowRow";
 import { AdSpendModal, OperatorsCard, SourceCostsCard } from "./AnalyticsCards";
 import { ExecutorsTable, FiltersBar, FreshnessLine, MonthsCard, PeriodPicker, RepeatCard, type StatsFilters } from "./AnalyticsStats";
@@ -137,6 +138,11 @@ export default function Analytics() {
             <KpiCard icon={ChartNoAxesColumn} tone="violet" label="Маржа" value={money(d.s.margin)} trend={d.trends.margin} />
             <KpiCard icon={Banknote} tone="yellow" label="Выполнено заказов" value={num(d.s.count)} trend={d.trends.count} />
           </div>
+          {d.s.fee > 0 && (
+            <p className="text-[13.5px] text-muted">
+              Комиссия платформы: <span className="font-semibold text-ink tabular-nums">{money(d.s.fee)}</span> — уже вычтена из маржи
+            </p>
+          )}
           <CashFlowRow cur={r.cur.t} prev={r.prev} caption={caption} />
         </>
       ) : (
@@ -258,7 +264,7 @@ export default function Analytics() {
         <MonthsCard filter={filter} money={r.money} />
       </div>
       {/* Кампании — с деньгами: только тем, кому сервер отдаёт суммы (руководителю и без права на маржу — нет). */}
-      {r.money && <div className="mt-4"><AnalyticsCampaigns from={dayStart(range.from)} to={dayEnd(range.to)} /></div>}
+      {r.money && <div className="mt-4"><ModuleGate module="analytics_pro" card><AnalyticsCampaigns from={dayStart(range.from)} to={dayEnd(range.to)} /></ModuleGate></div>}
 
       {r.money && (
         <>

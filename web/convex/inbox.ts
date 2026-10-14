@@ -6,11 +6,11 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { can, currentUser, requirePerm } from "./lib/access";
 import { audit, type AuditActor } from "./lib/audit";
 import { isMeaningful, isPlaceholder, PLACEHOLDER } from "./lib/chat";
-import { notify, nowIso, TENANT } from "./lib/domain";
+import { notify, nowIso } from "./lib/domain";
 import { fileSigner, type FileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { intakeLead } from "./lib/intake";
@@ -22,6 +22,8 @@ import { aiDraft, aiSummary, channel, messageKind } from "./schema";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { phone as fmtPhone } from "../src/lib/format";
 import type { AiDraft, AiSummary, Channel, Conversation, ConversationDetail, ConversationDraft, ConversationMessage, LeadOrigin, MessageKind } from "../src/data/types";
+import { tenantOf } from "./lib/tenantDb";
+import { actionHasModule } from "./lib/tenant";
 
 const MAX_TEXT = 4000;
 const PREVIEW = 160;
@@ -202,7 +204,7 @@ export async function ingestMessage(ctx: MutationCtx, a: IngestInput): Promise<I
   if (!conv) {
     const client = await clientByPhone(ctx, phone);
     const id = await ctx.db.insert("conversations", {
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       channel: a.channel,
       externalId,
       contactName: name ?? client?.name,
@@ -485,7 +487,7 @@ export const _autoLead = internalAction({
     const job = await ctx.runQuery(internal.inbox._autoLeadJob, a);
     if (!job) return;
     let parsed: { ai?: AiSummary; draft?: AiDraft } = {};
-    if (canExtract()) {
+    if (canExtract() && (await actionHasModule(ctx, "ai"))) {
       try {
         const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
         parsed = toSummary(await extract(job.text, hint, "message"), (id) => hint.services.find((s) => s.id === id)?.label ?? id);
@@ -861,7 +863,7 @@ export const draftFromConversation = action({
     const src = await ctx.runQuery(internal.inbox._draftSource, { id });
     if (!src) throw new ConvexError("Диалог не найден");
     const base: ConversationDraft = { channel: src.channel, phone: src.phone, name: src.name, text: src.text, draft: { description: src.text || undefined } };
-    if (!src.text || !canExtract()) return base;
+    if (!src.text || !canExtract() || !(await actionHasModule(ctx, "ai"))) return base;
     try {
       const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
       const { ai, draft } = toSummary(await extract(src.text, hint, "message"), (sid) => hint.services.find((s) => s.id === sid)?.label ?? sid);

@@ -16,6 +16,7 @@ import { DebtorsCard, OwnerMoneyKpis } from "../components/OwnerMoney";
 import { PayoutsCard } from "../components/PayoutsCard";
 import { Avatar, Badge, Card, KpiCard, Loading, PageHeader, Select, TextLink } from "../components/ui";
 import { cn, dayDiff, deadline, num, shortName, whenShort } from "../lib/format";
+import { OnboardingCard } from "./CompanyCards";
 
 export function PeriodSelect({ value, onChange, options = PERIODS.map((p) => p.id) }: { value: PeriodId; onChange: (p: PeriodId) => void; options?: PeriodId[] }) {
   return (
@@ -98,6 +99,7 @@ export default function Dashboard() {
   return (
     <>
       <PageHeader title="Главная" subtitle="Ключевые показатели и свежая информация по вашему бизнесу" actions={<PeriodSelect value={period} onChange={setPeriod} options={["today", "7d", "30d"]} />} />
+      <OnboardingCard />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard deco icon={FileText} tone="yellow" label="Новые заявки" value={num(k.leads.value)} trend={k.leads.trend} onClick={() => nav("/leads")} />

@@ -3,7 +3,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { can, currentUser, requirePerm, type Me } from "./lib/access";
 import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
 import { withDefaultPrices } from "./lib/defaultPrices";
@@ -14,6 +14,8 @@ import { cleanMoney, cleanText } from "./lib/limits";
 import { ACTIVE_STATUSES, CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type ServiceInfo, type Tone } from "../src/data/catalog";
 import { normalizeSkills, skillsDiff, SKILLS_PER_CATEGORY, textKey } from "../src/data/skills";
 import { money } from "../src/lib/format";
+import { publicTenant } from "./lib/tenant";
+import { forTenant } from "./lib/tenantDb";
 
 /**
  * Навыки направления. Строки, сохранённые до появления навыков (поля нет), получают навыки по умолчанию;
@@ -88,8 +90,12 @@ export const _categories = internalQuery({
 
 /** Для публичной формы заявки (/zayavka, без входа): только названия активных направлений и услуг — без цен и ставок. */
 export const publicList = query({
-  args: {},
-  handler: async (ctx): Promise<{ categories: { id: string; label: string }[]; services: { id: string; label: string; category: string }[] }> => {
+  args: { company: v.optional(v.string()) },
+  handler: async (pub, { company }): Promise<{ categories: { id: string; label: string }[]; services: { id: string; label: string; category: string }[] } | null> => {
+    // Форма — общая для платформы: компания по адресу (/zayavka?c=…), без адреса — первая компания (как до SaaS).
+    const tenantId = await publicTenant(pub, company);
+    if (!tenantId) return null;
+    const ctx = forTenant(pub, tenantId);
     const c = await loadCatalog(ctx);
     const categories = c.categories.filter((x) => x.active !== false);
     const open = new Set(categories.map((x) => x.id));
@@ -100,8 +106,8 @@ export const publicList = query({
   },
 });
 
-/** Перенести значения по умолчанию в базу перед первой правкой. */
-async function materialize(ctx: MutationCtx) {
+/** Перенести значения по умолчанию в базу перед первой правкой (и при регистрации компании — её справочник). */
+export async function materialize(ctx: MutationCtx) {
   if ((await ctx.db.query("categories").first()) || (await ctx.db.query("services").first())) return;
   for (const [i, c] of DEFAULT_CATEGORIES.entries()) await ctx.db.insert("categories", { key: c.id, label: c.label, tone: c.tone, order: i, active: true, skills: c.skills ?? [] });
   for (const [i, s] of withDefaultPrices(DEFAULT_SERVICES).entries()) {

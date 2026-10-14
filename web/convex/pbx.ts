@@ -5,10 +5,10 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, httpAction, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole, STAFF } from "./lib/access";
 import { audit, maskPhone } from "./lib/audit";
-import { safeEqual } from "./lib/crypto";
+
 import { dropFile } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
@@ -22,6 +22,9 @@ import { RECORDING_MAX_BYTES } from "./ai";
 import { env } from "./env";
 import { cleanExtension, isPbxProvider, ONLINEPBX_DOMAIN, PBX_INFO, PBX_PROVIDERS, type DialResult, type PbxDialState, type PbxProvider, type PbxSettingsView } from "../src/data/pbx";
 import { ROLE_LABEL } from "../src/data/catalog";
+import { actionFor } from "./lib/tenantDb";
+import { lockText } from "../src/data/plans";
+import { requireModuleAction } from "./lib/tenant";
 
 const KEY = { provider: "pbx.provider", public: "pbx.public", secrets: "pbx.secrets", session: "pbx.sessionKey" } as const;
 const pbxProvider = v.union(...PBX_PROVIDERS.map((p) => v.literal(p)));
@@ -153,6 +156,7 @@ export const save = action({
   args: { provider: pbxProvider, fields: v.record(v.string(), v.string()) },
   handler: async (ctx, { provider, fields }): Promise<void> => {
     if ((await ctx.runQuery(internal.users._viewerRole, {})) !== "owner") throw new ConvexError("Нет доступа");
+    await requireModuleAction(ctx, "telephony");
     const state: PbxState = await ctx.runQuery(internal.pbx._state, {});
     const same = state.provider === provider && !!state.sealed;
     const { pub, secret } = cleanFields(provider, fields, same);
@@ -297,6 +301,8 @@ export const _dialed = internalMutation({
 
 /** Звонок через АТС: АТС звонит сотруднику на внутренний номер и соединяет с клиентом; не подключено — tel: с телефона. */
 export async function dialHandler(ctx: ActionCtx, phone: string, context?: string): Promise<DialResult> {
+  // Звонок через АТС — модуль «Телефония» (ТЗ §24.3).
+  await requireModuleAction(ctx, "telephony");
   const start: DialStart = await ctx.runMutation(internal.pbx._dialStart, { phone });
   const href = `tel:+${start.phone}`;
   if (!start.state?.provider) return { mode: "tel", href, reason: "АТС не подключена — звоните с телефона" };
@@ -338,20 +344,23 @@ export const _callByExternal = internalQuery({
  * (у Zadarma) → события в calls._ingest → скачивание записи фоном. GET — проверка адреса (Zadarma: zd_echo).
  */
 export function pbxWebhook(provider: PbxProvider) {
-  return httpAction(async (ctx, request) => {
+  return httpAction(async (raw, request) => {
+    const url = new URL(request.url);
+    // Ключ АТС определяет и компанию (ТЗ §2.5): у каждой свой.
+    const header = request.headers.get("x-pbx-secret");
+    const given = header ?? url.searchParams.get("key");
+    const found = await raw.runQuery(internal.calls._pbxTenant, { given: (given ?? "").slice(0, 200) });
+    if (!found.configured) return new Response("not configured", { status: 503 });
+    if (!given || !found.tenantId) {
+      await raw.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
+      return new Response("forbidden", { status: 403 });
+    }
+    const ctx = actionFor(raw, found.tenantId);
     const reject = async (status: number, body: string, why: string) => {
       await ctx.runMutation(internal.health._mark, { key: "pbx", ok: false, note: why });
       return new Response(body, { status });
     };
-    const url = new URL(request.url);
-    const expected = await ctx.runQuery(internal.calls._pbxSecret, {});
-    if (!expected) return new Response("not configured", { status: 503 });
-    const header = request.headers.get("x-pbx-secret");
-    const given = header ?? url.searchParams.get("key");
-    if (!given || !safeEqual(given, expected)) {
-      await ctx.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
-      return new Response("forbidden", { status: 403 });
-    }
+    if (found.locked) return reject(403, "module disabled", lockText("telephony"));
     if (request.method === "GET") {
       // Zadarma проверяет адрес: GET ?zd_echo=<строка> — ответ должен быть этой строкой.
       const echo = url.searchParams.get("zd_echo");

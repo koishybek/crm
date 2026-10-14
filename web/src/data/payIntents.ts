@@ -158,6 +158,8 @@ export interface PaySettingsView {
   kaspiTemplate: string | null;
   keyIssue: string | null;
   siteUrl: string | null;
+  /** Адрес компании — в адресе уведомлений (?c=…): платформа общая, уведомление должно попасть в свою компанию; null — компания по умолчанию. */
+  company: string | null;
 }
 
 /** Путь уведомлений провайдера: https://<deployment>.convex.site/pay/<провайдер>. */

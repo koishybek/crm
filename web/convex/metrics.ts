@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { query } from "./_generated/server";
+import { query } from "./lib/functions";
 import { can, inScope, requirePerm, requireRole, scopeOf, TEAM } from "./lib/access";
 import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";

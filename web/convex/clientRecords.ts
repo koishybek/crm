@@ -3,7 +3,7 @@
 // (lib/files.ts); t — метка их обновления (src/data/files.ts).
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { query } from "./_generated/server";
+import { query } from "./lib/functions";
 import { can, noAccess, requirePerm } from "./lib/access";
 import { toCall } from "./lib/dto";
 import { fileSigner } from "./lib/files";

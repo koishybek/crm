@@ -4,7 +4,7 @@
 // хранится сутки и удаляется уборкой; каждая выгрузка — в журнале (без персональных данных в деталях).
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, type ActionCtx } from "./lib/functions";
 import { requireRole, STAFF, type Me } from "./lib/access";
 import { almatyStamp, audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
@@ -18,6 +18,7 @@ import { EXPORT_KIND, EXPORT_KINDS, EXPORT_MAX_ROWS, EXPORT_TTL_MS, exportFileNa
 import { exportAllowed, exportColumns } from "../src/data/exportAccess";
 import { toCsv } from "../src/lib/csv";
 import { num, plural } from "../src/lib/format";
+import { perTenant } from "./lib/tenant";
 
 const exportKind = v.union(...EXPORT_KINDS.map((k) => v.literal(k)));
 /** Выгрузок одного владельца в час — тяжёлые запросы, а не кнопка для нажатий подряд. */
@@ -175,7 +176,7 @@ async function saveFile(ctx: ActionCtx, kind: ExportKind, range: ExportRange, bl
 /** Крон: выгрузки старше суток удаляются вместе с файлом — ссылку на них уже не получить. */
 export const cleanup = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ removed: number }> => {
+  handler: async (cronCtx): Promise<{ removed: number }> => perTenant(cronCtx, internal.exports.cleanup, { removed: 0 }, async (ctx) => {
     const old = await ctx.db
       .query("exports")
       .withIndex("by_expires", (q) => q.lt("expiresAt", nowIso()))
@@ -185,5 +186,5 @@ export const cleanup = internalMutation({
       await ctx.db.delete(x._id);
     }
     return { removed: old.length };
-  },
+  }),
 });

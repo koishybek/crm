@@ -43,6 +43,7 @@ import { can, canAddPayment, canEditPrice } from "../data/permissions";
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, Payment, Urgency, User } from "../data/types";
 import { CloseModal, MoneyLedger, OrderPayoutModal, PaymentModal, RefundModal, VoidModal } from "../components/OrderMoney";
 import { OrderDocuments } from "../components/OrderDocuments";
+import { ModuleGate } from "../components/ModuleGate";
 import { OrderPayLinks } from "../components/OrderPayLinks";
 import { PbxCallButton } from "../components/PbxCallButton";
 import { OrderChat } from "../components/OrderChat";
@@ -299,7 +300,7 @@ export default function OrderDetail() {
           </Card>
           )}
 
-          <OrderDocuments o={o} />
+          <ModuleGate module="documents"><OrderDocuments o={o} /></ModuleGate>
 
           <Card
             title="Исполнитель"

@@ -13,7 +13,7 @@ import { formatPhone, isPhone, normalizePhone, phoneMask } from "../src/data/pho
 const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
-const T = "t-test";
+const T = "t-komfort";
 
 describe("нормализация номера (src/data/phone.ts)", () => {
   test("Казахстан и Россия — как раньше: «7XXXXXXXXXX» из любых привычных записей", () => {

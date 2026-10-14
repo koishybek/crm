@@ -111,8 +111,8 @@ afterEach(() => {
 async function setup() {
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => ({
-    worker: await ctx.db.insert("users", { name: "Мастер Ерлан", email: "77010000001", role: "executor", tenantId: "t-test", active: true }),
-    operator: await ctx.db.insert("users", { name: "Оператор", email: "op@test.kz", role: "operator", tenantId: "t-test", active: true }),
+    worker: await ctx.db.insert("users", { name: "Мастер Ерлан", email: "77010000001", role: "executor", tenantId: "t-komfort", active: true }),
+    operator: await ctx.db.insert("users", { name: "Оператор", email: "op@test.kz", role: "operator", tenantId: "t-komfort", active: true }),
   }));
   const as = (id: Id<"users">) => t.withIdentity({ subject: `${id}|s` });
   const subs = () => t.run((ctx) => ctx.db.query("pushSubscriptions").collect());

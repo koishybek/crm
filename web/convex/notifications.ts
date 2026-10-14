@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./lib/functions";
 import { currentUser, inScope, scopeOf } from "./lib/access";
 import { toNotification } from "./lib/dto";
 import { ACTIVE_STATUSES } from "../src/data/catalog";

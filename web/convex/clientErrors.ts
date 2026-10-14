@@ -2,12 +2,14 @@
 // (чистит src/data/clientErrors.ts, здесь — ещё раз). Принимаем и от невошедших (экран входа тоже ломается),
 // поэтому — лимиты на отправителя и общий. Одинаковые за сутки — одна строка со счётчиком. Список — владельцу.
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./lib/functions";
 import { currentUser, OWNER, requireRole } from "./lib/access";
 import { sha256Hex } from "./lib/crypto";
 import { nowIso } from "./lib/domain";
 import { hitLimit } from "./lib/rateLimit";
 import { scrubBuild, scrubErrorPath, scrubErrorText, type ClientErrorRow } from "../src/data/clientErrors";
+import { publicTenant } from "./lib/tenant";
+import { forTenant } from "./lib/tenantDb";
 
 const DAY_MS = 86400_000;
 /** С одного пользователя (или от всех невошедших вместе) — 20 за 10 минут; всего — 300 в час. */
@@ -20,10 +22,14 @@ const RAW_MAX = 4000;
 
 export const report = mutation({
   args: { message: v.string(), path: v.string(), build: v.string(), kind: v.union(v.literal("error"), v.literal("rejection")) },
-  handler: async (ctx, a): Promise<void> => {
+  handler: async (pub, a): Promise<void> => {
     const message = scrubErrorText(a.message.slice(0, RAW_MAX));
     if (!message) return;
-    const me = await currentUser(ctx);
+    const me = await currentUser(pub);
+    // Ошибка видна владельцу своей компании; до входа (экран входа, форма заявки) — первой компании платформы.
+    const tenantId = me?.tenantId ?? (await publicTenant(pub));
+    if (!tenantId) return;
+    const ctx = me ? pub : forTenant(pub, tenantId);
     // Лимит исчерпан — молча: интерфейс не должен сыпать ошибками об ошибках.
     if (!(await hitLimit(ctx, `clientError:${me?._id ?? "anon"}`, PER_SENDER, SENDER_WINDOW_MS))) return;
     if (!(await hitLimit(ctx, "clientError:all", TOTAL, TOTAL_WINDOW_MS))) return;

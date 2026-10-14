@@ -1,7 +1,7 @@
 // Наружу — только явные DTO в форме типов фронта (src/data/types.ts), никогда сырые документы.
 // Ссылки на файлы — подписанные и короткоживущие (lib/files.ts → fileSigner).
 import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { ORDER_STATUS } from "../../src/data/catalog";
 import { payout } from "../../src/data/logic";
 import { can, permissionsOf, type PermissionHolder } from "../../src/data/permissions";
@@ -201,6 +201,7 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   payoutBase: o.payoutBase,
   payoutManual: o.payoutManual,
   campaign: o.campaign,
+  platformFee: o.platformFee,
 });
 
 /** Заказ без выплаты мастеру (значит, и без маржи): сумма, ставка, отметки о выплате. */
@@ -214,6 +215,7 @@ const withoutPayouts = (o: Order): Order => ({
   acceptedPayout: undefined,
   payoutBase: undefined,
   payoutManual: undefined,
+  platformFee: undefined,
 });
 
 /** Заказ без денег: ни цены клиента, ни оплат и возвратов, ни выплаты — только статусы и сроки. */

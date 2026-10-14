@@ -3,10 +3,10 @@
 // появляется строка реестра, заказы отмечаются выплаченными, мастер получает уведомление. Ошибку можно отменить в течение суток.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./lib/functions";
 import { can, EXECUTOR, noAccess, requirePerm, requireRole, STAFF, type Me } from "./lib/access";
 import { almatyStamp, audit } from "./lib/audit";
-import { executorUser, log, notify, nowIso, TENANT, userActor } from "./lib/domain";
+import { executorUser, log, notify, nowIso, userActor } from "./lib/domain";
 import { moneyDate, noteText } from "./lib/money";
 import { paymentMethod } from "./schema";
 import { PAYMENT_METHODS } from "../src/data/catalog";
@@ -14,6 +14,7 @@ import { paidAmount, payout } from "../src/data/logic";
 import { isPayoutDue, PAYOUT_MAX_ORDERS, PAYOUT_UNDO_MS } from "../src/data/money";
 import type { OwedExecutor, PayoutEntry, WorkerPayout } from "../src/data/types";
 import { money, shortName } from "../src/lib/format";
+import { tenantOf } from "./lib/tenantDb";
 
 /** Строк реестра на экране владельца и у мастера. */
 const LIST_LIMIT = 100;
@@ -131,7 +132,7 @@ export const create = mutation({
     const amount = orders.reduce((s, o) => s + payout(o), 0);
     const numbers = orders.map((o) => o.number);
     const id = await ctx.db.insert("payouts", {
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       executorId: a.executorId,
       orderIds: orders.map((o) => o._id),
       orderNumbers: numbers,

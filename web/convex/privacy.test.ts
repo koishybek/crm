@@ -12,7 +12,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 const PHONE = "77071234567";
 const PII = ["Айгуль", "Сапарова", PHONE, "aigul@mail.kz", "Абая", "Звонить после 18", "холодит", "Асет молодец"];

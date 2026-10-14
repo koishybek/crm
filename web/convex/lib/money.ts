@@ -2,7 +2,7 @@
 // Сами правила (когда «Оплачен», что мешает закрыть) — общие с интерфейсом: src/data/money.ts.
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { orderNotice } from "../clientNotify";
 import { almatyStamp } from "./audit";
 import { executorUser, log, notify, nowIso, setStatus, uid, type StatusMove } from "./domain";

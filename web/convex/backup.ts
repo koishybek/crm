@@ -6,7 +6,7 @@
 import { ConvexError, v, type Value } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id, TableNames } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { fileRefs, type FileEntry, type FileRef } from "./lib/backupFiles";
@@ -14,6 +14,7 @@ import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
 import { s3Config } from "./lib/s3";
+import { actionFor } from "./lib/tenantDb";
 import { fileSize, type BackupList } from "../src/data/systemHealth";
 
 /** Сколько последних копий храним. */
@@ -71,7 +72,7 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
  * аналитики (stats*, dailyStats — после восстановления его заново соберёт крон: statsState в копию не попадает) —
  * их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries", "statsFacts", "dailyStats", "statsDirty", "statsState", "pushSubscriptions", "clientErrors", "offsiteFiles"] as const satisfies readonly TableNames[];
+const SKIPPED_TABLES = ["tenants", "rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries", "statsFacts", "dailyStats", "statsDirty", "statsState", "pushSubscriptions", "clientErrors", "offsiteFiles"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;
@@ -142,45 +143,51 @@ export const _page = internalQuery({
  * JSON собираем по страницам сразу в байты (UTF-8): в памяти действия — сам файл, без второй копии в объектах.
  */
 export const run = internalAction({
-  args: { by: v.optional(v.id("users")) },
-  handler: async (ctx, { by }): Promise<void> => {
-    let fileId: Id<"_storage"> | null = null;
-    try {
-      const at = new Date().toISOString();
-      const utf8 = new TextEncoder();
-      const parts: Uint8Array<ArrayBuffer>[] = [utf8.encode(`{"version":${BACKUP_VERSION},"createdAt":${JSON.stringify(at)},"tables":{`)];
-      let docs = 0;
-      const refs: FileRef[] = [];
-      for (const [i, table] of BACKUP_TABLES.entries()) {
-        parts.push(utf8.encode(`${i ? "," : ""}${JSON.stringify(table)}:[`));
-        let cursor: string | null = null;
-        let count = 0;
-        for (;;) {
-          const page: Page = await ctx.runQuery(internal.backup._page, { table, cursor });
-          if (page.docs.length) parts.push(utf8.encode(`${count ? "," : ""}${page.docs.map((d) => JSON.stringify(d)).join(",")}`));
-          for (const d of page.docs) refs.push(...fileRefs(table, d));
-          count += page.docs.length;
-          if (page.isDone) break;
-          cursor = page.cursor;
-        }
-        parts.push(utf8.encode("]"));
-        docs += count;
-      }
-      // Опись файлов — после таблиц: сами файлы в JSON не входят.
-      parts.push(utf8.encode(`},"files":${JSON.stringify(await inventory(ctx, refs))}}`));
-      const blob = new Blob(parts, { type: "application/json" });
-      parts.length = 0;
-      fileId = await ctx.storage.store(blob);
-      await ctx.runMutation(internal.backup._saved, { fileId, at, size: blob.size, docs, by });
-    } catch (e) {
-      const reason = e instanceof ConvexError ? String(e.data) : e instanceof Error ? e.message.slice(0, 200) : "неизвестная ошибка";
-      console.error(`Резервная копия не создана: ${reason}`);
-      // Файл записали, а строку о нём — нет: без строки его никто не увидит и не удалит.
-      if (fileId) await ctx.storage.delete(fileId).catch(() => undefined);
-      await ctx.runMutation(internal.backup._failed, { reason, manual: !!by });
-    }
+  args: { by: v.optional(v.id("users")), tenantId: v.optional(v.string()) },
+  handler: async (ctx, { by, tenantId }): Promise<void> => {
+    // Копия — у каждой компании своя (ТЗ §2.5): ручной запуск — своей, ночной крон — всех по очереди.
+    const tenants = tenantId ? [tenantId] : await ctx.runQuery(internal.tenants._active, {});
+    for (const t of tenants) await backupTenant(actionFor(ctx, t), by);
   },
 });
+
+async function backupTenant(ctx: ActionCtx, by: Id<"users"> | undefined): Promise<void> {
+  let fileId: Id<"_storage"> | null = null;
+  try {
+    const at = new Date().toISOString();
+    const utf8 = new TextEncoder();
+    const parts: Uint8Array<ArrayBuffer>[] = [utf8.encode(`{"version":${BACKUP_VERSION},"createdAt":${JSON.stringify(at)},"tables":{`)];
+    let docs = 0;
+    const refs: FileRef[] = [];
+    for (const [i, table] of BACKUP_TABLES.entries()) {
+      parts.push(utf8.encode(`${i ? "," : ""}${JSON.stringify(table)}:[`));
+      let cursor: string | null = null;
+      let count = 0;
+      for (;;) {
+        const page: Page = await ctx.runQuery(internal.backup._page, { table, cursor });
+        if (page.docs.length) parts.push(utf8.encode(`${count ? "," : ""}${page.docs.map((d) => JSON.stringify(d)).join(",")}`));
+        for (const d of page.docs) refs.push(...fileRefs(table, d));
+        count += page.docs.length;
+        if (page.isDone) break;
+        cursor = page.cursor;
+      }
+      parts.push(utf8.encode("]"));
+      docs += count;
+    }
+    // Опись файлов — после таблиц: сами файлы в JSON не входят.
+    parts.push(utf8.encode(`},"files":${JSON.stringify(await inventory(ctx, refs))}}`));
+    const blob = new Blob(parts, { type: "application/json" });
+    parts.length = 0;
+    fileId = await ctx.storage.store(blob);
+    await ctx.runMutation(internal.backup._saved, { fileId, at, size: blob.size, docs, by });
+  } catch (e) {
+    const reason = e instanceof ConvexError ? String(e.data) : e instanceof Error ? e.message.slice(0, 200) : "неизвестная ошибка";
+    console.error(`Резервная копия не создана: ${reason}`);
+    // Файл записали, а строку о нём — нет: без строки его никто не увидит и не удалит.
+    if (fileId) await ctx.storage.delete(fileId).catch(() => undefined);
+    await ctx.runMutation(internal.backup._failed, { reason, manual: !!by });
+  }
+}
 
 export const _saved = internalMutation({
   args: { fileId: v.id("_storage"), at: v.string(), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) },
@@ -244,7 +251,7 @@ export const runNow = mutation({
   args: {},
   handler: async (ctx): Promise<void> => {
     const me = await requireRole(ctx, OWNER);
-    if (!(await hitLimit(ctx, "backup:manual", 1, MANUAL_EVERY_MS))) throw new ConvexError("Копию уже запускали меньше 10 минут назад — подождите немного");
+    if (!(await hitLimit(ctx, `backup:manual:${me.tenantId}`, 1, MANUAL_EVERY_MS))) throw new ConvexError("Копию уже запускали меньше 10 минут назад — подождите немного");
     await ctx.scheduler.runAfter(0, internal.backup.run, { by: me._id });
     await audit(ctx, me, "system.backupRequested", "Запущено резервное копирование вручную");
   },
