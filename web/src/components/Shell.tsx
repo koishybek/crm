@@ -24,8 +24,7 @@ import {
   Users,
   Wallet,
   X,
-  type LucideIcon,
-} from "lucide-react";
+  type LucideIcon, LifeBuoy } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, Suspense } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -340,6 +339,9 @@ function UserMenu({ me }: { me: User }) {
               <PushToggle />
               <MenuItem icon={KeyRound} onClick={() => (close(), setPassword(true))}>
                 Сменить пароль
+              </MenuItem>
+              <MenuItem icon={LifeBuoy} onClick={() => (close(), window.open("/help", "_blank", "noopener"))}>
+                Как пользоваться
               </MenuItem>
               {me.role === "owner" && (
                 <MenuItem icon={SettingsIcon} onClick={() => (close(), nav("/settings"))}>

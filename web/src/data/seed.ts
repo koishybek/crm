@@ -144,7 +144,10 @@ const EXEC_MSG = ["Добрый день! Буду у вас примерно ч
 const OP_MSG = ["Клиент просил позвонить за 30 минут до приезда.", "Оплата на месте через Kaspi.", "Клиент постоянный, сделать скидку не обещали.", "Заказ передан исполнителю."];
 const CALL_NOTES = ["Уточнил стоимость и сроки", "Обсудили удобное время приезда", "Спросил про гарантию на работы", "Перезвонил после пропущенного"];
 
-export function buildSeed(nowDate = new Date()): DB {
+/** days — сколько дней истории (по умолчанию 90), scale — во сколько раз больше заявок в день (нагрузочная проверка). */
+export function buildSeed(nowDate = new Date(), opts: { days?: number; scale?: number } = {}): DB {
+  const DAYS = Math.max(7, Math.round(opts.days ?? 90));
+  const SCALE = Math.max(1, opts.scale ?? 1);
   const now = nowDate.getTime();
   const r = new Rng(20261011);
   let n = 0;
@@ -471,12 +474,12 @@ export function buildSeed(nowDate = new Date()): DB {
   const drafts: Draft[] = [];
   const startOfToday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
 
-  for (let ago = 90; ago >= 1; ago--) {
+  for (let ago = DAYS; ago >= 1; ago--) {
     const dayStart = startOfToday - ago * DAY;
     const dow = new Date(dayStart).getDay();
-    const growth = 0.55 + 0.8 * (1 - ago / 90);
+    const growth = 0.55 + 0.8 * (1 - ago / DAYS);
     const base = dow === 0 || dow === 6 ? 5 : 8;
-    const full = Math.max(1, Math.round(base * growth + r.int(-1, 2)));
+    const full = Math.max(1, Math.round((base * growth + r.int(-1, 2)) * SCALE));
     // Последние двое суток наполовину заняты ручными «свежими» заказами ниже — иначе на графике пик в конце.
     const count = ago <= 2 ? Math.ceil(full / 2) : full;
     for (let k = 0; k < count; k++) {

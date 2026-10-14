@@ -111,7 +111,11 @@ export default function Register() {
               <input type="text" name="website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} className="absolute -left-[9999px] h-px w-px opacity-0" aria-hidden />
               <label className="flex items-start gap-2.5 text-[14px] text-ink-2">
                 <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[#b07200]" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-                <span>Согласен на обработку персональных данных</span>
+                <span>
+                  Принимаю{" "}
+                  <a href="/offer" target="_blank" rel="noopener" className="font-medium text-brand-ink underline">оферту</a> и согласен на обработку персональных данных по{" "}
+                  <a href="/privacy" target="_blank" rel="noopener" className="font-medium text-brand-ink underline">политике конфиденциальности</a>
+                </span>
               </label>
               {error && (
                 <p className="text-[14px] text-bad-ink" role="alert">

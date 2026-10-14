@@ -31,6 +31,9 @@ const Leads = lazy(() => import("./screens/Leads"));
 const OrderDetail = lazy(() => import("./screens/OrderDetail"));
 const Orders = lazy(() => import("./screens/Orders"));
 const PublicRequest = lazy(() => import("./screens/PublicRequest"));
+const Help = lazy(() => import("./screens/Help"));
+const PrivacyPage = lazy(() => import("./screens/Legal").then((m) => ({ default: m.PrivacyPage })));
+const OfferPage = lazy(() => import("./screens/Legal").then((m) => ({ default: m.OfferPage })));
 const Settings = lazy(() => import("./screens/Settings"));
 
 const TEAM_ROLES: Role[] = ["owner", "operator", "manager"];
@@ -145,6 +148,10 @@ const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
   // Публичная форма заявки для клиентов (ссылка и iframe на сайте) — без входа.
   { path: "/zayavka", element: <Suspense fallback={<Splash />}><PublicRequest /></Suspense> },
+  // Инструкции и документы — без входа.
+  { path: "/help", element: <Suspense fallback={<Splash />}><Help /></Suspense> },
+  { path: "/privacy", element: <Suspense fallback={<Splash />}><PrivacyPage /></Suspense> },
+  { path: "/offer", element: <Suspense fallback={<Splash />}><OfferPage /></Suspense> },
   // Регистрация компании (ТЗ §23.7): открыта при SAAS_SIGNUP=1, иначе — «по приглашению».
   { path: "/register", element: <Suspense fallback={<Splash />}><Register /></Suspense> },
   {

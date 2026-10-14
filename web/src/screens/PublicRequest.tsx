@@ -194,7 +194,11 @@ export default function PublicRequest() {
                 <label className="flex cursor-pointer items-start gap-3 text-[14px] text-ink-2">
                   <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-[#f2a900]" aria-invalid={!!errors.consent} />
                   <span>
-                    Согласен(на) на сбор и обработку моих персональных данных для связи по заявке<span className="ml-0.5 text-bad">*</span>
+                    Согласен(на) на сбор и обработку моих персональных данных для связи по заявке —{" "}
+                    <a href="/privacy" target="_blank" rel="noopener" className="font-medium text-brand-ink underline" onClick={(e) => e.stopPropagation()}>
+                      политика конфиденциальности
+                    </a>
+                    <span className="ml-0.5 text-bad">*</span>
                   </span>
                 </label>
                 {errors.consent && <div className="mt-1.5 text-[12.5px] text-bad-ink">{errors.consent}</div>}
