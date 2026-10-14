@@ -2,7 +2,7 @@
 // на кампании по месяцам. Деньги компании — только владельцу. Формулы — src/data/campaigns.ts (общие с интерфейсом).
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import { OWNER, requireRole } from "./lib/access";
+import { OWNER, requirePerm, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
 import { cleanMoney } from "./lib/limits";
@@ -37,7 +37,9 @@ async function spendRows(ctx: Parameters<typeof requireRole>[0], first: string, 
 export const stats = query({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, a): Promise<CampaignRow[]> => {
-    await requireRole(ctx, OWNER);
+    // Суммы компании — как в «Аналитике» (convex/stats.ts viewer): право «Выплаты мастерам и маржа», руководителю — нет.
+    const me = await requirePerm(ctx, "money.payouts");
+    if (me.role === "manager") throw new ConvexError("Нет доступа");
     const s = span(a.from, a.to);
     const fromIso = new Date(s.from).toISOString();
     const toIso = new Date(s.to).toISOString();

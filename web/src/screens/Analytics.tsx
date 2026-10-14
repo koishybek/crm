@@ -257,7 +257,8 @@ export default function Analytics() {
       <div className="mt-4">
         <MonthsCard filter={filter} money={r.money} />
       </div>
-      <div className="mt-4"><AnalyticsCampaigns from={dayStart(range.from)} to={dayEnd(range.to)} /></div>
+      {/* Кампании — с деньгами: только тем, кому сервер отдаёт суммы (руководителю и без права на маржу — нет). */}
+      {r.money && <div className="mt-4"><AnalyticsCampaigns from={dayStart(range.from)} to={dayEnd(range.to)} /></div>}
 
       {r.money && (
         <>

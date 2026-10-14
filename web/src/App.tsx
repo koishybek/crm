@@ -4,6 +4,7 @@ import { api } from "../convex/_generated/api";
 import { setCatalog } from "./data/catalog";
 import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { Navigate, RouterProvider, createBrowserRouter, useLocation } from "react-router";
+import { RouteError } from "./components/RouteError";
 import { ForcedPasswordChange } from "./components/PasswordChange";
 import { Shell } from "./components/Shell";
 import { LogoMark } from "./components/icons";
@@ -130,6 +131,10 @@ const lazyReview = (
 );
 
 const router = createBrowserRouter([
+  {
+    // Ошибка любого раздела — понятный экран вместо стека (у кабинета мастера — свой WorkerError).
+    errorElement: <RouteError />,
+    children: [
   { path: "/login", element: <LoginRoute /> },
   // Публичная форма заявки для клиентов (ссылка и iframe на сайте) — без входа.
   { path: "/zayavka", element: <PublicRequest /> },
@@ -183,6 +188,8 @@ const router = createBrowserRouter([
   { path: "/docs/:kind/:orderId", element: <Suspense fallback={<Splash />}><StaffDocumentPage /></Suspense> },
   { path: "/d/:token", element: <Suspense fallback={<Splash />}><PublicDocumentPage /></Suspense> },
   { path: "*", element: <Navigate to="/" replace /> },
+    ],
+  },
 ]);
 
 export default function App() {
