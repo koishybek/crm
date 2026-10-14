@@ -4,17 +4,14 @@ import { useQuery } from "convex/react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { api } from "../../convex/_generated/api";
-import { AUDIT_ENTITY, canSeeEntityHistory, isSystemActor, type SystemActor } from "../data/audit";
-import { ROLE_LABEL } from "../data/catalog";
+import { AUDIT_ENTITY, auditRoleLabel, canSeeEntityHistory, isSystemActor, type SystemActor } from "../data/audit";
 import { useMe, useUi } from "../data/hooks";
-import type { AuditEntity, AuditEntry, Role, SourceId } from "../data/types";
+import type { AuditEntity, AuditEntry, SourceId } from "../data/types";
 import { cn, dateTime, plural } from "../lib/format";
 import { SourceIcon } from "./icons";
 import { Avatar } from "./ui";
 
 type Who = Pick<AuditEntry, "actorId" | "actorName" | "actorRole">;
-
-const isRole = (r: string | undefined): r is Role => r !== undefined && Object.prototype.hasOwnProperty.call(ROLE_LABEL, r);
 
 /** Каналы показываем их значками источника, систему, AI и API — своими. */
 const CHANNEL: Partial<Record<SystemActor, SourceId>> = { Telegram: "telegram", WhatsApp: "whatsapp", OLX: "olx", Сайт: "site", АТС: "phone" };
@@ -37,7 +34,7 @@ function SystemMark({ actor, size }: { actor: SystemActor; size: number }) {
 }
 
 /** Роль автора на момент действия; у системы, AI и каналов — «автоматически». */
-export const auditRole = (w: Who): string => (systemOf(w) ? "автоматически" : isRole(w.actorRole) ? ROLE_LABEL[w.actorRole] : "сотрудник");
+export const auditRole = (w: Who): string => auditRoleLabel(w);
 
 /** Кто сделал: сотрудник — аватар, имя и роль на момент действия; система, AI и каналы — значок. */
 export function AuditWho({ entry, size = 34 }: { entry: Who; size?: number }) {

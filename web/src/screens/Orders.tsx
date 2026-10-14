@@ -1,8 +1,8 @@
-import { Download, CalendarDays, Check, Clock, Ellipsis, FileText, MapPin, Settings, Wallet, ArrowRight, UserPlus, Ban, LayoutGrid, List } from "lucide-react";
+import { Download, CalendarDays, Check, Clock, Ellipsis, FileText, MapPin, Settings, Wallet, ArrowRight, UserPlus, Ban, LayoutGrid, List, Archive } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { CITIES, KANBAN, ORDER_STATUS, serviceById, type Tone } from "../data/catalog";
-import { useNow } from "../data/hooks";
+import { useMe, useNow } from "../data/hooks";
 import { isOverdue, margin, orderBadge, paidAmount, payout } from "../data/logic";
 import { exportCsv, stamp } from "../lib/csv";
 import { useQuery } from "convex/react";
@@ -10,10 +10,12 @@ import { api } from "../../convex/_generated/api";
 import { changeStatus, toast } from "../data/store";
 import { useTeam } from "../data/hooks";
 import type { Order, OrderStatus } from "../data/types";
+import { ExportButton } from "../components/ExportButton";
 import { ServiceLabel } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { Avatar, Badge, Button, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
 import { cn, dayDiff, dateTime, deadline, money } from "../lib/format";
+import { OrdersArchive } from "./OrdersArchive";
 
 const COL_ICON: Record<string, ReactNode> = {
   new: <FileText size={24} strokeWidth={1.8} className="text-ink" />,
@@ -33,17 +35,19 @@ const COL_HEAD: Partial<Record<Tone, { head: string; count: string }>> = {
 type Due = "" | "late" | "today" | "tomorrow" | "week";
 
 export default function Orders() {
+  const me = useMe();
   const team = useTeam();
-  const board = useQuery(api.orders.board, {});
+  const [params] = useSearchParams();
+  const [view, setView] = useState<"board" | "list" | "archive">(params.get("view") === "archive" ? "archive" : "board");
+  // Доска — активные и последние 45 дней; в архиве свой запрос с фильтрами на сервере.
+  const board = useQuery(api.orders.board, view === "archive" ? "skip" : {});
   const db = useMemo(() => ({ orders: board ?? [], executors: team.executors }), [board, team.executors]);
   const now = useNow();
   const nav = useNavigate();
-  const [params] = useSearchParams();
   const [status, setStatus] = useState<OrderStatus | "" | "closed_all">("");
   const [city, setCity] = useState("");
   const [executor, setExecutor] = useState("");
   const [due, setDue] = useState<Due>(params.get("late") ? "late" : "");
-  const [view, setView] = useState<"board" | "list">("board");
   const [doneLimit, setDoneLimit] = useState(8);
 
   const filtered = useMemo(() => {
@@ -81,6 +85,9 @@ export default function Orders() {
         subtitle="Управляйте заказами на услуги и отслеживайте их выполнение"
         actions={
           <>
+          {me?.role === "owner" ? (
+            <ExportButton kinds={["orders", "payments"]} />
+          ) : (
           <Button
             variant="secondary"
             icon={Download}
@@ -113,11 +120,13 @@ export default function Orders() {
           >
             Экспорт
           </Button>
+          )}
           <div className="inline-flex rounded-[12px] border border-line bg-white p-1">
             {(
               [
                 ["board", LayoutGrid, "Доска"],
                 ["list", List, "Список"],
+                ["archive", Archive, "Архив"],
               ] as const
             ).map(([id, I, label]) => (
               <button key={id} onClick={() => setView(id)} className={cn("inline-flex h-9 items-center gap-2 rounded-[9px] px-3.5 text-[14px] font-medium", view === id ? "bg-brand-soft text-brand-ink" : "text-ink-2 hover:bg-[#f4f2ec]")}>
@@ -129,6 +138,10 @@ export default function Orders() {
         }
       />
 
+      {view === "archive" ? (
+        <OrdersArchive />
+      ) : (
+      <>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <FilterCard label="Статус">
           <Select value={status} onChange={(e) => setStatus(e.target.value as OrderStatus | "")}>
@@ -253,8 +266,10 @@ export default function Orders() {
               </tbody>
             </table>
           </div>
-          {filtered.length > 200 && <div className="pt-3 text-center text-[13px] text-muted">Показаны первые 200 — уточните фильтры</div>}
+          {filtered.length > 200 && <div className="pt-3 text-center text-[13px] text-muted">Показаны первые 200 — уточните фильтры или откройте «Архив»</div>}
         </div>
+      )}
+      </>
       )}
     </>
   );

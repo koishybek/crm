@@ -9,9 +9,10 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Order } from "../data/types";
 import { Source } from "../components/icons";
+import { DebtorsCard, OwnerMoneyKpis } from "../components/OwnerMoney";
 import { PayoutsCard } from "../components/PayoutsCard";
 import { Avatar, Badge, Card, KpiCard, Loading, PageHeader, Select, TextLink } from "../components/ui";
-import { cn, dayDiff, deadline, money, num, shortName, whenShort } from "../lib/format";
+import { cn, dayDiff, deadline, num, shortName, whenShort } from "../lib/format";
 
 export function PeriodSelect({ value, onChange, options = PERIODS.map((p) => p.id) }: { value: PeriodId; onChange: (p: PeriodId) => void; options?: PeriodId[] }) {
   return (
@@ -56,14 +57,16 @@ export default function Dashboard() {
     const active = db.orders.filter(isActive);
     const created = ordersCreatedIn(db, cur).length;
     const overdue = db.orders.filter((o) => isOverdue(o, now));
-    const m = sums(doneIn(db, cur)).margin;
-    const mPrev = sums(doneIn(db, prev)).margin;
+    // Деньги — только у владельца: остальным сервер отдаёт заказы без сумм.
+    const done = sums(doneIn(db, cur));
+    const donePrev = sums(doneIn(db, prev));
     return {
       leads: { value: leadsCur, trend: trend(leadsCur, leadsPrev, caption) },
       active: { value: active.length, created },
       overdue: overdue.length,
       waiting: db.orders.filter((o) => o.status === "awaiting_executor").length,
-      margin: { value: m, trend: trend(m, mPrev, caption) },
+      revenue: { value: done.revenue, trend: trend(done.revenue, donePrev.revenue, caption) },
+      margin: { value: done.margin, trend: trend(done.margin, donePrev.margin, caption) },
     };
   }, [db, period, now]);
 
@@ -103,12 +106,9 @@ export default function Dashboard() {
           caption={k.overdue ? <span className="font-medium text-bad-ink">требуют реакции сейчас</span> : "всё в срок"}
           onClick={() => nav("/orders?late=1")}
         />
-        {isOwner ? (
-          <KpiCard deco icon={ChartNoAxesColumn} tone="amber" label="Маржа" value={money(k.margin.value)} trend={k.margin.trend} onClick={() => nav("/analytics")} />
-        ) : (
-          <KpiCard deco icon={Hourglass} tone="amber" label="Ждут исполнителя" value={num(k.waiting)} caption="в ленте исполнителей" onClick={() => nav("/orders")} />
-        )}
+        <KpiCard deco icon={Hourglass} tone="amber" label="Ждут исполнителя" value={num(k.waiting)} caption="в ленте исполнителей" onClick={() => nav("/orders")} />
       </div>
+      {isOwner && <OwnerMoneyKpis from={rangeOf(period, now).cur.from} revenue={k.revenue} margin={k.margin} />}
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
         <Card icon={FileText} title="Последние заявки" action={<TextLink to="/leads">Все заявки</TextLink>} bodyClass="px-3 pb-3 sm:px-4">
@@ -244,6 +244,7 @@ export default function Dashboard() {
         </Card>
 
         {isOwner && <PayoutsCard from={rangeOf(period, now).cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
+        {isOwner && <DebtorsCard className="xl:col-span-2" />}
       </div>
     </>
   );

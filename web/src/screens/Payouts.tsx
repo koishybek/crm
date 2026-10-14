@@ -12,6 +12,7 @@ import { createPayout, undoPayout } from "../data/moneyActions";
 import { toast } from "../data/store";
 import type { OwedExecutor, PaymentMethod, PayoutEntry } from "../data/types";
 import { date, dateTime, money, plural } from "../lib/format";
+import { ExportButton } from "../components/ExportButton";
 import { Avatar, Badge, Button, Card, EmptyState, FormRow, Input, KpiCard, Loading, Modal, PageHeader, Select } from "../components/ui";
 
 const METHODS = Object.keys(PAYMENT_METHODS) as PaymentMethod[];
@@ -44,7 +45,7 @@ export default function Payouts() {
 
   return (
     <>
-      <PageHeader title="Выплаты мастерам" subtitle="Сколько компания должна исполнителям за сданные заказы и что уже выплачено" />
+      <PageHeader title="Выплаты мастерам" subtitle="Сколько компания должна исполнителям за сданные заказы и что уже выплачено" actions={<ExportButton kinds={["payouts", "payments"]} />} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard icon={Wallet} tone="amber" label="К выплате сейчас" value={money(total)} caption={total ? `${ordersWord(ordersCount)}, мастеров: ${owed.length}` : "долгов перед мастерами нет"} />

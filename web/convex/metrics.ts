@@ -4,10 +4,9 @@ import { query } from "./_generated/server";
 import { inScope, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
 import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";
-import { toLead, toOrder } from "./lib/dto";
+import { orderWithoutMoney as withoutMoney, toLead, toOrder } from "./lib/dto";
 import { monthOf } from "../src/data/analytics";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
-import type { Order } from "../src/data/types";
 
 /** «Главной» не владельца хватает воронки за 90 дней и сравнения 30 дней с прошлыми 30 — глубже срез не отдаём. */
 const TEAM_MAX_DAYS = 92;
@@ -42,23 +41,6 @@ async function slice(ctx: Parameters<typeof requireRole>[0], from: string, scope
     orders: [...byId.values()].filter((o) => inScope(scope, o.category)),
   };
 }
-
-/**
- * Заказ без денег — для «Главной» оператора и руководителя: им нужны статусы и сроки, а выручка, маржа
- * и выплаты компании — финансовая аналитика владельца (ТЗ п.4–5; аудит M-2).
- */
-const withoutMoney = (o: Order): Order => ({
-  ...o,
-  clientPrice: 0,
-  payoutMode: "fixed",
-  payoutValue: 0,
-  payments: [],
-  refunds: undefined,
-  payoutPaid: false,
-  payoutPaidAt: undefined,
-  payoutId: undefined,
-  acceptedPayout: undefined,
-});
 
 export const dashboard = query({
   args: { from: v.string() },

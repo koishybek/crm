@@ -180,6 +180,23 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, forExecutor: f.forExecutor === true })),
 });
 
+/**
+ * Заказ без денег — для «Главной» и архива оператора и руководителя: им нужны статусы и сроки, а выручка, маржа
+ * и выплаты компании — финансовая аналитика владельца (ТЗ п.4–5; аудит M-2).
+ */
+export const orderWithoutMoney = (o: Order): Order => ({
+  ...o,
+  clientPrice: 0,
+  payoutMode: "fixed",
+  payoutValue: 0,
+  payments: [],
+  refunds: undefined,
+  payoutPaid: false,
+  payoutPaidAt: undefined,
+  payoutId: undefined,
+  acceptedPayout: undefined,
+});
+
 export const toOrderWithFiles = (o: Doc<"orders">, signer: FileSigner): Order => ({ ...toOrder(o), files: o.files.map((f) => toAttachment(f, signer)) });
 
 /**

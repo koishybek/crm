@@ -16,6 +16,7 @@ import { ExecutorRating } from "../components/Rating";
 import { ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { textKey } from "../data/skills";
+import { ExportButton } from "../components/ExportButton";
 import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, Input, KpiCard, Loading, Menu, MenuItem, Modal, PageHeader, Select, Toggle } from "../components/ui";
 import { OrdersTable } from "./ClientDetail";
 import { date, money, phone } from "../lib/format";
@@ -62,9 +63,12 @@ export default function Executors() {
         title="Исполнители"
         subtitle="Управление исполнителями, их загрузкой и доступностью"
         actions={
-          <Button size="lg" icon={Plus} className="h-[50px] text-[15px]" onClick={() => ui.openExecutor()}>
-            Добавить исполнителя
-          </Button>
+          <>
+            <ExportButton kinds={["executors", "payouts"]} height={50} />
+            <Button size="lg" icon={Plus} className="h-[50px] text-[15px]" onClick={() => ui.openExecutor()}>
+              Добавить исполнителя
+            </Button>
+          </>
         }
       />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -31,6 +31,7 @@ import { addClientNote, report, setClientTags, toast } from "../data/store";
 import type { Order } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
 import { ClientEraseCard, ErasedClientNotice } from "../components/ClientPrivacy";
+import { ClientRecords } from "../components/ClientRecords";
 import { ServiceLabel, SourceIcon } from "../components/icons";
 import { Avatar, BackLink, Badge, Button, Card, EmptyState, IconTile, Loading, Menu, MenuItem, Textarea } from "../components/ui";
 import { cn, date, dateTime, money, phone, plural, shortName } from "../lib/format";
@@ -348,6 +349,7 @@ export default function ClientDetail() {
       <Card className="mt-4" title="История заказов" bodyClass="px-3 pb-3 sm:px-4">
         <OrdersTable orders={past} empty="Завершённых заказов пока нет" />
       </Card>
+      <ClientRecords clientId={c.id} orders={orders} className="mt-4" />
       <ClientEraseCard client={c} />
       <EntityHistory entity="client" entityId={c.id} variant="card" className="mt-4" />
     </>

@@ -33,12 +33,41 @@ export async function log(ctx: MutationCtx, orderId: Id<"orders">, kind: History
   await ctx.db.insert("history", { orderId, kind, text, actor, at: nowIso(), ...move });
 }
 
+/** Сотрудники для рассылок по заказам, прочитанные один раз (E22): в цикле по заказам состав не перечитывается. */
+export interface StaffRoster {
+  /** Все владельцы, в том числе отключённые (notify их пропустит), — для эскалации просрочки. */
+  owners: Id<"users">[];
+  /** Кому слать события по заказу/заявке: владельцы, операторы и руководители направления, без отключённых. */
+  staff(category?: string): Id<"users">[];
+}
+
+export async function staffRoster(ctx: QueryCtx): Promise<StaffRoster> {
+  const byRole = (role: "owner" | "operator" | "manager") =>
+    ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", role))
+      .collect();
+  const [owners, ops, managers] = await Promise.all([byRole("owner"), byRole("operator"), byRole("manager")]);
+  // Список на направление считается один раз за запрос.
+  const cache = new Map<string, Id<"users">[]>();
+  return {
+    owners: owners.map((u) => u._id),
+    staff(category) {
+      const key = category ?? "";
+      let ids = cache.get(key);
+      if (!ids) {
+        const scoped = category ? managers.filter((u) => u.categories?.includes(category)) : [];
+        ids = [...owners, ...ops, ...scoped].filter((u) => u.active !== false).map((u) => u._id);
+        cache.set(key, ids);
+      }
+      return [...ids];
+    },
+  };
+}
+
 /** Кому слать события по заказу/заявке: владельцы, операторы и руководители этого направления. */
 export async function staffIds(ctx: QueryCtx, category?: string): Promise<Id<"users">[]> {
-  const owners = await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).collect();
-  const ops = await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "operator")).collect();
-  const managers = category ? (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "manager")).collect()).filter((u) => u.categories?.includes(category)) : [];
-  return [...owners, ...ops, ...managers].filter((u) => u.active !== false).map((u) => u._id);
+  return (await staffRoster(ctx)).staff(category);
 }
 
 export async function executorUser(ctx: QueryCtx, executorId: Id<"executors">): Promise<Doc<"users"> | null> {

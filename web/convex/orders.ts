@@ -1,3 +1,4 @@
+import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
@@ -7,6 +8,7 @@ import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor,
 import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
 import { cleanFileName, fileSigner, takeUpload } from "./lib/files";
 import { cleanMoney, cleanText } from "./lib/limits";
+import { archiveArgs, archivePage } from "./lib/orderArchive";
 import { activeExecutorIds, suitableUsers } from "./lib/matching";
 import { hitLimit } from "./lib/rateLimit";
 import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
@@ -51,6 +53,15 @@ export const active = query({
     const scope = scopeOf(await requireRole(ctx, TEAM));
     return (await activeOrders(ctx)).filter((o) => inScope(scope, o.category)).map(toOrder);
   },
+});
+
+/**
+ * Архив заказов (ТЗ п.27.8, E13): все заказы за всё время с фильтрами, страницами (usePaginatedQuery), новые сверху.
+ * Руководитель — только свои направления; суммы заказов — только владельцу (lib/orderArchive.ts).
+ */
+export const list = query({
+  args: { paginationOpts: paginationOptsValidator, ...archiveArgs },
+  handler: async (ctx, { paginationOpts, ...filters }) => archivePage(ctx, await requireRole(ctx, TEAM), filters, paginationOpts),
 });
 
 /** Карточка заказа. t — метка обновления подписанных ссылок на файлы (src/data/files.ts). */
