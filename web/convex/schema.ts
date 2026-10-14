@@ -3,6 +3,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { PERMISSIONS } from "../src/data/permissions";
 import { MODULES } from "../src/data/plans";
+import { PAY_METHODS } from "../src/data/billing";
 
 // Даты — ISO-строки в UTC: сортируются как строки и совпадают с типами фронта (src/data/types.ts).
 
@@ -177,6 +178,8 @@ export const plan = v.union(v.literal("free"), v.literal("standard"), v.literal(
 export const tenantModule = v.union(...MODULES.map((m) => v.literal(m)));
 /** Комиссия платформы (ТЗ §24.2): процент от цены клиента или фиксированная сумма с выполненного заказа. */
 export const platformFee = v.object({ mode: v.union(v.literal("percent"), v.literal("fixed")), value: v.number() });
+/** Способ оплаты подписки (src/data/billing.ts). */
+export const payMethod = v.union(...PAY_METHODS.map((m) => v.literal(m)));
 
 /** Провайдеры онлайн-оплаты (ТЗ п.19.7): Freedom Pay и CloudPayments — по API, Kaspi — ссылка магазина без уведомлений. */
 export const payProvider = v.union(v.literal("freedompay"), v.literal("cloudpayments"), v.literal("kaspi"));
@@ -230,7 +233,47 @@ export default defineSchema({
     migratedAt: v.optional(v.string()),
     /** Владелец скрыл список «С чего начать». */
     onboardingDoneAt: v.optional(v.string()),
+    /** Подписка оплачена по этот день включительно (день по Алматы, YYYY-MM-DD); нет — бессрочно (convex/billing.ts). */
+    paidUntil: v.optional(v.string()),
+    /** Почему приостановлена: unpaid — крон после льготных дней (оплата возобновляет сама), manual — администратор. */
+    suspendedFor: v.optional(v.union(v.literal("unpaid"), v.literal("manual"))),
+    /** Какие напоминания о конце подписки уже ушли — для этого paidUntil (новый срок — заново). */
+    subscriptionReminders: v.optional(v.object({ paidUntil: v.string(), sent: v.array(v.number()) })),
   }).index("by_slug", ["slug"]),
+
+  /**
+   * Оплаты подписки, принятые платформой вручную (Kaspi, перевод, наличные). Данные компании (tenantId) — читает
+   * и пишет только администратор платформы; prevPaidUntil и reactivated — чтобы отменить оплату в течение суток.
+   */
+  subscriptionPayments: defineTable({
+    tenantId: v.string(),
+    amount: v.number(),
+    currency: v.literal("KZT"),
+    method: payMethod,
+    months: v.optional(v.number()),
+    periodFrom: v.string(),
+    periodTo: v.string(),
+    paidAt: v.string(),
+    note: v.optional(v.string()),
+    by: v.id("users"),
+    byName: v.string(),
+    plan,
+    prevPaidUntil: v.optional(v.string()),
+    reactivated: v.optional(v.boolean()),
+    undoneAt: v.optional(v.string()),
+    undoneBy: v.optional(v.id("users")),
+  })
+    .index("by_paid", ["paidAt"])
+    .index("t_by_paid", ["tenantId", "paidAt"]),
+
+  /** Настройки платформы (одна строка, общая для всех компаний): льготные дни, «Как оплатить», цены тарифов. */
+  platformSettings: defineTable({
+    graceDays: v.number(),
+    howToPay: v.string(),
+    prices: v.object({ free: v.number(), standard: v.number(), pro: v.number() }),
+    updatedAt: v.string(),
+    updatedBy: v.optional(v.id("users")),
+  }),
 
   /** Сотрудники и исполнители. email — логин (email или телефон цифрами), пароль хранит Convex Auth. */
   users: defineTable({

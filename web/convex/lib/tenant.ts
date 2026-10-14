@@ -93,11 +93,15 @@ export async function assertLimit(ctx: QueryCtx, tenantId: string, kind: LimitKi
 /** Администратор платформы — логин из PLATFORM_ADMINS (через запятую). */
 export function isPlatformAdmin(user: Pick<Doc<"users">, "email"> | null): boolean {
   if (!user?.email) return false;
-  const list = (env("PLATFORM_ADMINS") ?? "")
+  return platformAdminLogins().includes(normalizeLogin(user.email));
+}
+
+/** Логины администраторов платформы из PLATFORM_ADMINS — для уведомлений о подписках компаний. */
+export function platformAdminLogins(): string[] {
+  return (env("PLATFORM_ADMINS") ?? "")
     .split(",")
     .map((s) => normalizeLogin(s))
     .filter(Boolean);
-  return list.includes(normalizeLogin(user.email));
 }
 
 /** Компании, с которыми работают кроны: активные из реестра; пока миграция не создала строку — компания по умолчанию. */

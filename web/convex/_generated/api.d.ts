@@ -19,6 +19,7 @@ import type * as audit from "../audit.js";
 import type * as auth from "../auth.js";
 import type * as autoAssign from "../autoAssign.js";
 import type * as backup from "../backup.js";
+import type * as billing from "../billing.js";
 import type * as board from "../board.js";
 import type * as bot from "../bot.js";
 import type * as calls from "../calls.js";
@@ -157,6 +158,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   autoAssign: typeof autoAssign;
   backup: typeof backup;
+  billing: typeof billing;
   board: typeof board;
   bot: typeof bot;
   calls: typeof calls;

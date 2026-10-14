@@ -53,6 +53,8 @@ const WIPE_TABLES = [
   "authVerificationCodes",
   "authVerifiers",
   "authRateLimits",
+  "subscriptionPayments",
+  "platformSettings",
   "tenants",
 ] as const;
 const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));

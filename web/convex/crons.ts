@@ -43,4 +43,8 @@ crons.interval("files maintenance", { minutes: 10 }, internal.files.maintain, {}
 crons.interval("stats", { minutes: 1 }, internal.stats.tick, {});
 crons.cron("executor loads", "0 22 * * *", internal.stats.reconcileLoads, {});
 
+// ТЗ §24: подписка компаний — напоминания за 7 и 1 день до «оплачено до», после льготных дней — приостановка
+// (convex/billing.ts). 03:30 UTC = 08:30 по Алматы.
+crons.cron("subscriptions", "30 3 * * *", internal.billing.run, {});
+
 export default crons;

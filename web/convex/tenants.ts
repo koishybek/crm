@@ -17,7 +17,7 @@ import { createLogin } from "./users";
 import schema, { tenantModule } from "./schema";
 import { CITIES } from "../src/data/catalog";
 import { passwordProblem } from "../src/data/passwordRules";
-import { MODULES, ONBOARDING_STEPS, PLAN_INFO, slugify, SLUG_RE, type CompanyInfo, type LimitKind, type OnboardingStep, type TenantInfo } from "../src/data/plans";
+import { MODULES, ONBOARDING_STEPS, PLAN_INFO, slugify, SLUG_RE, type CompanyInfo, type LimitKind, type OnboardingStep, type Plan, type TenantInfo } from "../src/data/plans";
 
 /** Компания вошедшего пользователя — для планировщика публичных action (lib/functions.ts). */
 export const _mine = internalQuery({
@@ -202,6 +202,13 @@ function checkForm(a: { company: string; ownerName: string; login: string; passw
   if (!Number.isFinite(elapsed) || elapsed < -CLOCK_SKEW_MS) throw new ConvexError("Проверьте дату и время на устройстве и попробуйте ещё раз");
   if (elapsed >= 0 && elapsed < MIN_FILL_MS) throw new ConvexError("Слишком быстро — проверьте данные и отправьте ещё раз");
   if (!a.consent) throw new ConvexError("Нужно согласие на обработку персональных данных");
+  const problem = passwordProblem(a.password, "owner");
+  if (problem) throw new ConvexError(problem);
+  return cleanCompanyFields(a);
+}
+
+/** Название, владелец, логин и город новой компании — общие правила регистрации и «Создать компанию» платформы. */
+export function cleanCompanyFields(a: { company: string; ownerName: string; login: string; city: string }): { company: string; ownerName: string; login: string; city: string } {
   const company = a.company.trim().replace(/\s+/g, " ");
   if (company.length < 2 || company.length > 80) throw new ConvexError("Название компании — от 2 до 80 символов");
   const ownerName = a.ownerName.trim().replace(/\s+/g, " ");
@@ -210,8 +217,6 @@ function checkForm(a: { company: string; ownerName: string; login: string; passw
   if (!login || (!login.includes("@") && !/^7\d{10}$/.test(login)) || (login.includes("@") && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(login))) {
     throw new ConvexError("Логин — email или казахстанский номер телефона");
   }
-  const problem = passwordProblem(a.password, "owner");
-  if (problem) throw new ConvexError(problem);
   const city = a.city.trim();
   if (!(CITIES as readonly string[]).includes(city)) throw new ConvexError("Выберите город из списка");
   return { company, ownerName, login, city };
@@ -251,21 +256,50 @@ export const _register = internalMutation({
   handler: async (base, a): Promise<{ slug: string; userId: Id<"users"> }> => {
     if (!(await hitLimit(base, "signup:all", SIGNUPS_PER_HOUR, 3600_000))) throw new ConvexError("Сейчас слишком много регистраций — попробуйте через час");
     if (!(await hitLimit(base, `signup:login:${a.login}`, PER_LOGIN_PER_HOUR, 3600_000))) throw new ConvexError("Слишком много попыток — попробуйте через час");
-    // Логин — один на всю платформу.
-    if (await unscopedDb(base).query("users").withIndex("email", (q) => q.eq("email", a.login)).first()) throw new ConvexError("Такой логин уже занят — войдите или выберите другой");
     const slug = await freeSlug(base, a.company);
     const plan = "free" as const;
-    const tenantRowId = await base.db.insert("tenants", { slug, name: a.company, plan, modules: [...PLAN_INFO[plan].modules], status: "active", createdAt: nowIso(), city: a.city });
-    // Дальше — в новой компании: владелец, справочник по умолчанию, запись в её журнале.
-    const ctx = forTenant(base, slug);
-    const userId = await ctx.db.insert("users", { name: a.ownerName, email: a.login, ...(a.login.includes("@") ? {} : { phone: a.login }), role: "owner", tenantId: slug, active: true });
-    await ctx.db.patch(tenantRowId, { ownerUserId: userId });
-    await materialize(ctx);
+    const { ctx, userId } = await createCompanyRecords(base, { ...a, slug, plan });
     const owner = await ctx.db.get(userId);
     await audit(ctx, owner ?? "Система", "settings.companyRegistered", `Компания «${a.company}» зарегистрирована, тариф «${PLAN_INFO[plan].label}»`, { entityId: slug, meta: { city: a.city, plan } });
     return { slug, userId };
   },
 });
+
+/**
+ * Новая компания: строка реестра, владелец и справочник по умолчанию — общий шаг регистрации и «Создать компанию»
+ * на экране «Платформа». Возвращает базу новой компании (запись в её журнал — у вызывающего) и владельца.
+ * Логин — один на всю платформу; mustChangePassword — пароль выдал администратор, владелец при входе задаёт свой.
+ */
+export async function createCompanyRecords(
+  base: MutationCtx,
+  a: { slug: string; company: string; ownerName: string; login: string; city: string; plan: Plan; paidUntil?: string; mustChangePassword?: boolean },
+): Promise<{ ctx: MutationCtx; userId: Id<"users"> }> {
+  if (await unscopedDb(base).query("users").withIndex("email", (q) => q.eq("email", a.login)).first()) throw new ConvexError("Такой логин уже занят — войдите или выберите другой");
+  const tenantRowId = await base.db.insert("tenants", {
+    slug: a.slug,
+    name: a.company,
+    plan: a.plan,
+    modules: [...PLAN_INFO[a.plan].modules],
+    status: "active",
+    createdAt: nowIso(),
+    city: a.city,
+    ...(a.paidUntil ? { paidUntil: a.paidUntil } : {}),
+  });
+  // Дальше — в новой компании: владелец, справочник по умолчанию.
+  const ctx = forTenant(base, a.slug);
+  const userId = await ctx.db.insert("users", {
+    name: a.ownerName,
+    email: a.login,
+    ...(a.login.includes("@") ? {} : { phone: a.login }),
+    role: "owner",
+    tenantId: a.slug,
+    active: true,
+    ...(a.mustChangePassword ? { mustChangePassword: true } : {}),
+  });
+  await ctx.db.patch(tenantRowId, { ownerUserId: userId });
+  await materialize(ctx);
+  return { ctx, userId };
+}
 
 /** Вход не создался — убрать только что созданную компанию целиком (её данные — только что созданные справочник и журнал). */
 export const _registerFailed = internalMutation({

@@ -5,7 +5,7 @@
  * Важные события, которые дублируются на email. Событие помечает сам вызов notify (opts.email), остальные
  * уведомления — только колокольчик и Telegram.
  */
-export type EmailKind = "lead_new" | "order_assigned" | "order_overdue" | "payment" | "low_rating" | "channel_lost" | "system_alert";
+export type EmailKind = "lead_new" | "order_assigned" | "order_overdue" | "payment" | "low_rating" | "channel_lost" | "system_alert" | "subscription";
 
 export const EMAIL_KINDS: Record<EmailKind, { label: string; to: string }> = {
   lead_new: { label: "Новая заявка", to: "владельцу, операторам и руководителю направления" },
@@ -15,6 +15,7 @@ export const EMAIL_KINDS: Record<EmailKind, { label: string; to: string }> = {
   low_rating: { label: "Низкая оценка клиента", to: "владельцу и руководителю направления" },
   channel_lost: { label: "Отключился OLX", to: "владельцу" },
   system_alert: { label: "Сбой подсистемы и восстановление", to: "владельцу" },
+  subscription: { label: "Подписка заканчивается или приостановлена", to: "владельцу" },
 };
 
 /** Карточка «Email» владельца. Ключ API сюда не попадает. */

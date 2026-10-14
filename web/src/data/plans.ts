@@ -1,5 +1,7 @@
 // Тарифы и платные модули компании (ТЗ §24.3–§24.5): одни правила для сервера и интерфейса.
-// Оплату тарифа платформа ведёт вне системы: тариф и модули ставит администратор платформы (экран «Платформа»).
+// Тариф и модули ставит администратор платформы (экран «Платформа»); оплату подписки он вносит там же (src/data/billing.ts).
+
+import type { PayMethod } from "./billing";
 
 export const MODULES = ["ai", "telephony", "whatsapp", "olx", "online_payments", "documents", "analytics_pro", "api"] as const;
 export type TenantModule = (typeof MODULES)[number];
@@ -115,4 +117,9 @@ export interface PlatformTenantRow {
   platformFee: PlatformFee | null;
   usage: Record<LimitKind, number>;
   owner: string | null;
+  /** Подписка оплачена по этот день (src/data/billing.ts); null — бессрочно. */
+  paidUntil: string | null;
+  /** Почему приостановлена: неоплата (оплата возобновит сама) или администратор. */
+  suspendedFor: "unpaid" | "manual" | null;
+  lastPayment: { amount: number; paidAt: string; method: PayMethod } | null;
 }
