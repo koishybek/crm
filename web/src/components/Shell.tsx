@@ -84,7 +84,7 @@ const navFor = (u: User) =>
 /** badges — счётчики у пунктов меню (непрочитанные «Сообщения»). */
 function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?: () => void; badges?: Record<string, number> }) {
   return (
-    <nav className="flex flex-col gap-1.5" aria-label="Разделы">
+    <nav className="flex flex-col gap-1.5 [@media(max-height:820px)]:gap-1" aria-label="Разделы">
       {items.map((n) => (
         <NavLink
           key={n.to}
@@ -93,7 +93,7 @@ function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?:
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              "relative flex h-[52px] items-center gap-3.5 rounded-[12px] px-4 text-[16px] font-medium transition-colors",
+              "relative flex h-[50px] shrink-0 items-center gap-3.5 rounded-[12px] px-4 text-[16px] font-medium transition-colors [@media(max-height:820px)]:h-[42px] [@media(max-height:820px)]:text-[15px]",
               isActive
                 ? "bg-[#3a3120] text-brand before:absolute before:top-2.5 before:bottom-2.5 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-brand"
                 : "text-[#dedbd3] hover:bg-white/[0.06] hover:text-white",
@@ -117,15 +117,18 @@ function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?:
   );
 }
 
+/** Компания внизу сайдбара — своя у каждой компании платформы (название и город из её карточки). */
 function CompanyCard() {
+  const tenant = useTenant();
+  const name = tenant?.name ?? APP_NAME;
   return (
     <div className="flex items-center gap-3 rounded-[12px] px-2 py-2">
       <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-side-2 text-brand">
         <Building2 size={20} strokeWidth={1.7} aria-hidden />
       </span>
       <div className="min-w-0 leading-tight">
-        <div className="truncate text-[13.5px] font-semibold text-white">{APP_NAME}</div>
-        <div className="text-[12.5px] text-[#a9a59c]">Алматы</div>
+        <div className="truncate text-[13.5px] font-semibold text-white" title={name}>{name}</div>
+        {tenant?.city && <div className="truncate text-[12.5px] text-[#a9a59c]">{tenant.city}</div>}
       </div>
     </div>
   );
@@ -409,11 +412,14 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
     <div className="min-h-dvh bg-page">
       {/* Сайдбар */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col bg-side px-3 pt-6 pb-4 lg:flex">
-        <div className="mb-8 px-3">
+        <div className="mb-8 shrink-0 px-3 [@media(max-height:820px)]:mb-5">
           <Logo onDark />
         </div>
-        <SideNav items={items} badges={badges} />
-        <div className="mt-auto">
+        {/* Пунктов больше, чем влезает на ноутбуке, — список прокручивается, логотип и компания на месте. */}
+        <div className="scroll-thin scroll-dark -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
+          <SideNav items={items} badges={badges} />
+        </div>
+        <div className="mt-3 shrink-0">
           <CompanyCard />
         </div>
       </aside>
@@ -427,8 +433,10 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
               <Logo onDark />
               <IconButton icon={X} label="Закрыть меню" onClick={() => ui.setNav(false)} className="text-[#a9a59c] hover:bg-white/10 hover:text-white" />
             </div>
-            <SideNav items={items} badges={badges} onNavigate={() => ui.setNav(false)} />
-            <div className="mt-auto">
+            <div className="scroll-thin scroll-dark -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
+              <SideNav items={items} badges={badges} onNavigate={() => ui.setNav(false)} />
+            </div>
+            <div className="mt-3 shrink-0">
               <CompanyCard />
             </div>
           </aside>

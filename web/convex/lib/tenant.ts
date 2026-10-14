@@ -25,12 +25,13 @@ export interface TenantView {
   plan: Plan;
   modules: TenantModule[];
   status: "active" | "suspended";
+  city?: string;
 }
 
 export const LEGACY_NAME = "Home Max Service";
 
 export function viewOf(tenantId: string, row: TenantRow | null): TenantView {
-  if (row) return { slug: row.slug, name: row.name, plan: row.plan, modules: row.modules, status: row.status };
+  if (row) return { slug: row.slug, name: row.name, plan: row.plan, modules: row.modules, status: row.status, city: row.city };
   if (tenantId === DEFAULT_TENANT) return { slug: tenantId, name: LEGACY_NAME, plan: "pro", modules: [...MODULES], status: "active" };
   return { slug: tenantId, name: tenantId, plan: "free", modules: [], status: "suspended" };
 }

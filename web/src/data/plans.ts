@@ -96,6 +96,7 @@ export interface TenantInfo {
   plan: Plan;
   modules: TenantModule[];
   status: "active" | "suspended";
+  city?: string;
   /** Администратор платформы (PLATFORM_ADMINS) — экран «Платформа». */
   platformAdmin: boolean;
 }

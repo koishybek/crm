@@ -157,6 +157,17 @@
     background: #ddd8cc;
     border-radius: 8px;
   }
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #ddd8cc transparent;
+  }
+  /* Тёмный сайдбар: полоса прокрутки — приглушённая, не светлая. */
+  .scroll-dark {
+    scrollbar-color: #3d3a33 transparent;
+  }
+  .scroll-dark::-webkit-scrollbar-thumb {
+    background: #3d3a33;
+  }
 }
 
 @keyframes drawer-in {
