@@ -76,16 +76,18 @@ export interface LeadInput {
   address?: string;
   preferredTime?: string;
   budget?: number;
+  /** Район города (ТЗ п.12.3). */
+  district?: string;
 }
 export const createLead = (a: LeadInput) =>
   run(convex.mutation(api.leads.create, { ...a, clientId: a.clientId ? cid(a.clientId) : undefined, callId: a.callId ? (a.callId as Id<"calls">) : undefined }));
-export const updateLead = (id: string, patch: { serviceId?: string; city?: string; description?: string; urgency?: Urgency; comment?: string; address?: string; preferredTime?: string; budget?: number | null }) =>
+export const updateLead = (id: string, patch: { serviceId?: string; city?: string; description?: string; urgency?: Urgency; comment?: string; address?: string; preferredTime?: string; budget?: number | null; district?: string }) =>
   run(convex.mutation(api.leads.update, { id: lid(id), ...patch }));
 export const setLeadStatus = (id: string, status: Exclude<LeadStatus, "converted">, reason?: string) => run(convex.mutation(api.leads.setStatus, { id: lid(id), status, reason }));
 export const convertLead = (id: string) => run(convex.mutation(api.leads.convert, { id: lid(id) }));
 
 // ── Заказы ───────────────────────────────────────────────────────────────────
-export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority"> & { requiredSkills?: string[] }) =>
+export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority"> & { requiredSkills?: string[]; district?: string }) =>
   run(convex.mutation(api.orders.updateInfo, { id: oid(id), ...a }));
 export const updateFinance = (id: string, f: { clientPrice: number; payoutMode: Order["payoutMode"]; payoutValue: number }) =>
   run(convex.mutation(api.orders.updateFinance, { id: oid(id), ...f }));
@@ -132,7 +134,7 @@ export const executorAction = (id: string, action: ExecAction) => run(convex.mut
 export const setMyAvailability = (available: boolean) => run(convex.mutation(api.worker.setAvailable, { available }));
 
 // ── Исполнители (для сотрудников) ────────────────────────────────────────────
-export type ExecutorInput = Pick<Executor, "name" | "phone" | "city" | "categories" | "skills" | "cooperation">;
+export type ExecutorInput = Pick<Executor, "name" | "phone" | "city" | "categories" | "skills" | "cooperation" | "districts">;
 export const createExecutor = (a: ExecutorInput) => run(convex.action(api.executors.create, a));
 export const updateExecutor = (id: string, a: ExecutorInput) => run(convex.mutation(api.executors.update, { id: eid(id), ...a }));
 export const setExecutorAvailable = (id: string, available: boolean) => run(convex.mutation(api.executors.setAvailable, { id: eid(id), available }));

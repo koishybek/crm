@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-// Автораспределение заказов («AI-подбор», ТЗ п.23): кому система отдаёт заказ, когда, что бывает при отказе
+// Автораспределение заказов («Автоподбор по правилам», ТЗ п.23): кому система отдаёт заказ, когда, что бывает при отказе
 // или молчании мастера и когда кандидаты кончились.
 import { convexTest } from "convex-test";
 import { describe, expect, test } from "vitest";
@@ -110,7 +110,7 @@ describe("подбор исполнителя", () => {
 
     const history = await t.run((ctx) => ctx.db.query("history").withIndex("by_order", (q) => q.eq("orderId", ids.order)).collect());
     expect(history.at(-1)).toMatchObject({ kind: "assigned", actor: { type: "system" } });
-    expect(history.at(-1)!.text).toBe("AI-подбор: назначен Бауыржан Л. — свободен, заказов в работе: 0, рейтинг 4,9. Ждём подтверждения 30 мин");
+    expect(history.at(-1)!.text).toBe("Автоподбор: назначен Бауыржан Л. — свободен, заказов в работе: 0, рейтинг 4,9. Ждём подтверждения 30 мин");
     const journal = await t.run((ctx) => ctx.db.query("audit").collect());
     expect(journal.find((a) => a.action === "order.autoAssigned")).toMatchObject({ actorName: "Система", entityId: ids.order });
   });

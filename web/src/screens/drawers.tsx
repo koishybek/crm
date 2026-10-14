@@ -63,6 +63,7 @@ import { ConversationLink } from "../components/ConversationLink";
 import { EntityHistory } from "../components/AuditHistory";
 import { Source } from "../components/icons";
 import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
+import { DistrictField, DistrictPicker } from "../components/DistrictSelect";
 import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
 import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
 import { cn, dateTime, digits, money, phone, phoneMask } from "../lib/format";
@@ -208,6 +209,7 @@ function NewLeadForm({
   const [source, setSource] = useState<SourceId | "">(callFromProps ? "phone" : "");
   const [serviceId, setServiceId] = useState("");
   const [city, setCity] = useState(preset?.city ?? "");
+  const [district, setDistrict] = useState("");
   const [description, setDescription] = useState("");
   const [urgency, setUrgency] = useState<Urgency>("normal");
   const [comment, setComment] = useState("");
@@ -246,7 +248,11 @@ function NewLeadForm({
   const apply = (d: AiDraft, summary: AiSummary) => {
     if (d.serviceId && SERVICES.some((x) => x.id === d.serviceId && x.active !== false)) setServiceId(d.serviceId);
     const c = normalizeCity(d.city);
-    if (c && (CITIES as readonly string[]).includes(c)) setCity(c);
+    if (c && (CITIES as readonly string[]).includes(c)) {
+      setCity(c);
+      // Район — только явно названный клиентом (сервер сверил его со справочником города).
+      setDistrict(d.district ?? "");
+    }
     if (d.description) setDescription(d.description);
     // Адрес, удобное время и бюджет — полями заявки (ТЗ п.8.3): адрес перейдёт в заказ, бюджет видят только сотрудники.
     if (d.address) setAddress((x) => x || d.address!);
@@ -330,6 +336,7 @@ function NewLeadForm({
       address: address.trim() || undefined,
       preferredTime: preferredTime.trim() || undefined,
       budget: digits(budget) ? Number(digits(budget)) : undefined,
+      district: district || undefined,
     });
     if (!res.ok) return (setBusy(false), setError(res.error));
     if (conversationId) {
@@ -497,8 +504,18 @@ function NewLeadForm({
         </div>
 
         <FormRow label="Город" required>
-          {(id) => <CitySelect id={id} value={city} onChange={setCity} />}
+          {(id) => (
+            <CitySelect
+              id={id}
+              value={city}
+              onChange={(c) => {
+                setCity(c);
+                setDistrict("");
+              }}
+            />
+          )}
         </FormRow>
+        <DistrictField city={city} value={district} onChange={setDistrict} />
 
         <FormRow label="Описание" required>
           {(id) => (
@@ -672,9 +689,10 @@ function LeadView({ id }: { id: string }) {
           {(fid) => <ServiceSelect id={fid} value={v.serviceId} onChange={(serviceId) => setDraft((d) => ({ ...d, serviceId }))} />}
         </FormRow>
         <FormRow label="Город">
-          {(fid) => <CitySelect id={fid} value={v.city} onChange={(city) => setDraft((d) => ({ ...d, city }))} />}
+          {(fid) => <CitySelect id={fid} value={v.city} onChange={(city) => setDraft((d) => ({ ...d, city, district: "" }))} />}
         </FormRow>
       </div>
+      <DistrictField city={v.city} value={v.district ?? ""} disabled={locked} onChange={(district) => setDraft((d) => ({ ...d, district }))} />
       <FormRow label="Описание">{(fid) => <Textarea id={fid} rows={3} value={v.description} disabled={locked} onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))} />}</FormRow>
       <div>
         <div className="mb-2 text-[14px] font-semibold text-ink">Срочность</div>
@@ -960,6 +978,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
   const [cats, setCats] = useState<CategoryId[]>(ex?.categories ?? []);
   const [skills, setSkills] = useState<string[]>(ex?.skills ?? []);
   const [coop, setCoop] = useState(ex?.cooperation ?? "freelance");
+  const [districts, setDistricts] = useState<string[]>(ex?.districts ?? []);
   const [error, setError] = useState("");
 
   /** Сняли специализацию — уходят и навыки, которые были только в её справочнике. */
@@ -975,7 +994,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
     if (!city) return setError("Укажите город");
     const checked = normalizeSkills(skills, SKILLS_PER_EXECUTOR);
     if (!checked.ok) return setError(checked.error);
-    const data = { name: name.trim(), phone: ph, city, categories: cats, skills: checked.skills, cooperation: coop };
+    const data = { name: name.trim(), phone: ph, city, categories: cats, skills: checked.skills, cooperation: coop, districts };
     if (ex) {
       if (!cats.length) return setError("Выберите хотя бы одну специализацию");
       const r = await updateExecutor(ex.id, { ...data, phone: ex.phone });
@@ -1048,9 +1067,19 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
           {(id) => (ex ? <Input id={id} icon={Phone} value={phone(ex.phone)} disabled title="Телефон — это логин, его меняет владелец" /> : <PhoneInput id={id} value={ph} onChange={setPh} />)}
         </FormRow>
         <FormRow label="Город" required>
-          {(id) => <CitySelect id={id} value={city} onChange={setCity} />}
+          {(id) => (
+            <CitySelect
+              id={id}
+              value={city}
+              onChange={(c) => {
+                setCity(c);
+                if (c !== city) setDistricts([]);
+              }}
+            />
+          )}
         </FormRow>
       </div>
+      <DistrictPicker city={city} value={districts} onChange={setDistricts} />
       <div>
         <div className="mb-2 text-[14px] font-semibold text-ink">
           Специализации<span className="ml-0.5 text-bad">*</span>

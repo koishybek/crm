@@ -106,6 +106,7 @@ export const _createLead = internalMutation({
     /** Из AI-разбора: когда клиенту удобно и названный бюджет (только сотрудникам). */
     preferredTime: v.optional(v.string()),
     budget: v.optional(v.number()),
+    district: v.optional(v.string()),
   },
   handler: async (ctx, a): Promise<BotLeadResult> => {
     const phone = normalizeLogin(a.phone);
@@ -133,6 +134,7 @@ export const _createLead = internalMutation({
       serviceId: a.serviceId,
       city: a.city,
       address: a.address,
+      district: a.district,
       preferredTime: a.preferredTime,
       budget: a.budget,
       urgency: a.urgency,

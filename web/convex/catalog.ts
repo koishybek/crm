@@ -7,6 +7,8 @@ import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from 
 import { currentUser, OWNER, requireRole, type Me } from "./lib/access";
 import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
 import { withDefaultPrices } from "./lib/defaultPrices";
+import { loadDistricts } from "./lib/districts";
+import { toDistrictList } from "../src/data/cities";
 import { log, userActor } from "./lib/domain";
 import { cleanMoney, cleanText } from "./lib/limits";
 import { ACTIVE_STATUSES, CITIES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, type Category, type Service, type ServiceIcon, type ServiceInfo, type Tone } from "../src/data/catalog";
@@ -73,7 +75,7 @@ export const _hint = internalQuery({
   args: {},
   handler: async (ctx) => {
     const c = await loadCatalog(ctx);
-    return { services: c.services.filter((s) => s.active !== false).map((s) => ({ id: s.id, label: s.label })), cities: [...CITIES] };
+    return { services: c.services.filter((s) => s.active !== false).map((s) => ({ id: s.id, label: s.label })), cities: [...CITIES], districts: toDistrictList(await loadDistricts(ctx)) };
   },
 });
 

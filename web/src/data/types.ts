@@ -113,6 +113,8 @@ export interface Lead {
   preferredTime?: string;
   /** Бюджет, который назвал клиент, ₸ — только для сотрудников, в цену заказа сам не попадает. */
   budget?: number;
+  /** Район города (ТЗ п.12.3) — переходит в заказ. */
+  district?: string;
 }
 
 export type CallStatus = "ringing" | "answered" | "missed" | "completed";
@@ -130,6 +132,8 @@ export interface AiDraft {
   when?: string;
   /** Бюджет клиента, ₸ — только для сотрудников. */
   budget?: number;
+  /** Район — только если клиент назвал его явно («Бостандыкский район»). */
+  district?: string;
 }
 
 export interface Call {
@@ -229,7 +233,16 @@ export interface Order {
   /** Навыки, без которых заказ мастеру не показывается. */
   requiredSkills?: string[];
   files: Attachment[];
+  /** Район города (ТЗ п.12.3): мастеру с заданными районами заказ подходит, только если район — его. */
+  district?: string;
+  /** Условия выплаты заказа до применения ставки мастера (ставка услуги или ручная правка) — см. termsFor. */
+  payoutBase?: PayoutTerms;
+  /** Выплату в заказе правили вручную — ставки мастеров к нему не применяются. */
+  payoutManual?: boolean;
 }
+
+/** Условия выплаты исполнителю: сумма или процент от цены клиента. */
+export type PayoutTerms = Pick<Order, "payoutMode" | "payoutValue">;
 
 /** Заказ глазами исполнителя: без цены клиента и маржи; адрес и контакты — после подтверждения. */
 export interface WorkerOrder {
@@ -254,6 +267,8 @@ export interface WorkerOrder {
   /** Навыки, которые нужны для заказа (мастер видит заказ, только если они у него есть). */
   requiredSkills?: string[];
   files: Attachment[];
+  /** Район города. */
+  district?: string;
 }
 
 export type Actor = { type: "user"; id: string } | { type: "client"; id: string } | { type: "system" };
@@ -314,6 +329,40 @@ export interface Executor {
   reviews: number;
   cooperation: "freelance" | "staff";
   joinedAt: string;
+  /** Районы, где мастер берёт заказы (ТЗ п.12.3); нет — весь город. */
+  districts?: string[];
+  /** Ставки мастера (ТЗ п.14.5); нет — ставка услуги. */
+  rates?: ExecutorRates;
+  /** История за 90 дней (ТЗ п.12.6) — пересчитывает сервер. */
+  stats90?: ExecutorStats90;
+}
+
+/** Режим ставки: service — ставка услуги из справочника, percent — свой процент, fixed — своя сумма за заказ. */
+export type RateMode = "service" | "percent" | "fixed";
+/** Ставка мастера на конкретную услугу: сумма важнее процента. */
+export interface RateOverride {
+  percent?: number;
+  fixed?: number;
+}
+export interface ExecutorRates {
+  mode: RateMode;
+  /** Свой процент от цены клиента (mode = percent). */
+  percent?: number;
+  /** Своя сумма за заказ, ₸ (mode = fixed). */
+  fixed?: number;
+  /** Ставки на отдельные услуги — важнее режима. Ключ — id услуги. */
+  perService?: Record<string, RateOverride>;
+}
+
+/** История мастера за 90 дней: сдано (из них в срок), отменено, отказов, среднее время от назначения до сдачи. */
+export interface ExecutorStats90 {
+  done: number;
+  onTime: number;
+  cancelled: number;
+  refusals: number;
+  /** Среднее время выполнения, часов (от назначения до «Работа выполнена»). */
+  avgHours?: number;
+  updatedAt: string;
 }
 
 export interface Interaction {

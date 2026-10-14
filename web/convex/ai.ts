@@ -13,7 +13,7 @@ import { currentUser } from "./lib/access";
 import { fetchPublicFile } from "./lib/safeFetch";
 import { env } from "./env";
 import { URGENCY } from "../src/data/catalog";
-import { normalizeCity } from "../src/data/cities";
+import { canonicalDistrict, districtsOf, findDistrict, fromDistrictList, normalizeCity, type DistrictList, type DistrictMap } from "../src/data/cities";
 import { money } from "../src/lib/format";
 import type { AiDraft, AiSummary, Urgency } from "../src/data/types";
 
@@ -21,6 +21,8 @@ export interface Extraction {
   summary: string;
   serviceId: string | null;
   city: string | null;
+  /** Район — только если клиент назвал его явно и он есть в справочнике города. */
+  district?: string | null;
   address: string | null;
   when: string | null;
   budget: number | null;
@@ -29,7 +31,7 @@ export interface Extraction {
   questions: string[];
 }
 
-export type CatalogHint = { services: { id: string; label: string }[]; cities: string[] };
+export type CatalogHint = { services: { id: string; label: string }[]; cities: string[]; districts?: DistrictList };
 
 // ── Провайдеры ───────────────────────────────────────────────────────────────
 
@@ -203,6 +205,7 @@ export function extractionPrompt(text: string, hint: CatalogHint, channel: "call
     "summary — 1–3 коротких предложения: что случилось и что клиент хочет, без воды.",
     `serviceId — ровно один id из списка услуг ниже, наиболее подходящий; если ни одна не подходит — null.\nУслуги:\n${list}`,
     `city — город клиента${hint.cities.length ? ` (обычно один из: ${hint.cities.join(", ")})` : ""}, иначе null. address — улица/микрорайон/дом/квартира, если названы, иначе null.`,
+    "district — район города, только если клиент назвал его прямо (например «Бостандыкский район»); по улице или микрорайону район не угадывай — тогда null.",
     `when — когда клиенту удобно, коротко как он сказал (например «завтра после 18:00»), иначе null; сегодня ${today}. budget — сумма в тенге числом, если названа, иначе null.`,
     "urgency: urgent — авария, течёт, нет света/воды, «срочно», «сегодня»; high — нужно в ближайшие 1–2 дня; иначе normal.",
     "clientName — имя клиента, если представился, иначе null. questions — до 3 вопросов, которые оператору стоит уточнить (того, чего нет в обращении).",
@@ -214,7 +217,8 @@ export function extractionPrompt(text: string, hint: CatalogHint, channel: "call
   ].join("\n");
 }
 
-async function extractViaChat(cfg: OpenAiCfg, text: string, hint: CatalogHint, channel: "call" | "message"): Promise<Record<string, unknown>> {
+/** Один запрос к OpenAI-совместимому чату: всё — в сообщении роли user (шлюз не принимает system), ответ — JSON-объект. */
+async function chatCompletion(cfg: OpenAiCfg, content: string): Promise<Record<string, unknown>> {
   const res = await call(
     `${cfg.base}/chat/completions`,
     {
@@ -224,7 +228,7 @@ async function extractViaChat(cfg: OpenAiCfg, text: string, hint: CatalogHint, c
         model: cfg.model,
         response_format: { type: "json_object" },
         ...(cfg.effort ? { reasoning_effort: cfg.effort } : {}),
-        messages: [{ role: "user", content: extractionPrompt(text, hint, channel, almatyToday()) }],
+        messages: [{ role: "user", content }],
       }),
     },
     LLM_TIMEOUT_MS,
@@ -234,6 +238,19 @@ async function extractViaChat(cfg: OpenAiCfg, text: string, hint: CatalogHint, c
   const parsed = parseJsonObject(j.choices?.[0]?.message?.content ?? "");
   if (!parsed) throw new AiError("AI вернул неразборчивый ответ", true);
   return parsed;
+}
+
+const extractViaChat = (cfg: OpenAiCfg, text: string, hint: CatalogHint, channel: "call" | "message") =>
+  chatCompletion(cfg, extractionPrompt(text, hint, channel, almatyToday()));
+
+/** Основной LLM подключён — без него AI-подбор исполнителя не работает (у запасного Worker нет чата). */
+export const canChat = () => !!llmCfg();
+
+/** Запрос к основному LLM (та же модель, что разбирает обращения) — для AI-подбора исполнителя (convex/aiMatch.ts). */
+export async function chatJson(prompt: string): Promise<Record<string, unknown>> {
+  const cfg = llmCfg();
+  if (!cfg) throw new ConvexError("AI не подключён");
+  return chatCompletion(cfg, prompt);
 }
 
 async function extractViaWorker(w: WorkerCfg, text: string, hint: CatalogHint, channel: "call" | "message"): Promise<Record<string, unknown>> {
@@ -273,13 +290,16 @@ export async function extract(text: string, hint: CatalogHint, channel: "call" |
 export function sanitize(r: Record<string, unknown>, hint: CatalogHint): Extraction {
   const s = (x: unknown, max = 300) => (typeof x === "string" && x.trim() && x.trim().toLowerCase() !== "null" ? x.trim().slice(0, max) : null);
   const city = s(r.city, 60);
+  const cityName = normalizeCity(city).slice(0, 60);
+  const address = s(r.address, 200);
   const serviceId = s(r.serviceId, 80);
   const budget = typeof r.budget === "number" ? r.budget : typeof r.budget === "string" ? Number(r.budget.replace(/[^\d.]/g, "")) : NaN;
   return {
     summary: s(r.summary, 600) ?? "",
     serviceId: serviceId && hint.services.some((x) => x.id === serviceId) ? serviceId : null,
-    city: normalizeCity(city).slice(0, 60) || null,
-    address: s(r.address, 200),
+    city: cityName || null,
+    district: cityName ? districtOf(fromDistrictList(hint.districts ?? []), cityName, s(r.district, 60), address) : null,
+    address,
     when: s(r.when, 120),
     budget: Number.isFinite(budget) && budget > 0 && budget < 100_000_000 ? Math.round(budget) : null,
     urgency: r.urgency === "urgent" || r.urgency === "high" ? r.urgency : "normal",
@@ -288,11 +308,23 @@ export function sanitize(r: Record<string, unknown>, hint: CatalogHint): Extract
   };
 }
 
+/**
+ * Район из разбора (ТЗ п.12.3): названный AI — если он есть в справочнике города (в том числе «Бостандыкский район»),
+ * иначе — явно названный в адресе («ул. Тимирязева, Бостандыкский р-н»). По улицам район не угадываем.
+ */
+function districtOf(map: DistrictMap, city: string, named: string | null, address: string | null): string | null {
+  const list = districtsOf(map, city);
+  if (!list.length) return null;
+  if (named) return canonicalDistrict(map, city, named) ?? findDistrict(/район|р-н|ауданы/iu.test(named) ? named : `${named} район`, list);
+  return findDistrict(address, list);
+}
+
 /** Разбор → блок «AI-разбор» в заявке и черновик полей формы. */
 export function toSummary(x: Extraction, serviceLabel: (id: string) => string): { ai: AiSummary; draft: AiDraft } {
   const extracted = [
     x.serviceId && { label: "Услуга", value: serviceLabel(x.serviceId) },
     x.city && { label: "Город", value: x.city },
+    x.district && { label: "Район", value: x.district },
     x.address && { label: "Адрес", value: x.address },
     x.when && { label: "Когда", value: x.when },
     { label: "Срочность", value: URGENCY[x.urgency].label },
@@ -308,6 +340,7 @@ export function toSummary(x: Extraction, serviceLabel: (id: string) => string): 
     draft: {
       serviceId: x.serviceId ?? undefined,
       city: x.city ?? undefined,
+      district: x.district ?? undefined,
       address: x.address ?? undefined,
       urgency: x.urgency,
       clientName: x.clientName ?? undefined,

@@ -1,5 +1,5 @@
 // Карточки владельца в «Настройках»: состояние системы (ТЗ п.20 «мониторинг»), резервные копии (п.20, п.26)
-// и автораспределение заказов — «AI-подбор» (п.23).
+// и автораспределение заказов — «Автоподбор по правилам» (п.23; AI только советует в карточке заказа).
 import { useQuery } from "convex/react";
 import { Activity, DatabaseBackup, Download, Shuffle, TriangleAlert } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -188,12 +188,12 @@ function AutoAssignCard() {
       title="Автораспределение заказов"
       titleExtra={
         <Badge tone="violet" size="sm">
-          AI-подбор
+          Автоподбор по правилам
         </Badge>
       }
     >
       <p className="text-[13.5px] text-muted">
-        Заказ {s.minutes} мин лежит в ленте и его никто не взял — система сама назначит лучшего подходящего мастера и пришлёт заказ с кнопками «Подтвердить / Отказаться». Выключено — заказы назначают только люди.
+        Заказ {s.minutes} мин лежит в ленте и его никто не взял — система сама назначит лучшего подходящего мастера по правилам ниже (без AI) и пришлёт заказ с кнопками «Подтвердить / Отказаться». Выключено — заказы назначают только люди.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-3">
         <Toggle checked={s.enabled} onChange={(on) => !busy && void save(on, valid ? typed : s.minutes)} label={s.enabled ? "Включено" : "Выключено"} />

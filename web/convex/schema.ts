@@ -118,6 +118,26 @@ export const aiDraft = v.object({
   description: v.optional(v.string()),
   when: v.optional(v.string()),
   budget: v.optional(v.number()),
+  district: v.optional(v.string()),
+});
+/** Условия выплаты: сумма или процент от цены клиента. */
+export const payoutTerms = v.object({ payoutMode: v.union(v.literal("fixed"), v.literal("percent")), payoutValue: v.number() });
+const rateOverride = v.object({ percent: v.optional(v.number()), fixed: v.optional(v.number()) });
+/** Ставки исполнителя (ТЗ п.14.5): service — ставка услуги, percent — свой процент, fixed — своя сумма; perService — по услугам. */
+export const executorRates = v.object({
+  mode: v.union(v.literal("service"), v.literal("percent"), v.literal("fixed")),
+  percent: v.optional(v.number()),
+  fixed: v.optional(v.number()),
+  perService: v.optional(v.record(v.string(), rateOverride)),
+});
+/** История мастера за 90 дней (ТЗ п.12.6) — кеш для подбора, считает convex/executorStats.ts. */
+export const executorStats90 = v.object({
+  done: v.number(),
+  onTime: v.number(),
+  cancelled: v.number(),
+  refusals: v.number(),
+  avgHours: v.optional(v.number()),
+  updatedAt: v.string(),
 });
 
 export default defineSchema({
@@ -171,6 +191,14 @@ export default defineSchema({
     unavailableReason: v.optional(v.string()),
     /** Заказов в работе одновременно; не задано — DEFAULT_MAX_ACTIVE (src/data/logic.ts). Меняет владелец. */
     maxActiveOrders: v.optional(v.number()),
+    /** Районы города, где мастер берёт заказы (ТЗ п.12.3); пусто — весь город. */
+    districts: v.optional(v.array(v.string())),
+    /** Ставки мастера (ТЗ п.14.5); нет — ставка услуги. Меняет владелец. */
+    rates: v.optional(executorRates),
+    /** История за 90 дней — кеш для подбора (ТЗ п.12.6). */
+    stats90: v.optional(executorStats90),
+    /** Когда мастер отказывался от заказа или не подтвердил назначение — за последние 90 дней, для stats90. */
+    refusals: v.optional(v.array(v.string())),
   }).index("by_phone", ["phone"]),
 
   clients: defineTable({
@@ -227,6 +255,8 @@ export default defineSchema({
     address: v.optional(v.string()),
     preferredTime: v.optional(v.string()),
     budget: v.optional(v.number()),
+    /** Район города (ТЗ п.12.3) — переходит в заказ. */
+    district: v.optional(v.string()),
   })
     .index("by_created", ["createdAt"])
     .index("by_status", ["status", "createdAt"])
@@ -281,6 +311,12 @@ export default defineSchema({
     autoOffered: v.optional(v.array(v.id("executors"))),
     autoAssignedAt: v.optional(v.string()),
     autoExhaustedAt: v.optional(v.string()),
+    /** Район города (ТЗ п.12.3): мастеру с заданными районами заказ подходит, только если район — его. */
+    district: v.optional(v.string()),
+    /** Условия выплаты до применения ставки мастера (ТЗ п.14.5): с ними заказ возвращается в ленту. */
+    payoutBase: v.optional(payoutTerms),
+    /** Выплату правили вручную — ставки мастеров к заказу не применяются. */
+    payoutManual: v.optional(v.boolean()),
   })
     .index("by_status", ["status", "deadline"])
     .index("by_executor", ["executorId", "status"])

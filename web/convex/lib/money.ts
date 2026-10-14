@@ -6,6 +6,7 @@ import type { MutationCtx } from "../_generated/server";
 import { orderNotice } from "../clientNotify";
 import { executorUser, notify, nowIso, setStatus, type StatusMove } from "./domain";
 import { cleanMoney, cleanText } from "./limits";
+import { refreshStats } from "./stats";
 import { almatyDayStart } from "./tg";
 import { paidAmount } from "../../src/data/logic";
 import { settledStatus, TERMS_WATCH_STATUSES } from "../../src/data/money";
@@ -76,6 +77,8 @@ export async function finishWork(ctx: MutationCtx, o: Doc<"orders">, actor: Acto
   await setStatus(ctx, o, "done", actor, text);
   // Событие «выполнен» отправляем явно: через мгновение статус уже «Ожидает оплаты» или «Оплачен».
   await orderNotice(ctx, o._id, "done");
+  // Сдача работы — в историю мастера за 90 дней (ТЗ п.12.6): вовремя ли и сколько заняло.
+  await refreshStats(ctx, o.executorId);
   const fresh = (await ctx.db.get(o._id))!;
   const settled = await settle(ctx, fresh);
   return { status: settled?.to ?? fresh.status, settled };

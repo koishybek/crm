@@ -10,7 +10,7 @@ import { executorFiles, executorThread, toWorkerOrder } from "./lib/dto";
 import { fileSigner, type FileSigner } from "./lib/files";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
-import { contactsOpen, payout } from "../src/data/logic";
+import { contactsOpen, payout, payoutFor } from "../src/data/logic";
 import { fitsProfile } from "../src/data/workerMatch";
 import { executorStats, type EarningOrder } from "../src/data/workerStats";
 import { firstName } from "../src/lib/format";
@@ -122,7 +122,7 @@ export const order = query({
     const files = visibleFiles(o, new Set());
     return {
       state: "available",
-      order: toWorkerOrder(o, { contacts: false }),
+      order: toWorkerOrder(o, { contacts: false, payout: payoutFor(ex.rates, o) }),
       photos: photosOf(files, signer),
       documents: documentsOf(files, signer),
       publishedAt: await publishedAt(ctx, o),
@@ -198,6 +198,7 @@ export const profile = query({
       unavailableReason: ex.unavailableReason,
       cooperation: ex.cooperation,
       joinedAt: ex.joinedAt,
+      districts: ex.districts ?? [],
       telegram: { enabled: !!env("TELEGRAM_BOT_TOKEN") && !!env("TELEGRAM_BOT_USERNAME"), linked: !!me.telegramChatId },
       stats: executorStats(orders.map(toEarning), Date.now()),
       reviews,

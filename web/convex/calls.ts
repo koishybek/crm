@@ -10,6 +10,7 @@ import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
 import { markError, markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
+import { districtOrNone } from "./lib/districts";
 import { dropFile, fileSigner, takeUpload } from "./lib/files";
 import { hitLimit } from "./lib/rateLimit";
 import { insertClient } from "./clients";
@@ -191,6 +192,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
     address: c.draft?.address?.slice(0, 300),
     preferredTime: c.draft?.when?.slice(0, 120),
     budget: c.draft?.budget,
+    district: await districtOrNone(ctx, city, c.draft?.district),
   });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "call", channel: "phone", title: "Звонок · разобран AI", text: c.ai?.summary ?? "", at: c.startedAt });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: "phone", title: "Новая заявка", text: svc.label, at, leadId });

@@ -515,6 +515,7 @@ export const _autoLeadCreate = internalMutation({
       serviceId: d.serviceId,
       city: d.city,
       address: d.address,
+      district: d.district,
       preferredTime: d.when,
       budget: d.budget,
       urgency: d.urgency,

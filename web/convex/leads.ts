@@ -6,6 +6,7 @@ import { almatyStamp, audit, ChangeLog, quote } from "./lib/audit";
 import { assertNotErased, cleanPhone, insertClient } from "./clients";
 import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
 import { toLead, toOrder } from "./lib/dto";
+import { districtFor } from "./lib/districts";
 import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { loadCatalog } from "./catalog";
 import { aiSummary, source, urgency } from "./schema";
@@ -92,6 +93,8 @@ export const create = mutation({
     address: v.optional(v.string()),
     preferredTime: v.optional(v.string()),
     budget: v.optional(v.number()),
+    /** Район города (ТЗ п.12.3) — из справочника города; перейдёт в заказ. */
+    district: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     const me = await requireRole(ctx, TEAM);
@@ -102,6 +105,7 @@ export const create = mutation({
     const description = cleanText(a.description, MAX.description, "Описание");
     if (!description) throw new ConvexError("Опишите, что нужно сделать");
     const city = cleanCity(a.city);
+    const district = await districtFor(ctx, city, a.district);
     const comment = optionalText(a.comment, MAX.comment, "Комментарий");
     const address = optionalText(a.address, MAX.address, "Адрес");
     const preferredTime = optionalText(a.preferredTime, MAX.preferredTime, "Удобное время");
@@ -144,6 +148,7 @@ export const create = mutation({
       address,
       preferredTime,
       budget,
+      district,
     });
     // Звонок без номера (запись загрузили вручную) получает номер клиента.
     if (call) await ctx.db.patch(call._id, { leadId: id, clientId, clientName: c.name, ...(call.from || call.direction === "out" ? {} : { from: c.phone }) });
@@ -192,7 +197,7 @@ export const take = mutation({
   },
 });
 
-type LeadPatch = Partial<Pick<Doc<"leads">, "serviceId" | "city" | "description" | "urgency" | "comment" | "address" | "preferredTime" | "budget">>;
+type LeadPatch = Partial<Pick<Doc<"leads">, "serviceId" | "city" | "description" | "urgency" | "comment" | "address" | "preferredTime" | "budget" | "district">>;
 
 /** Правка заявки. Ничего не поменялось — ни записи, ни шума в журнале. */
 export const update = mutation({
@@ -207,6 +212,8 @@ export const update = mutation({
     preferredTime: v.optional(v.string()),
     /** null — бюджет убрать. */
     budget: v.optional(v.union(v.number(), v.null())),
+    /** Район (ТЗ п.12.3); пустая строка — без района. */
+    district: v.optional(v.string()),
   },
   handler: async (ctx, { id, ...input }) => {
     const me = await requireRole(ctx, TEAM);
@@ -230,6 +237,15 @@ export const update = mutation({
       if (city !== l.city) {
         patch.city = city;
         log.add(`город ${l.city} → ${city}`, "city", { from: l.city, to: city });
+      }
+    }
+    // Район — из справочника города заявки; сменили город и не указали район — прежний к новому городу не относится.
+    const city = patch.city ?? l.city;
+    if (input.district !== undefined || patch.city !== undefined) {
+      const district = await districtFor(ctx, city, input.district ?? (patch.city !== undefined ? undefined : l.district));
+      if (district !== l.district) {
+        patch.district = district;
+        log.add(`район ${l.district ?? "—"} → ${district ?? "—"}`, "district", { from: l.district ?? null, to: district ?? null });
       }
     }
     if (input.urgency !== undefined && input.urgency !== l.urgency) {
@@ -335,6 +351,7 @@ export const convert = mutation({
       category: svc.category,
       description: l.description,
       city: l.city,
+      district: l.district,
       address: (address === undefined ? undefined : cleanText(address, MAX.address, "Адрес")) || l.address || c.address || "",
       deadline: due,
       priority: l.urgency,

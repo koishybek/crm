@@ -6,6 +6,7 @@ import { currentUser, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
 import { almatyStamp, audit, ChangeLog, listDiff, listDiffText, quote, type AuditActor } from "./lib/audit";
 import { executorUser, notify, nowIso, TENANT } from "./lib/domain";
 import { toExecutor, toOrder, toUser } from "./lib/dto";
+import { executorDistricts } from "./lib/districts";
 import { cleanCity, cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
 import { createLogin } from "./users";
@@ -155,6 +156,8 @@ const fields = {
   categories: v.array(category),
   skills: v.array(v.string()),
   cooperation: v.union(v.literal("freelance"), v.literal("staff")),
+  /** Районы города, где мастер берёт заказы (ТЗ п.12.3); пусто — весь город. Не передан — без изменений. */
+  districts: v.optional(v.array(v.string())),
 };
 
 /** Профиль + учётка мастера. Вызывают create и импорт из Excel — от имени того, кто их запустил. */
@@ -169,7 +172,21 @@ export const _insert = internalMutation({
     const name = cleanText(a.name, 120, "ФИО");
     if (!name) throw new ConvexError("Укажите имя и город");
     const city = cleanCity(a.city);
-    const id = await ctx.db.insert("executors", { ...a, categories, skills, name, city, phone, tenantId: TENANT, available: true, rating: 5, reviews: 0, joinedAt: nowIso() });
+    const districts = await executorDistricts(ctx, city, a.districts);
+    const id = await ctx.db.insert("executors", {
+      ...a,
+      categories,
+      skills,
+      name,
+      city,
+      phone,
+      districts: districts.length ? districts : undefined,
+      tenantId: TENANT,
+      available: true,
+      rating: 5,
+      reviews: 0,
+      joinedAt: nowIso(),
+    });
     // Пароль выдаёт сотрудник (создание или импорт) — он временный: при первом входе мастер задаёт свой (аудит M-8).
     await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true, mustChangePassword: true });
     await audit(ctx, (await currentUser(ctx)) ?? "Система", "executor.created", `Добавлен исполнитель ${shortName(name)}${skills.length ? `, навыков: ${skills.length}` : ""}`, {
@@ -214,12 +231,20 @@ export const update = mutation({
     const skills = await cleanExecutorSkills(ctx, a.skills);
     const name = cleanText(a.name, 120, "ФИО") || e.name;
     const city = cleanCity(a.city);
+    // Сменили город — прежние районы к нему не относятся; те же районы того же города не перепроверяем
+    // (владелец мог убрать район из справочника — профиль мастера от этого не ломается).
+    const sameList = (x: readonly string[], y: readonly string[]) => x.length === y.length && x.every((d, i) => d === y[i]);
+    const kept = city === e.city && (a.districts === undefined || sameList(a.districts, e.districts ?? []));
+    const districts = kept ? (e.districts ?? []) : await executorDistricts(ctx, city, a.districts ?? []);
+    const before = e.districts ?? [];
 
     const cats = listDiff(e.categories, categories);
     const diff = skillsDiff(e.skills, skills);
     const log = new ChangeLog();
     if (name !== e.name) log.add(`ФИО ${quote(e.name)} → ${quote(name)}`, "name", "изменено");
     if (city !== e.city) log.add(`город ${e.city} → ${city}`, "city", { from: e.city, to: city });
+    const areas = listDiff(before, districts);
+    if (areas.added.length || areas.removed.length) log.add(districts.length ? `районы: ${listDiffText(areas)}` : "районы: весь город", "districts", areas);
     if (cats.added.length || cats.removed.length) log.add(`специализации ${listDiffText(cats, label)}`, "categories", cats);
     if (a.cooperation !== e.cooperation) log.add(`сотрудничество: ${COOPERATION[e.cooperation]} → ${COOPERATION[a.cooperation]}`, "cooperation", { from: e.cooperation, to: a.cooperation });
     if (diff.added.length || diff.removed.length) log.add(`навыки: ${listDiffText(diff)}`, "skills", diff);
@@ -229,7 +254,7 @@ export const update = mutation({
     if (log.empty) return;
 
     // Телефон — это логин; менять его здесь нельзя, чтобы не сломать вход.
-    await ctx.db.patch(id, { name, city, categories, skills, cooperation: a.cooperation });
+    await ctx.db.patch(id, { name, city, categories, skills, cooperation: a.cooperation, districts: districts.length ? districts : undefined });
     const u = await ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", id)).first();
     if (u && u.name !== name) await ctx.db.patch(u._id, { name });
     await audit(ctx, me, "executor.updated", `Профиль исполнителя ${shortName(name)} изменён: ${log.text()}`, { entityId: id, meta: { changes: log.changes } });

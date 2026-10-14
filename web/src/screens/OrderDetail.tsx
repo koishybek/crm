@@ -35,7 +35,7 @@ import { ORDER_STATUS, STAFF_TRANSITIONS, TRANSITION_LABEL, URGENCY, categoryByI
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useMe, useNow, useTeam } from "../data/hooks";
-import { EXEC_STATE, debt, executorState, isOverdue, netMargin, paidAmount, payout, paymentState, rankExecutors, refundedAmount, revenueOf, type Load } from "../data/logic";
+import { EXEC_STATE, debt, executorState, historyLine, isOverdue, netMargin, paidAmount, payout, payoutFor, paymentState, rankExecutors, refundedAmount, revenueOf, type Load } from "../data/logic";
 import { closeProblems, isPayoutDue, netReceived, OWNER_MONEY_STATUSES, PAYMENT_BLOCKED, REFUNDABLE_STATUSES, settledStatus, TERMS_WATCH_STATUSES } from "../data/money";
 import { useFileQuery } from "../data/files";
 import { assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
@@ -50,6 +50,8 @@ import { SkillChips, SkillPicker } from "../components/SkillChips";
 import { hasSkill } from "../data/skills";
 import { Avatar, BackLink, Badge, Button, Card, DotBadge, EmptyState, FormRow, IconTile, Input, Loading, Menu, MenuItem, Modal, Segmented, Select, Textarea } from "../components/ui";
 import { CitySelect, ServiceSelect } from "./drawers";
+import { DistrictField } from "../components/DistrictSelect";
+import { AiMatchPanel } from "../components/AiMatchPanel";
 import { cn, date, dateTime, digits, money, num, phone, shortName, toLocalInput } from "../lib/format";
 
 /** Данные карточки с сервера — для вложенных блоков (подбор, история, подсказка). */
@@ -215,6 +217,7 @@ export default function OrderDetail() {
               </InfoRow>
               <InfoRow icon={<Building2 size={20} className="text-muted" />} label="Город">
                 {o.city}
+                {o.district && <span className="font-normal text-ink-2"> · район {o.district}</span>}
               </InfoRow>
               <InfoRow icon={<CalendarDays size={20} className="text-muted" />} label="Дедлайн">
                 <span className={cn(overdue && "text-bad")}>{dateTime(o.deadline)}</span>
@@ -558,10 +561,20 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const noPrice = o.clientPrice <= 0 || payout(o) <= 0;
   // Мастера на выходном назначает только владелец — так же проверяет сервер.
   const canOverrideOff = me?.role === "owner";
+  const assign = async (e: Executor) => {
+    setBusy(true);
+    // Передаём, каким заказ видели на экране: если его только что взял мастер — сервер не даст перебить.
+    const r = await assignExecutor(o.id, e.id, o);
+    setBusy(false);
+    if (!r.ok) return toast(r.error, "bad");
+    toast(`${shortName(e.name)} назначен — ждём подтверждения`);
+    onClose();
+  };
   return (
     <Modal open onClose={onClose} title="Назначить исполнителя" width={640}>
       <p className="-mt-1 mb-3 text-[14px] text-muted">
-        {serviceById(o.serviceId).label} · {o.city}. Сверху — подходящие по специализации, навыкам и городу: свободные, с меньшей загрузкой и высоким рейтингом.
+        {serviceById(o.serviceId).label} · {o.city}
+        {o.district ? `, район ${o.district}` : ""}. Сверху — подходящие по специализации, навыкам, городу и району: свободные, с меньшей загрузкой, высоким рейтингом и хорошей историей за 90 дней.
       </p>
       {!!o.requiredSkills?.length && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[13.5px] text-ink-2">
@@ -570,6 +583,14 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
         </div>
       )}
       {noPrice && <div className="mb-3 rounded-[10px] bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-ink">Сначала укажите цену клиента и выплату — исполнитель должен видеть, сколько получит.</div>}
+      <AiMatchPanel
+        orderId={o.id}
+        disabled={busy || noPrice}
+        onPick={(id) => {
+          const e = db.executors.find((x) => x.id === id);
+          if (e) void assign(e);
+        }}
+      />
       <Input icon={Search} placeholder="Поиск по имени" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="mt-3 flex flex-col gap-2">
         {list.map(({ e, state, load, fits, reasons }) => (
@@ -592,6 +613,11 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
                   "нет оценок"
                 )}
               </div>
+              <div className="mt-0.5 truncate text-[12.5px] text-muted">
+                {historyLine(e.stats90) ?? "истории за 90 дней нет"}
+                {o.clientPrice > 0 && ` · получит ${money(payoutFor(e.rates, o))}`}
+                {e.districts?.length ? ` · районы: ${e.districts.join(", ")}` : ""}
+              </div>
               {!fits && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Почему не подходит">
                   {reasons.map((r) => (
@@ -607,15 +633,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
               variant={o.executorId === e.id ? "soft" : "primary"}
               title={state === "off" && !canOverrideOff ? "Исполнитель на выходном — назначить его может только владелец" : undefined}
               disabled={busy || (state === "off" && !canOverrideOff) || noPrice || o.executorId === e.id}
-              onClick={async () => {
-                setBusy(true);
-                // Передаём, каким заказ видели на экране: если его только что взял мастер — сервер не даст перебить.
-                const r = await assignExecutor(o.id, e.id, o);
-                setBusy(false);
-                if (!r.ok) return toast(r.error, "bad");
-                toast(`${shortName(e.name)} назначен — ждём подтверждения`);
-                onClose();
-              }}
+              onClick={() => void assign(e)}
             >
               {o.executorId === e.id ? "Назначен" : "Назначить"}
             </Button>
@@ -636,6 +654,7 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const [serviceId, setServiceId] = useState(o.serviceId);
   const [description, setDescription] = useState(o.description);
   const [city, setCity] = useState(o.city);
+  const [district, setDistrict] = useState(o.district ?? "");
   const [address, setAddress] = useState(o.address);
   const [dl, setDl] = useState(toLocalInput(o.deadline));
   const [priority, setPriority] = useState<Urgency>(o.priority);
@@ -659,7 +678,7 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
           <Button
             onClick={async () => {
               if (Number.isNaN(Date.parse(dl))) return toast("Укажите дедлайн", "bad");
-              const r = await updateOrderInfo(o.id, { serviceId, description, city, address, deadline: new Date(dl).toISOString(), priority, requiredSkills: required });
+              const r = await updateOrderInfo(o.id, { serviceId, description, city, district, address, deadline: new Date(dl).toISOString(), priority, requiredSkills: required });
               if (!r.ok) return toast(r.error, "bad");
               toast(r.value.notified ? `Заказ обновлён — он стал подходить ещё исполнителям: ${r.value.notified}, они получили уведомление` : "Заказ обновлён");
               onClose();
@@ -683,9 +702,21 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
         </div>
         <FormRow label="Описание и ТЗ">{(id) => <Textarea id={id} rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />}</FormRow>
         <div className="grid grid-cols-2 gap-3">
-          <FormRow label="Город">{(id) => <CitySelect id={id} value={city} onChange={setCity} />}</FormRow>
+          <FormRow label="Город">
+            {(id) => (
+              <CitySelect
+                id={id}
+                value={city}
+                onChange={(c) => {
+                  setCity(c);
+                  if (c !== city) setDistrict("");
+                }}
+              />
+            )}
+          </FormRow>
           <FormRow label="Дедлайн">{(id) => <input id={id} type="datetime-local" className="field" value={dl} onChange={(e) => setDl(e.target.value)} />}</FormRow>
         </div>
+        <DistrictField city={city} value={district} onChange={setDistrict} />
         <FormRow label="Адрес">{(id) => <Input id={id} icon={MapPin} value={address} onChange={(e) => setAddress(e.target.value)} />}</FormRow>
         <div>
           <div className="mb-2 text-[14px] font-semibold text-ink">Приоритет</div>
