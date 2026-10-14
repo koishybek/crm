@@ -1,16 +1,19 @@
 // Резервные копии (ТЗ п.20, п.26): каждую ночь — JSON-снимок бизнес-таблиц в файловом хранилище Convex,
-// храним 14 последних. Секреты (токены интеграций, хэши ключей API, коды привязки Telegram, секреты настроек)
-// и служебные таблицы (вход, лимиты, OAuth) в копию не попадают. Это дополнительная копия внутри того же
-// деплоймента: от потери самого деплоймента защищают бэкапы Convex Pro и `npx convex export` во внешнее хранилище.
+// храним 14 последних; с описью файлов (lib/backupFiles.ts) и, если подключено, — копией во внешнем S3 (offsite.ts).
+// Секреты (токены интеграций, хэши ключей API, коды привязки Telegram, секреты настроек)
+// и служебные таблицы (вход, лимиты, OAuth) в копию не попадают. Копия внутри деплоймента от потери самого
+// деплоймента не спасает — для этого внешнее хранилище; восстановление — scripts/restore.ts.
 import { ConvexError, v, type Value } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id, TableNames } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./_generated/server";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
+import { fileRefs, type FileEntry, type FileRef } from "./lib/backupFiles";
 import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
+import { s3Config } from "./lib/s3";
 import { fileSize, type BackupList } from "../src/data/systemHealth";
 
 /** Сколько последних копий храним. */
@@ -23,7 +26,8 @@ const MANUAL_EVERY_MS = 10 * 60_000;
  */
 const PAGE = 100;
 const PAGE_OF: Partial<Record<TableNames, number>> = { calls: 25 };
-export const BACKUP_VERSION = 1;
+/** 2 — добавлена опись файлов («files»). Восстановление (scripts/restore.ts) понимает обе версии. */
+export const BACKUP_VERSION = 2;
 
 /** Что копируем: всё, с чем работает бизнес. */
 export const BACKUP_TABLES = [
@@ -64,7 +68,9 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
  * отметки эскалаций (живут неделю-две и после восстановления не нужны) и выгрузки CSV (временные файлы на сутки) —
  * их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries"] as const satisfies readonly TableNames[];
+// Подписки web push привязаны к браузеру и ключам устройства — после восстановления подписываются заново;
+// ошибки интерфейса — служебный журнал на две недели; отметки копирования файлов — состояние внешнего хранилища.
+const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries", "pushSubscriptions", "clientErrors", "offsiteFiles"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;
@@ -92,6 +98,33 @@ export function scrub(table: BackupTable, doc: Record<string, Value>): Record<st
 
 type Page = { docs: Record<string, Value>[]; cursor: string; isDone: boolean };
 
+/** Сведения о файлах из хранилища для описи: размер и тип; нет строки — файла уже нет. */
+export const _fileMeta = internalQuery({
+  args: { ids: v.array(v.string()) },
+  handler: async (ctx, { ids }): Promise<{ id: string; size: number; contentType?: string }[]> => {
+    const out: { id: string; size: number; contentType?: string }[] = [];
+    for (const raw of ids) {
+      const id = ctx.db.system.normalizeId("_storage", raw);
+      const meta = id ? await ctx.db.system.get(id) : null;
+      if (meta) out.push({ id: raw, size: meta.size, contentType: meta.contentType });
+    }
+    return out;
+  },
+});
+
+/** Опись: каждая ссылка на файл + размер и тип из хранилища. */
+async function inventory(ctx: ActionCtx, refs: FileRef[]): Promise<FileEntry[]> {
+  const meta = new Map<string, { size: number; contentType?: string }>();
+  const ids = [...new Set(refs.map((r) => r.storageId))];
+  for (let i = 0; i < ids.length; i += 200) {
+    for (const m of await ctx.runQuery(internal.backup._fileMeta, { ids: ids.slice(i, i + 200) })) meta.set(m.id, m);
+  }
+  return refs.map((r) => {
+    const m = meta.get(r.storageId);
+    return m ? { ...r, size: m.size, ...(m.contentType ? { contentType: m.contentType } : {}) } : { ...r, missing: true as const };
+  });
+}
+
 export const _page = internalQuery({
   args: { table: v.string(), cursor: v.union(v.string(), v.null()) },
   handler: async (ctx, { table, cursor }): Promise<Page> => {
@@ -115,6 +148,7 @@ export const run = internalAction({
       const utf8 = new TextEncoder();
       const parts: Uint8Array<ArrayBuffer>[] = [utf8.encode(`{"version":${BACKUP_VERSION},"createdAt":${JSON.stringify(at)},"tables":{`)];
       let docs = 0;
+      const refs: FileRef[] = [];
       for (const [i, table] of BACKUP_TABLES.entries()) {
         parts.push(utf8.encode(`${i ? "," : ""}${JSON.stringify(table)}:[`));
         let cursor: string | null = null;
@@ -122,6 +156,7 @@ export const run = internalAction({
         for (;;) {
           const page: Page = await ctx.runQuery(internal.backup._page, { table, cursor });
           if (page.docs.length) parts.push(utf8.encode(`${count ? "," : ""}${page.docs.map((d) => JSON.stringify(d)).join(",")}`));
+          for (const d of page.docs) refs.push(...fileRefs(table, d));
           count += page.docs.length;
           if (page.isDone) break;
           cursor = page.cursor;
@@ -129,7 +164,8 @@ export const run = internalAction({
         parts.push(utf8.encode("]"));
         docs += count;
       }
-      parts.push(utf8.encode("}}"));
+      // Опись файлов — после таблиц: сами файлы в JSON не входят.
+      parts.push(utf8.encode(`},"files":${JSON.stringify(await inventory(ctx, refs))}}`));
       const blob = new Blob(parts, { type: "application/json" });
       parts.length = 0;
       fileId = await ctx.storage.store(blob);
@@ -156,6 +192,8 @@ export const _saved = internalMutation({
       await ctx.db.delete(b._id);
     }
     await markOk(ctx, "backup", `${a.docs} записей, ${fileSize(a.size)}`);
+    // Внешнее хранилище подключено — та же копия уходит и туда (offsite.ts).
+    if (s3Config()) await ctx.scheduler.runAfter(0, internal.offsite.push, { backupId: id });
     await audit(ctx, "Система", "system.backupCreated", `Резервная копия создана: ${a.docs} записей, ${fileSize(a.size)}${old.length ? `; старых копий удалено: ${old.length}` : ""}`, {
       entityId: id,
       meta: { docs: a.docs, size: a.size, removed: old.length, manual: !!a.by },
@@ -173,7 +211,7 @@ export const _failed = internalMutation({
 });
 
 /** Имя файла копии при скачивании: «homemax-backup-2026-10-13-0200.json» (время — по Алматы). */
-const backupName = (at: string) => `homemax-backup-${new Date(Date.parse(at) + 5 * 3600_000).toISOString().slice(0, 16).replace("T", "-").replace(":", "")}.json`;
+export const backupName = (at: string) => `homemax-backup-${new Date(Date.parse(at) + 5 * 3600_000).toISOString().slice(0, 16).replace("T", "-").replace(":", "")}.json`;
 
 /**
  * Копии для владельца: свежие сверху, с подписанной ссылкой на скачивание (15 минут) и состоянием последней попытки.
@@ -193,7 +231,7 @@ export const list = query({
     ]);
     return {
       keep: KEEP_BACKUPS,
-      items: rows.map((b) => ({ id: b._id, at: b.at, size: b.size, docs: b.docs, manual: !!b.by, url: signer.url(b.fileId, backupName(b.at)) })),
+      items: rows.map((b) => ({ id: b._id, at: b.at, size: b.size, docs: b.docs, manual: !!b.by, url: signer.url(b.fileId, backupName(b.at)), offsite: !!b.offsiteAt })),
       lastError: status?.errorAt && (!status.okAt || status.errorAt > status.okAt) ? { at: status.errorAt, text: status.error ?? "Ошибка" } : undefined,
     };
   },

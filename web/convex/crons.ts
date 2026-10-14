@@ -20,6 +20,12 @@ crons.interval("operations", { minutes: 5 }, internal.escalations.run, {});
 // ТЗ п.20, п.26: резервная копия данных каждую ночь — 21:00 UTC = 02:00 по Алматы.
 crons.cron("daily backup", "0 21 * * *", internal.backup.run, {});
 
+// ТЗ п.26.5: оповещения владельцу — подсистема давно не отрабатывала или сбой после часовой паузы (convex/alerts.ts).
+crons.interval("system alerts", { minutes: 10 }, internal.alerts.check, {});
+
+// ТЗ п.26.4: срок хранения записей звонков и расшифровок — 22:00 UTC = 03:00 по Алматы (convex/retention.ts).
+crons.cron("call records retention", "0 22 * * *", internal.retention.run, {});
+
 // Выгрузки CSV живут сутки: старше — удаляются вместе с файлом (convex/exports.ts).
 crons.interval("exports cleanup", { hours: 1 }, internal.exports.cleanup, {});
 

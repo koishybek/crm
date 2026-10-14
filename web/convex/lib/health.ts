@@ -1,10 +1,11 @@
 // Состояние подсистем для владельца (ТЗ п.20 «мониторинг»): когда подсистема последний раз отработала и последняя ошибка.
 // Из мутаций — markOk/markError напрямую; из actions — через internal.health._mark.
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { alertDown, alertRecovered } from "./alerts";
 import { nowIso } from "./domain";
 
-export type HealthKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations";
+export type HealthKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite";
 
 /**
  * Одна и та же отметка подряд чаще раза в минуту строку не переписывает: поток событий АТС или флуд вебхука
@@ -28,17 +29,27 @@ export async function markOk(ctx: MutationCtx, key: HealthKey, note?: string): P
   const r = await row(ctx, key);
   const okNote = note?.slice(0, 200);
   if (r && repeated(r.okAt, r.errorAt, r.okNote === okNote)) return;
-  await write(ctx, r, key, { okAt: nowIso(), okNote });
+  const id = await write(ctx, r, key, { okAt: nowIso(), okNote });
+  // Владельцу уже сообщили о сбое — одно сообщение «восстановилось» (convex/alerts.ts).
+  if (r?.alertState === "down") await alertRecovered(ctx, key, id);
 }
 
-export async function markError(ctx: MutationCtx, key: HealthKey, error: string): Promise<void> {
+/** ownerNotified — вызывающий уже сам написал владельцу об этом сбое (OLX отключился): оповещение не дублируем. */
+export async function markError(ctx: MutationCtx, key: HealthKey, error: string, opts: { ownerNotified?: boolean } = {}): Promise<void> {
   const r = await row(ctx, key);
   const text = error.slice(0, 300);
   if (r && repeated(r.errorAt, r.okAt, r.error === text)) return;
-  await write(ctx, r, key, { errorAt: nowIso(), error: text });
+  const id = await write(ctx, r, key, { errorAt: nowIso(), error: text });
+  // Первая ошибка после успеха — оповещение владельцу (не чаще раза в час на подсистему); о текущем сбое уже сообщили — тишина.
+  if (r?.alertState === "down") return;
+  if (opts.ownerNotified) await ctx.db.patch(id, { alertAt: nowIso(), alertState: "down" });
+  else await alertDown(ctx, key, id, r?.alertAt, `Сбой: ${text}`);
 }
 
-async function write(ctx: MutationCtx, r: Doc<"systemStatus"> | null, key: HealthKey, patch: Partial<Doc<"systemStatus">>): Promise<void> {
-  if (r) await ctx.db.patch(r._id, patch);
-  else await ctx.db.insert("systemStatus", { key, ...patch });
+async function write(ctx: MutationCtx, r: Doc<"systemStatus"> | null, key: HealthKey, patch: Partial<Doc<"systemStatus">>): Promise<Id<"systemStatus">> {
+  if (r) {
+    await ctx.db.patch(r._id, patch);
+    return r._id;
+  }
+  return ctx.db.insert("systemStatus", { key, ...patch });
 }

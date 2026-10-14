@@ -17,6 +17,8 @@ import type { WorkerReview } from "../../data/workerTypes";
 import { cn, phone, plural } from "../../lib/format";
 import { Avatar } from "../../components/ui";
 import { ChangePasswordModal } from "../../components/PasswordChange";
+import { PushToggle } from "../../components/PushToggle";
+import { pushBeforeSignOut } from "../../data/pushActions";
 import { AvailabilitySwitch } from "../../components/worker/Availability";
 import { ConfirmSheet } from "../../components/worker/ConfirmSheet";
 import { useInstallOffer } from "../../components/worker/Install";
@@ -173,6 +175,7 @@ export function Profile() {
             )}
           </div>
         )}
+        <PushToggle variant="worker" />
         <RowButton icon={MapPinned} title={`Карты для маршрута: ${mapApp ? MAP_APPS[mapApp].label : "спрашивать"}`} onClick={() => setMaps(true)} />
         <RowLink icon={Headset} title="Позвонить в поддержку" hint={SUPPORT_PHONE} href={SUPPORT_TEL} />
         {/* Нет, если кабинет открыт с иконки на экране (уже установлен) или браузер компьютера не умеет ставить приложения. */}
@@ -192,6 +195,7 @@ export function Profile() {
           danger
           onClose={() => setConfirm(null)}
           onConfirm={async () => {
+            await pushBeforeSignOut();
             await signOut();
             nav("/login", { replace: true });
           }}

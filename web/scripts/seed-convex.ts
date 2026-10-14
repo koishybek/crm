@@ -93,7 +93,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "campaignSpend", "webhookDeliveries", "webhooks", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "campaignSpend", "webhookDeliveries", "webhooks", "pushSubscriptions", "clientErrors", "offsiteFiles", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
     while ((await call(internal.seed.wipeFiles, {})) > 0);

@@ -11,7 +11,7 @@ import { env } from "./env";
 import { createLogin } from "./users";
 import { passwordProblem } from "../src/data/passwordRules";
 
-function assertSeedAllowed() {
+export function assertSeedAllowed(): void {
   if (env("ALLOW_SEED") !== "1") throw new ConvexError("Загрузка демо-данных выключена: на деплойменте не задан ALLOW_SEED=1");
 }
 
@@ -34,6 +34,9 @@ const WIPE_TABLES = [
   "exports",
   "webhooks",
   "webhookDeliveries",
+  "pushSubscriptions",
+  "clientErrors",
+  "offsiteFiles",
   "categories",
   "services",
   "authAccounts",
