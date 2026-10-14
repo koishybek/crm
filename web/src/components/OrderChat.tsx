@@ -1,10 +1,15 @@
 import { Eye, EyeOff, FileText, HardHat, ImageIcon, Lock, Paperclip, SendHorizontal, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { setFileForExecutor } from "../data/files";
+import { setFileForExecutor, useFileQuery } from "../data/files";
+import { canUseInbox } from "../data/inbox";
+import { sendToOrderClient } from "../data/orderClientActions";
 import { addMessage, report, toast, uploadFile } from "../data/store";
 import type { Actor, Attachment, Message, MessageChannel, User } from "../data/types";
 import { cn, shortName, when } from "../lib/format";
+import { ClientFeedItem, ClientTarget } from "./OrderClientFeed";
+import type { OrderClientMessage } from "../data/orderClientChat";
 import { SignedImg } from "./SignedMedia";
 import { Avatar, Modal } from "./ui";
 
@@ -82,6 +87,8 @@ function ExecutorAccess({ orderId, file, fromThread }: { orderId: string; file: 
 }
 
 type Pending = Attachment & { storageId?: Id<"_storage"> };
+/** Лента заказа: сообщения заказа и переписка с клиентом из его мессенджера — по времени. */
+type TimelineItem = { key: string; at: string; order: Message } | { key: string; at: string; client: OrderClientMessage };
 
 const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: string; border: string; bubble: string; placeholder: string }[] = [
   { id: "client", label: "Переписка с клиентом", active: "bg-brand-soft text-brand-ink", border: "border-line-strong", bubble: "bg-[#f6f4ee]", placeholder: "Написать комментарий..." },
@@ -124,6 +131,12 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
   // Локальные превью выбранных картинок до отправки.
   useEffect(() => () => files.forEach((f) => f.src?.startsWith("blob:") && URL.revokeObjectURL(f.src)), [files]);
   const current = channelOf(channel);
+  // Владелец и операторы пишут клиенту в его мессенджер прямо отсюда; руководителю направления это остаётся заметками.
+  const thread = useFileQuery(api.orderClientChat.feed, canUseInbox(me) ? { orderId: orderId as Id<"orders"> } : "skip");
+  const toClient = channel === "client" && !!thread;
+  const timeline = [...messages.map((m): TimelineItem => ({ key: m.id, at: m.at, order: m })), ...(thread?.messages ?? []).map((m): TimelineItem => ({ key: m.id, at: m.at, client: m }))].sort((a, b) =>
+    a.at < b.at ? -1 : a.at > b.at ? 1 : 0,
+  );
 
   const attach = async (list: File[]) => {
     setUploading((n) => n + list.length);
@@ -140,12 +153,38 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
 
   const send = async () => {
     if (uploading) return toast("Дождитесь загрузки файлов", "info");
+    if (toClient) return sendClient();
     setSending(true);
     const r = await addMessage(orderId, text, channel, files);
     setSending(false);
     if (!r.ok) return toast(r.error, "bad");
     setText("");
     setFiles([]);
+  };
+
+  /** «Клиенту»: текст — в мессенджер клиента (или заметкой, если писать некуда), файлы — в заказ. */
+  const sendClient = async () => {
+    const body = text.trim();
+    if (!body && !files.length) return toast("Напишите сообщение", "info");
+    setSending(true);
+    if (body) {
+      const r = await sendToOrderClient(orderId, body);
+      if (!r.ok) {
+        setSending(false);
+        return toast(r.error, "bad");
+      }
+      setText("");
+      if (!r.value.sent) toast(r.value.reason, "info");
+    }
+    if (files.length) {
+      const r = await addMessage(orderId, "", "client", files);
+      if (!r.ok) {
+        setSending(false);
+        return toast(r.error, "bad");
+      }
+      setFiles([]);
+    }
+    setSending(false);
   };
 
   return (
@@ -164,7 +203,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
                 className={cn("inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-1 text-[12.5px] font-semibold", channel === c.id ? c.active : "text-muted hover:bg-[#f4f2ec]")}
               >
                 {c.icon && <c.icon size={12} aria-hidden />}
-                {c.label}
+                {c.id === "client" && thread ? "Клиенту" : c.label}
               </button>
             ))}
           </div>
@@ -173,6 +212,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
               {executorName ? `Увидит ${executorName}: в приложении мастера и в Telegram. Файлы отсюда мастеру видны сразу.` : "Мастер ещё не назначен — сообщение увидит тот, кто возьмёт заказ."}
             </p>
           )}
+          {toClient && <ClientTarget thread={thread} />}
           <div className="flex items-end gap-2 p-2 pl-3">
             <textarea
               value={text}
@@ -184,7 +224,7 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
                   void send();
                 }
               }}
-              placeholder={current.placeholder}
+              placeholder={toClient ? (thread?.target ? "Сообщение клиенту — уйдёт в его мессенджер..." : "Заметка по клиенту — клиенту она не уйдёт...") : current.placeholder}
               aria-label="Сообщение"
               className="max-h-32 min-h-[38px] flex-1 resize-none bg-transparent py-2 text-[14.5px] text-ink placeholder:text-faint focus:outline-none"
             />
@@ -227,15 +267,24 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
         </div>
       </div>
 
-      {messages.length === 0 ? (
+      {timeline.length === 0 ? (
         <div className="py-8 text-center text-[14px] text-muted">Сообщений пока нет. Здесь будет переписка по заказу и фото.</div>
       ) : (
         <ol className="relative mt-5 space-y-4 pl-6 before:absolute before:top-2 before:bottom-2 before:left-[5px] before:w-px before:bg-line-strong">
-          {messages.map((m, i) => {
+          {timeline.map((item, i) => {
+            const dot = <span className={cn("absolute top-3 -left-6 h-[11px] w-[11px] rounded-full border-2 border-white", i === 0 ? "bg-[#ffc629]" : "bg-[#d9d4c8]")} />;
+            if ("client" in item)
+              return (
+                <li key={item.key} className="relative">
+                  {dot}
+                  <ClientFeedItem m={item.client} />
+                </li>
+              );
+            const m = item.order;
             const c = channelOf(m.channel);
             return (
-              <li key={m.id} className="relative">
-                <span className={cn("absolute top-3 -left-6 h-[11px] w-[11px] rounded-full border-2 border-white", i === 0 ? "bg-[#ffc629]" : "bg-[#d9d4c8]")} />
+              <li key={item.key} className="relative">
+                {dot}
                 <div className="flex items-start gap-3">
                   <Avatar name={nameOf(m.author)} size={40} variant={m.author.type === "client" ? "client" : "person"} />
                   <div className="min-w-0 flex-1">

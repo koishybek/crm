@@ -1,6 +1,7 @@
 // Заявка с сайта и публичный API: адрес HTTP-эндпоинтов Convex, отправка формы /zayavka, ключи API и сайты (владелец).
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import type { ApiScope } from "./apiScopes";
 import { convex, run, type Result } from "./convex";
 
 /**
@@ -48,6 +49,7 @@ export async function submitPublicLead(input: PublicLeadInput): Promise<Result<{
 }
 
 // ── Владелец: ключи API и сайты компании ────────────────────────────────────
-export const createApiKey = (name: string) => run(convex.mutation(api.apiKeys.create, { name }));
+export const createApiKey = (name: string, scopes: ApiScope[]) => run(convex.mutation(api.apiKeys.create, { name, scopes }));
+export const setApiServicePrices = (enabled: boolean) => run(convex.mutation(api.apiKeys.setServicePrices, { enabled }));
 export const revokeApiKey = (id: string) => run(convex.mutation(api.apiKeys.revoke, { id: id as Id<"apiKeys"> }));
 export const saveSiteOrigins = (origins: string[]) => run(convex.mutation(api.site.setOrigins, { origins }));

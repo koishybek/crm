@@ -115,6 +115,8 @@ export interface Lead {
   budget?: number;
   /** Район города (ТЗ п.12.3) — переходит в заказ. */
   district?: string;
+  /** Рекламная кампания (utm_campaign или поле API) — src/data/utm.ts. */
+  campaign?: string;
 }
 
 export type CallStatus = "ringing" | "answered" | "missed" | "completed";
@@ -239,6 +241,8 @@ export interface Order {
   payoutBase?: PayoutTerms;
   /** Выплату в заказе правили вручную — ставки мастеров к нему не применяются. */
   payoutManual?: boolean;
+  /** Рекламная кампания — из заявки. */
+  campaign?: string;
 }
 
 /** Условия выплаты исполнителю: сумма или процент от цены клиента. */
@@ -518,6 +522,8 @@ export interface ApiKeyInfo {
   createdBy?: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  /** Права ключа (src/data/apiScopes.ts). */
+  scopes: import("./apiScopes").ApiScope[];
 }
 
 /** Карточка «WhatsApp» у владельца: что настроено и доходят ли вебхуки. Значений секретов здесь нет — только имена недостающих переменных. */

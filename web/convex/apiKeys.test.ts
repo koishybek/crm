@@ -77,7 +77,7 @@ describe("ключи API", () => {
     expect(row.hash).toBe(sha256Hex(created.key));
     expect(JSON.stringify(row)).not.toContain(created.key);
     const { keys } = await as(ids.owner).query(api.apiKeys.list, {});
-    expect(keys).toEqual([{ id: created.id, name: "Сайт компании", prefix: created.prefix, createdAt: row.createdAt, createdBy: "Владелец" }]);
+    expect(keys).toEqual([{ id: created.id, name: "Сайт компании", prefix: created.prefix, createdAt: row.createdAt, createdBy: "Владелец", scopes: ["leads:write", "leads:read"] }]);
     expect(JSON.stringify(keys)).not.toContain(created.key);
     const journal = await t.run((ctx) => ctx.db.query("audit").collect());
     const entry = journal.find((x) => x.action === "integration.apiKey")!;

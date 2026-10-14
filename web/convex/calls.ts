@@ -13,6 +13,7 @@ import { normalizeLogin } from "./lib/login";
 import { districtOrNone } from "./lib/districts";
 import { dropFile, fileSigner, takeUpload } from "./lib/files";
 import { hitLimit } from "./lib/rateLimit";
+import { emitEvent } from "./lib/webhookEvents";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -204,6 +205,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
     meta: { source: "phone", serviceId, city, urgency: c.draft?.urgency ?? "normal", clientId: client._id, newClient, callId: c._id, ai: true },
   });
   await notify(ctx, await staffIds(ctx, svc.category), `Звонок разобран AI → заявка №${number}: ${svc.label} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info", email: { kind: "lead_new", text: `Новая заявка №${number} по звонку: ${svc.label}` } });
+  await emitEvent(ctx, "lead.created", { leadId });
   return leadId;
 }
 

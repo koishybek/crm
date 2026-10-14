@@ -8,6 +8,7 @@ import { inScope, requireRole, scopeOf, STAFF, TEAM, type Me } from "./lib/acces
 import { almatyStamp, audit, type AuditActor } from "./lib/audit";
 import { log, notify, nowIso, TENANT, userActor } from "./lib/domain";
 import { hitLimit } from "./lib/rateLimit";
+import { emitEvent } from "./lib/webhookEvents";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import {
@@ -133,6 +134,7 @@ async function createReview(ctx: MutationCtx, o: Doc<"orders">, r: NewReview): P
     authorId: r.author?._id,
   });
   await recomputeRating(ctx, executorId);
+  await emitEvent(ctx, "review.created", { reviewId: id });
   const after = await ctx.db.get(executorId);
   const name = after?.name ?? "мастер";
   await log(ctx, o._id, "comment", `Оценка клиента: ${r.rating}★ (${REVIEW_VIA[r.via]})`, r.author ? userActor(r.author._id) : { type: "client", id: o.clientId });

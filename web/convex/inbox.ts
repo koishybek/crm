@@ -641,27 +641,35 @@ export const markRead = mutation({
   },
 });
 
-/** Ответ клиенту. Сохраняется сразу («отправляется»), в канал уходит фоном — статус обновится сам. */
+/**
+ * Ответ клиенту в диалог — из «Сообщений» и из карточки заказа (orderClientChat.ts). Сохраняется сразу («отправляется»),
+ * в канал уходит фоном — статус обновится сам. Длина — под канал; написать нельзя (окно WhatsApp и т.п.) — ошибка.
+ */
+export async function queueReply(ctx: MutationCtx, me: Doc<"users">, c: Doc<"conversations">, text: string, meta: Record<string, string> = {}): Promise<Id<"conversationMessages">> {
+  const conversationId = c._id;
+  const body = text.replace(/\u0000/g, "").trim();
+  if (!body) throw new ConvexError("Напишите сообщение");
+  const max = replyMaxText(c.channel, MAX_TEXT);
+  if (body.length > max) throw new ConvexError(`Слишком длинное сообщение — не больше ${max} символов`);
+  const block = await replyBlock(ctx, c, Date.now());
+  if (block) throw new ConvexError(block);
+  const at = nowIso();
+  const messageId = await ctx.db.insert("conversationMessages", { conversationId, direction: "out", kind: "text", text: body, at, authorId: me._id, status: "sending" });
+  await ctx.db.patch(conversationId, { lastMessageAt: at, lastText: preview(body), lastDirection: "out", unread: 0, status: "open" });
+  // Ответ клиенту — первое действие по заявке из этого диалога: «заявка без ответа» по ней больше не эскалируется.
+  const lead = c.leadId ? await ctx.db.get(c.leadId) : null;
+  if (lead && !lead.firstActionAt) await ctx.db.patch(lead._id, { firstActionAt: at });
+  await ctx.scheduler.runAfter(0, internal.inbox._deliver, { messageId });
+  await audit(ctx, me, "conversation.reply", `Ответ клиенту ${CHANNEL_IN[c.channel]}: ${who(c)}`, { entityId: conversationId, meta: { channel: c.channel, length: body.length, ...meta } });
+  return messageId;
+}
+
+/** Ответ клиенту из «Сообщений». */
 export const reply = mutation({
   args: { conversationId: v.id("conversations"), text: v.string() },
   handler: async (ctx, { conversationId, text }): Promise<{ messageId: Id<"conversationMessages"> }> => {
     const me = await requireRole(ctx, STAFF);
-    const body = text.replace(/\u0000/g, "").trim();
-    if (!body) throw new ConvexError("Напишите сообщение");
-    const c = await mustGet(ctx, conversationId);
-    const max = replyMaxText(c.channel, MAX_TEXT);
-    if (body.length > max) throw new ConvexError(`Слишком длинное сообщение — не больше ${max} символов`);
-    const block = await replyBlock(ctx, c, Date.now());
-    if (block) throw new ConvexError(block);
-    const at = nowIso();
-    const messageId = await ctx.db.insert("conversationMessages", { conversationId, direction: "out", kind: "text", text: body, at, authorId: me._id, status: "sending" });
-    await ctx.db.patch(conversationId, { lastMessageAt: at, lastText: preview(body), lastDirection: "out", unread: 0, status: "open" });
-    // Ответ клиенту — первое действие по заявке из этого диалога: «заявка без ответа» по ней больше не эскалируется.
-    const lead = c.leadId ? await ctx.db.get(c.leadId) : null;
-    if (lead && !lead.firstActionAt) await ctx.db.patch(lead._id, { firstActionAt: at });
-    await ctx.scheduler.runAfter(0, internal.inbox._deliver, { messageId });
-    await audit(ctx, me, "conversation.reply", `Ответ клиенту ${CHANNEL_IN[c.channel]}: ${who(c)}`, { entityId: conversationId, meta: { channel: c.channel, length: body.length } });
-    return { messageId };
+    return { messageId: await queueReply(ctx, me, await mustGet(ctx, conversationId), text) };
   },
 });
 

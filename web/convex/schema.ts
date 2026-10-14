@@ -103,6 +103,24 @@ export const auditEntity = v.union(
   v.literal("system"),
   v.literal("export"),
 );
+/** Рекламные метки обращения (ТЗ п.6.6, п.28.5): utm_* со страницы формы или из API. */
+export const utm = v.object({
+  source: v.optional(v.string()),
+  medium: v.optional(v.string()),
+  campaign: v.optional(v.string()),
+  content: v.optional(v.string()),
+  term: v.optional(v.string()),
+});
+/** События исходящих вебхуков (convex/webhooks.ts); webhook.test — «Отправить тестовое событие». */
+export const webhookEvent = v.union(
+  v.literal("lead.created"),
+  v.literal("lead.status_changed"),
+  v.literal("order.created"),
+  v.literal("order.status_changed"),
+  v.literal("order.paid"),
+  v.literal("review.created"),
+  v.literal("webhook.test"),
+);
 export const aiSummary = v.object({
   summary: v.string(),
   extracted: v.array(v.object({ label: v.string(), value: v.string() })),
@@ -257,6 +275,9 @@ export default defineSchema({
     budget: v.optional(v.number()),
     /** Район города (ТЗ п.12.3) — переходит в заказ. */
     district: v.optional(v.string()),
+    /** Метки рекламы и кампания (ТЗ п.6.6): кампания — из utm_campaign или задана явно; в заказ копируются при конвертации. */
+    utm: v.optional(utm),
+    campaign: v.optional(v.string()),
   })
     .index("by_created", ["createdAt"])
     .index("by_status", ["status", "createdAt"])
@@ -317,6 +338,9 @@ export default defineSchema({
     payoutBase: v.optional(payoutTerms),
     /** Выплату правили вручную — ставки мастеров к заказу не применяются. */
     payoutManual: v.optional(v.boolean()),
+    /** Метки рекламы и кампания — из заявки (ТЗ п.28.5). */
+    utm: v.optional(utm),
+    campaign: v.optional(v.string()),
   })
     .index("by_status", ["status", "deadline"])
     .index("by_executor", ["executorId", "status"])
@@ -562,6 +586,8 @@ export default defineSchema({
     createdBy: v.id("users"),
     lastUsedAt: v.optional(v.string()),
     revokedAt: v.optional(v.string()),
+    /** Права ключа (src/data/apiScopes.ts); нет поля — ключ создан до прав: leads:write и leads:read. */
+    scopes: v.optional(v.array(v.string())),
   }).index("by_hash", ["hash"]),
 
   /** Заявки, созданные через публичный API: ключ идемпотентности (externalId) и «свои» заявки ключа — статус отдаём только по ним. */
@@ -592,6 +618,45 @@ export default defineSchema({
 
   /** Расходы на рекламу по источникам за месяц (YYYY-MM) — для стоимости заявки и заказа (ТЗ п.17). */
   adSpend: defineTable({ month: v.string(), source, amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "source"]),
+
+  /** Расходы на рекламную кампанию за месяц (YYYY-MM) — для CPL/CPO/ROMI кампаний (ТЗ п.28.5). campaign — как в utm_campaign. */
+  campaignSpend: defineTable({ month: v.string(), campaign: v.string(), amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "campaign"]),
+
+  /**
+   * Исходящие вебхуки (ТЗ п.20.7, п.26.7): подписка владельца на события. secret — зашифрован (lib/secretBox.ts),
+   * им подписывается тело (X-HMS-Signature). failures — неудачных попыток подряд; на пороге подписка отключается.
+   */
+  webhooks: defineTable({
+    url: v.string(),
+    events: v.array(webhookEvent),
+    secret: v.string(),
+    description: v.optional(v.string()),
+    active: v.boolean(),
+    failures: v.number(),
+    createdAt: v.string(),
+    createdBy: v.id("users"),
+    disabledAt: v.optional(v.string()),
+    disabledReason: v.optional(v.string()),
+    lastDeliveryAt: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+  }).index("by_active", ["active"]),
+  /** Доставки вебхуков: тело, попытки, ответ получателя. pending — ждёт попытки; failed — попытки кончились. */
+  webhookDeliveries: defineTable({
+    webhookId: v.id("webhooks"),
+    event: webhookEvent,
+    eventId: v.string(),
+    body: v.string(),
+    status: v.union(v.literal("pending"), v.literal("ok"), v.literal("failed")),
+    attempts: v.number(),
+    test: v.optional(v.boolean()),
+    nextAt: v.optional(v.string()),
+    responseCode: v.optional(v.number()),
+    error: v.optional(v.string()),
+    createdAt: v.string(),
+    deliveredAt: v.optional(v.string()),
+  })
+    .index("by_webhook", ["webhookId", "createdAt"])
+    .index("by_created", ["createdAt"]),
 
   /** Счётчики лимитов (антиспам публичных форм и API): ключ + окно. by_window — для очистки отживших (maintenance.ts). */
   rateLimits: defineTable({ key: v.string(), windowStart: v.number(), count: v.number() }).index("by_key", ["key"]).index("by_window", ["windowStart"]),

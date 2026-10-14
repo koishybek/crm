@@ -11,10 +11,10 @@ import { Button, FormRow, Input, Select, Textarea } from "../components/ui";
 import { APP_NAME, CITIES } from "../data/catalog";
 import { submitPublicLead } from "../data/publicApi";
 import { cn, digits } from "../lib/format";
+import { utmFromSearch, utmParams } from "../data/utm";
 import { PhoneInput } from "./drawers";
 
 type Field = "name" | "phone" | "consent";
-const UTM_KEYS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
 
 /** Казахстанский номер в маске: +7, затем 6 или 7 (мобильные 70x/747/77x, городские 7xx). */
 const validPhone = (masked: string) => /^7[67]\d{9}$/.test(digits(masked));
@@ -78,11 +78,8 @@ export default function PublicRequest() {
     setFormError("");
     if (Object.keys(next).length) return;
     setSending(true);
-    const utm: Record<string, string> = {};
-    for (const k of UTM_KEYS) {
-      const val = params.get(k);
-      if (val) utm[k] = val.slice(0, 100);
-    }
+    // Метки рекламы — из адреса формы; во встроенной форме сниппет передаёт сюда адрес страницы сайта.
+    const utm = utmParams(utmFromSearch(params.toString()));
     const r = await submitPublicLead({ name: name.trim(), phone: ph, serviceId: serviceId || undefined, city, description: description.trim(), consent, startedAt, website, utm });
     setSending(false);
     if (!r.ok) return setFormError(r.error);

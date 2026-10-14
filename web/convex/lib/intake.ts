@@ -11,6 +11,8 @@ import { loadCatalog } from "../catalog";
 import { env } from "../env";
 import { audit, type AuditActor } from "./audit";
 import { districtOrNone } from "./districts";
+import { emitEvent } from "./webhookEvents";
+import { campaignOf, type Utm } from "../../src/data/utm";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./domain";
 
 /** Каналы, в которых клиенту удобно отвечать сообщением, — они становятся «предпочитаемым каналом» нового клиента. */
@@ -43,6 +45,9 @@ export interface IntakeInput {
   actor: AuditActor;
   /** «из Telegram», «с сайта», «через API» — в уведомлении и журнале. */
   via: string;
+  /** Метки рекламы (форма сайта, API) и кампания — явная или utm_campaign (ТЗ п.6.6). */
+  utm?: Utm;
+  campaign?: string;
   /** Дополнительные детали для журнала (без персональных данных). */
   auditMeta?: Record<string, string | number | boolean>;
 }
@@ -117,6 +122,8 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     preferredTime: a.preferredTime?.trim().slice(0, 120) || undefined,
     budget: cleanBudget(a.budget),
     district: await districtOrNone(ctx, city, a.district),
+    utm: a.utm,
+    campaign: campaignOf(a.utm, a.campaign),
   });
   if (a.message) {
     await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: a.source, title: a.message.title, text: a.message.text.slice(0, 1000), at });
@@ -132,5 +139,6 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     entityId: leadId,
     meta: { source: a.source, origin: a.origin, serviceId: svc.id, newClient, ...a.auditMeta },
   });
+  await emitEvent(ctx, "lead.created", { leadId });
   return { leadId, number, clientId: client._id, newClient, serviceId: svc.id };
 }

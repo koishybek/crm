@@ -15,6 +15,7 @@ import { Avatar, Button, Card, KpiCard, Loading, PageHeader } from "../component
 import { PayoutsCard } from "../components/PayoutsCard";
 import { ExecutorRating } from "../components/Rating";
 import { AdSpendModal, OperatorsCard, SourceCostsCard } from "./AnalyticsCards";
+import { AnalyticsCampaigns } from "./AnalyticsCampaigns";
 import { PeriodSelect } from "./Dashboard";
 import { dayLabel, money, moneyShort, num, pct } from "../lib/format";
 import { exportCsv } from "../lib/csv";
@@ -258,6 +259,7 @@ export default function Analytics() {
       <div className="mt-4">
         <SourceCostsCard rows={d.sources} onSpend={() => setSpendOpen(true)} />
       </div>
+      <div className="mt-4"><AnalyticsCampaigns period={period} /></div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
         <OperatorsCard rows={d.ops.rows} auto={d.ops.auto} users={team.users} />

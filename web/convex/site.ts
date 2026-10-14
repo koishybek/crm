@@ -15,6 +15,8 @@ import { ingestMessage, linkConversation } from "./inbox";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { cityKey } from "../src/data/cities";
+import { utmFromRecord, utmText, type Utm } from "../src/data/utm";
+import { utm as utmValidator } from "./schema";
 
 const MAX_BODY = 10 * 1024;
 /** Человек заполняет форму дольше 3 секунд. */
@@ -26,7 +28,6 @@ const GLOBAL_PER_MIN = 60;
 const PHONE_PER_HOUR = 3;
 const MAX_ORIGINS = 10;
 const ORIGINS_KEY = "siteOrigins";
-const UTM = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] as const;
 
 export interface SiteLead {
   name: string;
@@ -34,8 +35,8 @@ export interface SiteLead {
   serviceId?: string;
   city?: string;
   description: string;
-  /** Рекламные метки страницы: «utm_source=instagram, utm_campaign=ac-oct». */
-  utm?: string;
+  /** Рекламные метки страницы (utm_* из адреса формы или страницы, где она встроена). */
+  utm?: Utm;
 }
 
 export type ParseResult = { ok: true; data: SiteLead } | { ok: false; error: string };
@@ -67,13 +68,8 @@ export function parseSiteLead(body: Record<string, unknown>, now: number): Parse
   const phone = phoneRaw.value ? kzPhone(phoneRaw.value) : null;
   if (!phone) return { ok: false, error: "Укажите казахстанский номер: +7 7XX XXX XX XX" };
 
-  const utm = UTM.map((k) => {
-    const raw = body[k];
-    return typeof raw === "string" && raw.trim() ? `${k}=${raw.trim().slice(0, 100)}` : "";
-  })
-    .filter(Boolean)
-    .join(", ");
-  return { ok: true, data: { name: name.value, phone, serviceId: serviceId.value, city: city.value, description: description.value ?? "", utm: utm || undefined } };
+  const utm = utmFromRecord(body);
+  return { ok: true, data: { name: name.value, phone, serviceId: serviceId.value, city: city.value, description: description.value ?? "", ...(utm ? { utm } : {}) } };
 }
 
 // ── Какие сайты могут слать заявки (CORS) ────────────────────────────────────
@@ -179,7 +175,7 @@ async function sameRecentLead(ctx: MutationCtx, a: SiteLead, serviceId: string, 
 }
 
 export const _submit = internalMutation({
-  args: { name: v.string(), phone: v.string(), serviceId: v.optional(v.string()), city: v.optional(v.string()), description: v.string(), utm: v.optional(v.string()) },
+  args: { name: v.string(), phone: v.string(), serviceId: v.optional(v.string()), city: v.optional(v.string()), description: v.string(), utm: v.optional(utmValidator) },
   handler: async (ctx, a): Promise<SubmitResult> => {
     const now = Date.now();
     if (!(await hitLimit(ctx, "site:all", GLOBAL_PER_MIN, 60_000))) return { ok: false, status: 429, error: "Сейчас слишком много заявок — попробуйте через минуту" };
@@ -200,7 +196,8 @@ export const _submit = internalMutation({
       serviceId: svc?.id,
       city: a.city,
       description,
-      comment: a.utm ? `Метки рекламы: ${a.utm}` : undefined,
+      comment: a.utm ? `Метки рекламы: ${utmText(a.utm)}` : undefined,
+      utm: a.utm,
       message: { title: "Заявка с сайта", text: description },
       actor: "Сайт",
       via: "с сайта",

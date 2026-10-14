@@ -9,6 +9,7 @@ import { toLead, toOrder } from "./lib/dto";
 import { districtFor } from "./lib/districts";
 import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { loadCatalog } from "./catalog";
+import { emitEvent } from "./lib/webhookEvents";
 import { aiSummary, source, urgency } from "./schema";
 import { LEAD_STATUS, SOURCES, URGENCY } from "../src/data/catalog";
 import { deadlineByUrgency } from "../src/data/leadRules";
@@ -160,6 +161,7 @@ export const create = mutation({
       meta: { source: a.source, serviceId: a.serviceId, city, urgency: a.urgency, clientId, newClient: isNewClient, callId: call?._id, ai: !!a.ai },
     });
     await notify(ctx, await staffIds(ctx, svc.category), `Новая заявка №${number}: ${svc.label}`, { link: `/leads?open=${id}`, except: me._id, email: { kind: "lead_new" } });
+    await emitEvent(ctx, "lead.created", { leadId: id });
     return { id, number };
   },
 });
@@ -189,6 +191,7 @@ export const take = mutation({
     }
     const status = l.status === "new" ? "qualifying" : l.status;
     await ctx.db.patch(id, { operatorId: me._id, status, ...touch(l, me, false) });
+    if (status !== l.status) await emitEvent(ctx, "lead.status_changed", { leadId: id, from: l.status });
     const waited = Date.now() - Date.parse(l.createdAt);
     await audit(ctx, me, "lead.taken", `Заявка №${l.number}: взята в работу${status !== l.status ? `, «${LEAD_STATUS[l.status].label}» → «${LEAD_STATUS[status].label}»` : ""}`, {
       entityId: id,
@@ -307,6 +310,7 @@ export const setStatus = mutation({
     // Повторное нажатие того же этапа ничего не меняет — и в журнал не пишется.
     if (l.status === status && l.rejectReason === why) return;
     await ctx.db.patch(id, { status, rejectReason: why, ...touch(l, me, true) });
+    if (status !== l.status) await emitEvent(ctx, "lead.status_changed", { leadId: id, from: l.status });
     await audit(
       ctx,
       me,
@@ -364,8 +368,13 @@ export const convert = mutation({
       createdAt: nowIso(),
       createdBy: me._id,
       files: [],
+      // Метки рекламы и кампания переходят в заказ (ТЗ п.28.5): выручка кампании считается по заказам.
+      ...(l.utm ? { utm: l.utm } : {}),
+      ...(l.campaign ? { campaign: l.campaign } : {}),
     });
     await ctx.db.patch(l._id, { status: "converted", orderId, ...touch(l, me, true) });
+    await emitEvent(ctx, "lead.status_changed", { leadId: l._id, from: l.status });
+    await emitEvent(ctx, "order.created", { orderId });
     const hint = l.preferredTime ? `. Клиенту удобно: ${l.preferredTime}` : "";
     await log(ctx, orderId, "created", `Заказ создан из заявки, срок ${almatyStamp(due)}${hint}`, userActor(me._id));
     await audit(ctx, me, "lead.converted", `Заявка №${l.number} → заказ №${l.number}: ${svc.label}`, { entityId: id, meta: { orderId, deadline: due, deadlineBy: deadline === undefined ? l.urgency : "manual" } });

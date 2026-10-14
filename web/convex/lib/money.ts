@@ -8,6 +8,7 @@ import { executorUser, notify, nowIso, setStatus, type StatusMove } from "./doma
 import { cleanMoney, cleanText } from "./limits";
 import { refreshStats } from "./stats";
 import { almatyDayStart } from "./tg";
+import { emitEvent } from "./webhookEvents";
 import { paidAmount } from "../../src/data/logic";
 import { settledStatus, TERMS_WATCH_STATUSES } from "../../src/data/money";
 import type { Actor, OrderStatus } from "../../src/data/types";
@@ -66,6 +67,7 @@ export async function settle(ctx: MutationCtx, o: Doc<"orders">): Promise<Status
   const owed = Math.max(0, o.clientPrice - paidAmount(o));
   const text = to === "paid" ? "Оплачен: клиент оплатил заказ полностью" : `Ожидает оплаты: долг клиента ${money(owed)}`;
   await setStatus(ctx, o, to, SYSTEM, text, to === "paid" ? {} : { paidAt: undefined });
+  if (to === "paid") await emitEvent(ctx, "order.paid", { orderId: o._id });
   return { from: o.status, to };
 }
 

@@ -47,7 +47,7 @@ admin.setAdminAuth(deployKey);
 const call = <F extends FunctionReference<"query" | "mutation" | "action", "internal">>(fn: F, args: FunctionArgs<F>): Promise<FunctionReturnType<F>> =>
   admin.function(fn, undefined, args) as Promise<FunctionReturnType<F>>;
 
-type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend" | "payouts";
+type Table = "executors" | "users" | "clients" | "leads" | "orders" | "messages" | "history" | "interactions" | "clientNotes" | "notifications" | "counters" | "calls" | "conversations" | "conversationMessages" | "audit" | "reviews" | "adSpend" | "payouts" | "campaignSpend";
 
 async function insert(table: Table, rows: Record<string, unknown>[]): Promise<string[]> {
   const ids: string[] = [];
@@ -93,7 +93,7 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "campaignSpend", "webhookDeliveries", "webhooks", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits"] as const) {
       while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
     while ((await call(internal.seed.wipeFiles, {})) > 0);
@@ -158,6 +158,16 @@ async function main() {
   const ORIGIN: Partial<Record<string, "site" | "bot">> = { site: "site", telegram: "bot" };
   const originOf = (l: (typeof db.leads)[number]) => ORIGIN[l.source] ?? "operator";
   const untaken = (l: (typeof db.leads)[number]) => originOf(l) !== "operator" && l.status === "new";
+  // Рекламные кампании (ТЗ п.28.5): заявки сайта и Instagram — по меткам utm, через одну; заказ наследует метки заявки.
+  const CAMPAIGNS: Partial<Record<string, { source: string; medium: string; campaign: string }[]>> = {
+    site: [
+      { source: "google", medium: "cpc", campaign: "ac-oct-search" },
+      { source: "2gis", medium: "cpc", campaign: "wm-autumn" },
+    ],
+    instagram: [{ source: "instagram", medium: "paid-social", campaign: "ac-oct-reels" }],
+  };
+  const utmOf = (l: (typeof db.leads)[number], i: number) => (i % 2 === 0 ? CAMPAIGNS[l.source]?.[(i >> 1) % (CAMPAIGNS[l.source]?.length ?? 1)] : undefined);
+  const leadUtm = new Map(db.leads.map((l, i) => [l.id, utmOf(l, i)] as const));
   const leadIds = await insert(
     "leads",
     db.leads.map((l) => {
@@ -170,6 +180,7 @@ async function main() {
         operatorId: untaken(l) ? undefined : userMap.get(l.operatorId),
         origin,
         firstActionAt: untaken(l) ? undefined : origin === "operator" ? l.createdAt : iso(Date.parse(l.createdAt) + 4 * MIN),
+        ...(leadUtm.get(l.id) ? { utm: leadUtm.get(l.id), campaign: leadUtm.get(l.id)!.campaign } : {}),
       };
     }),
   );
@@ -214,6 +225,7 @@ async function main() {
       createdBy: userMap.get(o.createdBy),
       files: o.files.map(fileRow),
       moneyAt: moneyAt(o),
+      ...(o.leadId && leadUtm.get(o.leadId) ? { utm: leadUtm.get(o.leadId), campaign: leadUtm.get(o.leadId)!.campaign } : {}),
     })),
   );
   const orderMap = new Map(db.orders.map((o, i) => [o.id, orderIds[i]!]));
@@ -465,6 +477,11 @@ async function main() {
   await insert(
     "adSpend",
     months.flatMap((month, i) => SPEND.map(([source, amount]) => ({ month, source, amount: Math.round(amount * (1 - i * 0.08)), updatedAt: iso(now), updatedBy: userMap.get("u-owner") }))),
+  );
+  const CAMPAIGN_SPEND: [string, number][] = [["ac-oct-search", 60_000], ["wm-autumn", 25_000], ["ac-oct-reels", 70_000]];
+  await insert(
+    "campaignSpend",
+    months.flatMap((month, i) => CAMPAIGN_SPEND.map(([campaign, amount]) => ({ month, campaign, amount: Math.round(amount * (1 - i * 0.1)), updatedAt: iso(now), updatedBy: userMap.get("u-owner") }))),
   );
 
   // ── Журнал действий за две недели — из событий демо-заявок и заказов, чтобы журнал не был пустым ──
