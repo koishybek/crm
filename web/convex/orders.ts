@@ -11,11 +11,11 @@ import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { archiveArgs, archivePage } from "./lib/orderArchive";
 import { activeExecutorIds, suitableUsers } from "./lib/matching";
 import { hitLimit } from "./lib/rateLimit";
-import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
+import { finishWork, moneyDate, noteText, notifyPayoutChange, positiveMoney, recordPayment, settle } from "./lib/money";
 import { districtFor } from "./lib/districts";
 import { baseTerms, rateTerms } from "./lib/rates";
 import { refreshStats } from "./lib/stats90";
-import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
+import { ACTIVE_STATUSES, ORDER_STATUS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
 import { orderNotice } from "./clientNotify";
@@ -321,15 +321,9 @@ export const addPayment = mutation({
     const value = positiveMoney(amount, "Оплата");
     const at = moneyDate(paidAt, "Дата оплаты", o.createdAt);
     const comment = noteText(note, "Комментарий к оплате");
-    const paid = paidAmount(o) + value;
-    const over = paid - o.clientPrice;
+    const over = paidAmount(o) + value - o.clientPrice;
     if (over > 0 && !confirmOverpay) throw new ConvexError(`Оплата больше цены заказа на ${money(over)} — подтвердите переплату`);
-    const payment = { id: uid("p"), amount: value, method, at, by: me._id, ...(comment ? { note: comment } : {}) };
-    await ctx.db.patch(id, { payments: [...o.payments, payment], moneyAt: laterMoment(o.moneyAt, at) });
-    const backdated = Math.abs(Date.now() - Date.parse(at)) > 10 * 60_000;
-    const details = [PAYMENT_METHODS[method], ...(backdated ? [`дата оплаты ${almatyStamp(at)}`] : []), ...(over > 0 ? [`переплата ${money(over)}`] : [])];
-    await log(ctx, id, "payment", `Внесена оплата ${money(value)} (${details.join(", ")})`, userActor(me._id));
-    const settled = await settle(ctx, (await ctx.db.get(id))!);
+    const { payment, paid, settled, details } = await recordPayment(ctx, o, { amount: value, method, at, by: me._id, note: comment }, userActor(me._id));
     await audit(ctx, me, "order.payment", `Заказ №${o.number}: оплата ${money(value)} (${details.join(", ")}), оплачено ${money(paid)} из ${money(o.clientPrice)}${settled ? `; статус ${moveText(settled)}` : ""}`, {
       entityId: id,
       meta: { paymentId: payment.id, amount: value, method, at, paid, clientPrice: o.clientPrice, ...(over > 0 ? { overpay: over } : {}), ...(settled ? { status: settled } : {}) },

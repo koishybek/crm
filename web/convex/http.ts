@@ -11,6 +11,10 @@ import { FILES_PATH } from "./lib/files";
 import { OLX_CALLBACK_PATH } from "./lib/olxApi";
 import { createLeadHttp, getLeadHttp, getOrderHttp, openApiHttp, servicesHttp } from "./publicApi";
 import { leadOptions, leadPost } from "./site";
+import { payWebhook } from "./payments";
+import { pbxWebhook } from "./pbx";
+import { PBX_PROVIDERS, pbxWebhookPath } from "../src/data/pbx";
+import { ONLINE_PROVIDERS, payWebhookPath } from "../src/data/payIntents";
 
 const http = httpRouter();
 
@@ -123,6 +127,15 @@ http.route({
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   }),
 });
+
+// ── Провайдеры АТС (convex/pbx.ts): POST /pbx/<провайдер>?key=<ключ АТС>; GET — проверка адреса (Zadarma: zd_echo) ──
+for (const p of PBX_PROVIDERS) {
+  http.route({ path: pbxWebhookPath(p), method: "POST", handler: pbxWebhook(p) });
+  http.route({ path: pbxWebhookPath(p), method: "GET", handler: pbxWebhook(p) });
+}
+
+// ── Онлайн-оплата (convex/payments.ts): уведомления провайдеров, подпись проверяет адаптер ────────────────
+for (const p of ONLINE_PROVIDERS) http.route({ path: payWebhookPath(p), method: "POST", handler: payWebhook(p) });
 
 // ── WhatsApp Cloud API (Meta) ───────────────────────────────────────────────
 // Callback URL в Meta: https://<deployment>.convex.site/whatsapp/webhook. GET — проверка адреса, POST — события (подпись App Secret).

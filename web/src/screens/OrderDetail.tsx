@@ -41,6 +41,9 @@ import { useFileQuery } from "../data/files";
 import { assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, Payment, Urgency, User } from "../data/types";
 import { CloseModal, MoneyLedger, OrderPayoutModal, PaymentModal, RefundModal, VoidModal } from "../components/OrderMoney";
+import { OrderDocuments } from "../components/OrderDocuments";
+import { OrderPayLinks } from "../components/OrderPayLinks";
+import { PbxCallButton } from "../components/PbxCallButton";
 import { OrderChat } from "../components/OrderChat";
 import { OrderReview } from "../components/OrderReview";
 import { ExecutorRating } from "../components/Rating";
@@ -152,6 +155,7 @@ export default function OrderDetail() {
               </Link>
             )}{" "}
             · <a href={`tel:+${client.phone}`} className="hover:text-brand-ink">{phone(client.phone)}</a>
+            <PbxCallButton phone={client.phone} orderId={o.id} clientId={client.id} className="ml-3 align-middle" />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
@@ -281,7 +285,10 @@ export default function OrderDetail() {
               </div>
             </div>
             <MoneyLedger o={o} onVoid={isOwner ? setVoiding : undefined} />
+            <OrderPayLinks o={o} />
           </Card>
+
+          <OrderDocuments o={o} />
 
           <Card
             title="Исполнитель"

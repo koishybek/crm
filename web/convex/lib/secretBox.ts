@@ -11,7 +11,7 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_BYTES = 32;
 
-export type SecretPurpose = "olx.accessToken" | "olx.refreshToken" | "webhook.secret";
+export type SecretPurpose = "olx.accessToken" | "olx.refreshToken" | "webhook.secret" | "pbx.credentials" | "pbx.session" | "pay.credentials";
 
 /** key — ключа нет или он неверный; open — шифртекст не открывается этим ключом (ключ сменили или данные испорчены). */
 export class SecretBoxError extends Error {

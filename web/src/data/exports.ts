@@ -1,10 +1,10 @@
 // Выгрузки владельца в CSV (ТЗ п.26.9 «Экспорт CSV/Excel»): что выгружаем, за какой период и как называется файл.
 // Общие для сервера (convex/exports.ts собирает файл постранично, без лимита браузера) и экрана (кнопка «Выгрузка»).
 
-export const EXPORT_KINDS = ["leads", "orders", "calls", "executors", "payments", "payouts", "audit"] as const;
+export const EXPORT_KINDS = ["leads", "orders", "calls", "executors", "payments", "payouts", "audit", "accounting", "commerceml"] as const;
 export type ExportKind = (typeof EXPORT_KINDS)[number];
 
-export const EXPORT_KIND: Record<ExportKind, { label: string; file: string; period: string }> = {
+export const EXPORT_KIND: Record<ExportKind, { label: string; file: string; period: string; ext?: "xml" }> = {
   leads: { label: "Заявки", file: "zayavki", period: "по дате создания" },
   orders: { label: "Заказы", file: "zakazy", period: "по дате создания" },
   calls: { label: "Звонки", file: "zvonki", period: "по началу звонка" },
@@ -12,6 +12,10 @@ export const EXPORT_KIND: Record<ExportKind, { label: string; file: string; peri
   payments: { label: "Оплаты и возвраты", file: "oplaty", period: "по дате оплаты или возврата" },
   payouts: { label: "Выплаты мастерам", file: "vyplaty", period: "по дате выплаты" },
   audit: { label: "Журнал действий", file: "zhurnal", period: "по времени действия" },
+  // Для 1С (ТЗ п.19.8): реестр денег за период (CSV «;», UTF-8 с BOM — 1С:Бухгалтерия 8 читает его при загрузке из файла)
+  // и выполненные заказы как документы реализации услуг в CommerceML 2 (XML).
+  accounting: { label: "1С: реестр оплат, возвратов и выплат", file: "1c-reestr", period: "по дате оплаты, возврата или выплаты" },
+  commerceml: { label: "1С: реализация услуг (CommerceML 2, XML)", file: "1c-realizaciya", period: "по дате выполнения заказа", ext: "xml" },
 };
 
 /** Строк в одном файле — не больше: дальше это уже резервная копия, а не таблица для Excel. Выгружайте по частям. */
@@ -79,4 +83,4 @@ export function exportRange(preset: PeriodPreset, now: number, custom?: { from: 
 }
 
 /** Имя файла: «zakazy-2026-10-01_2026-10-14.csv» (дни по Алматы). */
-export const exportFileName = (kind: ExportKind, r: ExportRange): string => `${EXPORT_KIND[kind].file}-${almatyDay(Date.parse(r.from))}_${almatyDay(Date.parse(r.to))}.csv`;
+export const exportFileName = (kind: ExportKind, r: ExportRange): string => `${EXPORT_KIND[kind].file}-${almatyDay(Date.parse(r.from))}_${almatyDay(Date.parse(r.to))}.${EXPORT_KIND[kind].ext ?? "csv"}`;

@@ -70,7 +70,7 @@ wrangler в зависимостях проекта нет — `npx wrangler` (�
 | `EMAIL_API_KEY`, `EMAIL_FROM` [, `EMAIL_REPLY_TO`, `EMAIL_REDIRECT_TO`] | копии важных уведомлений на email (Resend); без них письма не отправляются, карточка «Email» в настройках объясняет, как подключить |
 | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` [, `WHATSAPP_GRAPH_VERSION`] | WhatsApp Cloud API; в Meta: Callback URL `https://<deployment>.convex.site/whatsapp/webhook`, подписка `messages` |
 | `OLX_CLIENT_ID`, `OLX_CLIENT_SECRET` | OLX Partner API (developer.olx.kz); адрес возврата `https://<deployment>.convex.site/olx/callback`, нужен и `INTEGRATIONS_KEY` |
-| `INTEGRATIONS_KEY` | ключ шифрования токенов интеграций (OLX) в базе, AES-GCM: 32 случайных байта в base64 — `node scripts/setup-auth-env.mjs [--prod] INTEGRATIONS_KEY=random32`. Без него OLX не подключается («Состояние системы» и карточка OLX показывают причину). Смена ключа = подключить OLX заново |
+| `INTEGRATIONS_KEY` | ключ шифрования токенов интеграций (OLX, ключи провайдеров АТС и онлайн-оплаты, секреты вебхуков) в базе, AES-GCM: 32 случайных байта в base64 — `node scripts/setup-auth-env.mjs [--prod] INTEGRATIONS_KEY=random32`. Без него OLX не подключается («Состояние системы» и карточка OLX показывают причину). Смена ключа = подключить OLX заново |
 | `ALLOW_SEED=1` | заливка демо-данных (`npm run seed`); на боевой базе заказчика не ставить |
 
 Сгенерированные скриптом значения (`KEY=random`, `KEY=random32`) в консоль не печатаются — они дописываются в `.secrets.local` (в git не попадает).
@@ -109,6 +109,10 @@ wrangler в зависимостях проекта нет — `npx wrangler` (�
 - **Мастер видит только своё**: без цен компании и внутренней переписки, канал «С мастером», файлы — с отметкой «Показать мастеру», контакты клиента — после подтверждения. Все файлы и записи — по подписанным ссылкам (`convex/files.ts`), загрузки проверяются по типу и размеру.
 - **Журнал действий** (`convex/audit.ts`, раздел владельца), **архив заказов**, **долги клиентов**, **экспорт CSV на сервере** (`convex/exports.ts`, защита от формул, ссылка на сутки).
 - **Надёжность**: ночная резервная копия (`convex/backup.ts`, 14 последних), «Состояние системы» по подсистемам, удаление данных клиента по его просьбе (`clients.anonymize`), токены OLX в базе зашифрованы, временные пароли с обязательной сменой, отключённый сотрудник теряет доступ сразу.
+- **Адаптеры интеграций** (ТЗ п.19.1, 19.7–19.9; «Настройки → Провайдер АТС / Онлайн-оплата / Документы и 1С»; ключи провайдеров — зашифрованы `INTEGRATIONS_KEY`):
+  - АТС `convex/pbx.ts`, `lib/pbx/*` — Binotel, Zadarma (подпись `Signature`), OnlinePBX: `POST /pbx/<провайдер>?key=<ключ АТС>` → `calls._ingest`, запись — по API провайдера, «Позвонить через АТС» (`calls.dial`, внутренний номер сотрудника; иначе `tel:`).
+  - Оплата `convex/payments.ts`, `lib/pay/*` — Freedom Pay и CloudPayments: «Выставить счёт на оплату» в заказе → ссылка → уведомление `POST /pay/<провайдер>` (подпись) → оплата от «Система» через `lib/money.recordPayment`; Kaspi — ссылка магазина, оплату отмечают вручную.
+  - Документы `convex/documents.ts` — счёт и акт со снимком, печать `/docs/<invoice|act>/<заказ>`, ссылка клиенту `/d/<токен>` (30 дней, нужен `APP_URL`); выгрузки для 1С — `convex/accounting.ts` (реестр денег CSV, CommerceML 2 XML).
 - **Кабинет мастера** (`src/screens/worker/*`, `convex/executorApp.ts`): лента в стиле Яндекс Про, «Мои заказы», «Доход» с выплатами, профиль с приёмом заказов «до …»; ставится на телефон (PWA, `public/manifest.webmanifest`).
 
 ## Устройство

@@ -35,6 +35,7 @@ import { ClientRecords } from "../components/ClientRecords";
 import { ServiceLabel, SourceIcon } from "../components/icons";
 import { Avatar, BackLink, Badge, Button, Card, EmptyState, IconTile, Loading, Menu, MenuItem, Textarea } from "../components/ui";
 import { cn, date, dateTime, money, phone, plural, shortName } from "../lib/format";
+import { PbxCallButton } from "../components/PbxCallButton";
 
 const tagTone = (t: string) => (t === "VIP" ? "violet" : t === "Постоянный клиент" ? "green" : CATEGORIES.some((c) => c.label === t || t === "Кондиционеры") ? "blue" : "gray");
 
@@ -101,6 +102,7 @@ export default function ClientDetail() {
                 <Phone size={18} className="text-muted" /> {phone(c.phone)}
               </a>
             )}
+            {c.phone && <PbxCallButton phone={c.phone} clientId={c.id} />}
             <span className="inline-flex items-center gap-2">
               <MapPin size={18} className="text-muted" /> {c.city}
             </span>

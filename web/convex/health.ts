@@ -21,6 +21,7 @@ const healthKey = v.union(
   v.literal("backup"),
   v.literal("reminders"),
   v.literal("escalations"),
+  v.literal("payments"),
 );
 
 /** Для actions (у них нет ctx.db): отметить успех или ошибку подсистемы. */
@@ -58,7 +59,7 @@ export const overview = query({
         .query("integrations")
         .withIndex("by_provider", (q) => q.eq("provider", provider))
         .first();
-    const [olx, email, pbxSecret, keys] = await Promise.all([
+    const [olx, email, pbxSecret, keys, payProvider] = await Promise.all([
       integration("olx"),
       integration("email"),
       ctx.db
@@ -66,6 +67,10 @@ export const overview = query({
         .withIndex("by_key", (q) => q.eq("key", "pbxSecret"))
         .unique(),
       ctx.db.query("apiKeys").collect(),
+      ctx.db
+        .query("settings")
+        .withIndex("by_key", (q) => q.eq("key", "pay.provider"))
+        .unique(),
     ]);
     const sub = (key: SubsystemInfo["key"], configured: boolean, extra: Pick<SubsystemInfo, "hint" | "issue" | "warning"> = {}): SubsystemInfo => ({ key, configured, ...extra, mark: marks.get(key) });
     /**
@@ -96,6 +101,7 @@ export const overview = query({
         linked("email", email, "Почта не подключена"),
         sub("site", marks.has("site"), { hint: "Заявок с сайта ещё не было" }),
         sub("api", activeKeys > 0 || marks.has("api"), { hint: "Ключей API нет" }),
+        sub("payments", !!payProvider || marks.has("payments"), { hint: "Онлайн-оплата не подключена — «Настройки → Онлайн-оплата»" }),
       ],
     };
   },

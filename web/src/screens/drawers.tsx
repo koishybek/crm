@@ -60,6 +60,7 @@ import { linkConversationLead, useConversationDraft } from "../data/inbox";
 import { AiCard } from "../components/AiCard";
 import { SignedAudio } from "../components/SignedMedia";
 import { ConversationLink } from "../components/ConversationLink";
+import { PbxCallButton } from "../components/PbxCallButton";
 import { EntityHistory } from "../components/AuditHistory";
 import { Source } from "../components/icons";
 import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
@@ -651,9 +652,7 @@ function LeadView({ id }: { id: string }) {
               {phone(client.phone)} · {client.city}
             </div>
           </div>
-          <a href={`tel:+${client.phone}`} className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] bg-ok-bg text-ok-ink" aria-label="Позвонить">
-            <Phone size={18} />
-          </a>
+          <PbxCallButton compact phone={client.phone} leadId={lead.id} clientId={client.id} />
           <a href={`https://wa.me/${client.phone}`} target="_blank" rel="noreferrer" className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] bg-brand-soft text-brand-ink" aria-label="Написать в WhatsApp">
             <MessageCircle size={18} />
           </a>

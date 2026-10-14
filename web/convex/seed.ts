@@ -38,6 +38,8 @@ const WIPE_TABLES = [
   "dailyStats",
   "statsDirty",
   "statsState",
+  "paymentIntents",
+  "documents",
   "categories",
   "services",
   "authAccounts",

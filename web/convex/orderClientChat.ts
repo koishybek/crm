@@ -5,8 +5,8 @@
 // диалогов клиента за период заказа. Только владелец и операторы: руководителю направления и мастеру переписка не видна.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
-import { currentUser, requireRole, STAFF } from "./lib/access";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { currentUser, requireRole, STAFF, type Me } from "./lib/access";
 import { log, nowIso, userActor } from "./lib/domain";
 import { fileSigner } from "./lib/files";
 import { replyBlock } from "./lib/outbound";
@@ -116,17 +116,25 @@ export const send = mutation({
     if (!o) throw new ConvexError("Заказ не найден");
     const body = text.replace(/\u0000/g, "").trim();
     if (!body) throw new ConvexError("Напишите сообщение");
-    const client = await ctx.db.get(o.clientId);
-    const c = client && !client.anonymizedAt ? await replyChannel(ctx, o.clientId) : null;
-    const actor = userActor(me._id);
-    if (c) {
-      await queueReply(ctx, me, c, body, { orderId });
-      await log(ctx, orderId, "comment", `Сообщение клиенту ${CHANNEL_IN[c.channel]}`, actor);
-      return { sent: true, channel: c.channel };
-    }
-    const reason = await noChannelReason(ctx, await recentConversations(ctx, o.clientId));
-    await ctx.db.insert("messages", { orderId, author: actor, channel: "client", text: body.slice(0, MAX_NOTE), files: [], at: nowIso() });
-    await log(ctx, orderId, "comment", "Заметка по клиенту: клиент не на связи в мессенджерах", actor);
-    return { sent: false, reason };
+    return sendOrderClientText(ctx, me, o, body);
   },
 });
+
+/**
+ * Текст клиенту заказа тем же путём, что «Клиенту» в карточке: в его канал или заметкой с причиной. Им же уходят
+ * ссылка на оплату (payments.ts) и ссылка на документ (documents.ts).
+ */
+export async function sendOrderClientText(ctx: MutationCtx, me: Me, o: Doc<"orders">, body: string): Promise<OrderClientSend> {
+  const client = await ctx.db.get(o.clientId);
+  const c = client && !client.anonymizedAt ? await replyChannel(ctx, o.clientId) : null;
+  const actor = userActor(me._id);
+  if (c) {
+    await queueReply(ctx, me, c, body, { orderId: o._id });
+    await log(ctx, o._id, "comment", `Сообщение клиенту ${CHANNEL_IN[c.channel]}`, actor);
+    return { sent: true, channel: c.channel };
+  }
+  const reason = await noChannelReason(ctx, await recentConversations(ctx, o.clientId));
+  await ctx.db.insert("messages", { orderId: o._id, author: actor, channel: "client", text: body.slice(0, MAX_NOTE), files: [], at: nowIso() });
+  await log(ctx, o._id, "comment", "Заметка по клиенту: клиент не на связи в мессенджерах", actor);
+  return { sent: false, reason };
+}
