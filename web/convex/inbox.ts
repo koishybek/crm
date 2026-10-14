@@ -23,6 +23,7 @@ import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { phone as fmtPhone } from "../src/lib/format";
 import type { AiDraft, AiSummary, Channel, Conversation, ConversationDetail, ConversationDraft, ConversationMessage, LeadOrigin, MessageKind } from "../src/data/types";
 import { tenantOf } from "./lib/tenantDb";
+import { actionHasModule } from "./lib/tenant";
 
 const MAX_TEXT = 4000;
 const PREVIEW = 160;
@@ -486,7 +487,7 @@ export const _autoLead = internalAction({
     const job = await ctx.runQuery(internal.inbox._autoLeadJob, a);
     if (!job) return;
     let parsed: { ai?: AiSummary; draft?: AiDraft } = {};
-    if (canExtract()) {
+    if (canExtract() && (await actionHasModule(ctx, "ai"))) {
       try {
         const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
         parsed = toSummary(await extract(job.text, hint, "message"), (id) => hint.services.find((s) => s.id === id)?.label ?? id);
@@ -862,7 +863,7 @@ export const draftFromConversation = action({
     const src = await ctx.runQuery(internal.inbox._draftSource, { id });
     if (!src) throw new ConvexError("Диалог не найден");
     const base: ConversationDraft = { channel: src.channel, phone: src.phone, name: src.name, text: src.text, draft: { description: src.text || undefined } };
-    if (!src.text || !canExtract()) return base;
+    if (!src.text || !canExtract() || !(await actionHasModule(ctx, "ai"))) return base;
     try {
       const hint: CatalogHint = await ctx.runQuery(internal.catalog._hint, {});
       const { ai, draft } = toSummary(await extract(src.text, hint, "message"), (sid) => hint.services.find((s) => s.id === sid)?.label ?? sid);

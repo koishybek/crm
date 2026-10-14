@@ -16,6 +16,8 @@ import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 import { SystemCards } from "./SystemCards";
 import { MatchingCards } from "./MatchingCards";
 import { AdapterCards } from "./AdapterCards";
+import { CompanyCard } from "./CompanyCards";
+import { ModuleGate } from "../components/ModuleGate";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
 
@@ -129,6 +131,7 @@ export default function Settings() {
   return (
     <>
       <PageHeader title="Настройки" subtitle="Команда, доступы, импорт данных и уведомления" />
+      <div className="mb-4"><CompanyCard /></div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.3fr_1fr]">
         <Card
@@ -241,17 +244,17 @@ export default function Settings() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.3fr_1fr]">
-        <TelephonyCard />
-        <AiStatusCard />
+        <ModuleGate module="telephony" card><TelephonyCard /></ModuleGate>
+        <ModuleGate module="ai" card><AiStatusCard /></ModuleGate>
       </div>
       <AdapterCards />
 
       <div className="mt-4">
-        <WhatsAppCard />
+        <ModuleGate module="whatsapp" card><WhatsAppCard /></ModuleGate>
       </div>
 
       <div className="mt-4">
-        <OlxCard />
+        <ModuleGate module="olx" card><OlxCard /></ModuleGate>
       </div>
       <NotifyCards />
 

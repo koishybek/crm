@@ -154,3 +154,12 @@ export async function publicTenant(ctx: QueryCtx, slug?: string): Promise<string
   const first = await ctx.db.query("tenants").order("asc").first();
   return first ? (first.status === "active" ? first.slug : null) : DEFAULT_TENANT;
 }
+
+/** Модуль у компании action (публичной — по вошедшему пользователю, внутренней — по tenantId из аргументов). */
+export async function actionHasModule(ctx: ActionCtx, module: TenantModule): Promise<boolean> {
+  return ctx.runQuery(internal.tenants._hasModule, { module });
+}
+
+export async function requireModuleAction(ctx: ActionCtx, module: TenantModule): Promise<void> {
+  if (!(await actionHasModule(ctx, module))) throw new ConvexError(lockText(module));
+}

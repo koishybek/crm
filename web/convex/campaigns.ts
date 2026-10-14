@@ -10,6 +10,7 @@ import { FIRST_MONTH, MONTH_RE, monthLabel, monthOf } from "../src/data/analytic
 import { campaignRows, type CampaignRow, type CampaignSpendRow } from "../src/data/campaigns";
 import { cleanUtmValue } from "../src/data/utm";
 import { money } from "../src/lib/format";
+import { requireModule } from "./lib/tenant";
 
 /** Период отчёта — не длиннее года: запрос «за всё время» упёрся бы в лимиты чтения. */
 const MAX_SPAN_MS = 366 * 86400_000;
@@ -37,7 +38,8 @@ async function spendRows(ctx: Parameters<typeof requireRole>[0], first: string, 
 export const stats = query({
   args: { from: v.string(), to: v.string() },
   handler: async (ctx, a): Promise<CampaignRow[]> => {
-    await requireRole(ctx, OWNER);
+    const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "analytics_pro");
     const s = span(a.from, a.to);
     const fromIso = new Date(s.from).toISOString();
     const toIso = new Date(s.to).toISOString();
@@ -81,6 +83,7 @@ export const setSpend = mutation({
   args: { month: v.string(), items: v.array(v.object({ campaign: v.string(), amount: v.number() })) },
   handler: async (ctx, { month, items }): Promise<{ changed: number }> => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "analytics_pro");
     if (!MONTH_RE.test(month) || month < FIRST_MONTH) throw new ConvexError("Неверный месяц");
     if (month > monthOf(Date.now())) throw new ConvexError("Расходы вносятся за прошедшие месяцы и текущий");
     if (items.length > MAX_ITEMS) throw new ConvexError(`Не больше ${MAX_ITEMS} кампаний за раз`);

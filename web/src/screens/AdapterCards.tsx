@@ -14,17 +14,18 @@ import { PBX_INFO, PBX_PROVIDERS, pbxWebhookPath, type PbxProvider } from "../da
 import { revealPbxSecret } from "../data/securityActions";
 import { report, toast } from "../data/store";
 import { copy, CopyRow } from "./Integrations";
+import { ModuleGate } from "../components/ModuleGate";
 
 /** Карточки адаптеров — одной строкой в «Настройках». */
 export function AdapterCards() {
   return (
     <>
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <PbxProviderCard />
-        <PaymentsCard />
+        <ModuleGate module="telephony" card><PbxProviderCard /></ModuleGate>
+        <ModuleGate module="online_payments" card><PaymentsCard /></ModuleGate>
       </div>
       <div className="mt-4">
-        <DocumentsCard />
+        <ModuleGate module="documents" card><DocumentsCard /></ModuleGate>
       </div>
     </>
   );

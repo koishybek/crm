@@ -4,7 +4,7 @@
 // O(дней), а не O(заказов). Формулы денег — из ./logic и ./analytics: здесь они не повторяются.
 import { SOURCE_IDS } from "./catalog";
 import { byOperatorLoad, leadWaitMs, operatorRowOf, sourceRow, sumsOf, visibleSources, type OperatorRow, type SourceRow } from "./analytics";
-import { isFinished, payout, revenueOf, type RevenueLike } from "./logic";
+import { isFinished, payout, platformFeeOf, revenueOf, type RevenueLike } from "./logic";
 import type { Lead, Order, OrderStatus, SourceId } from "./types";
 
 // ── Дни по Алматы ────────────────────────────────────────────────────────────
@@ -71,13 +71,14 @@ export const TOTAL_KEYS = [
   "received",
   "refunded",
   "paidOut",
+  "fee",
 ] as const;
 export type TotalKey = (typeof TOTAL_KEYS)[number];
 /** По мастеру: выполнено, деньги, опоздания, отмены, отказы, время до взятия и на работу (сумма мс и сколько замеров). */
-export const EX_KEYS = ["done", "revenue", "payouts", "late", "accruedPaid", "paidOut", "cancelled", "refusals", "takeMs", "takeN", "workMs", "workN"] as const;
+export const EX_KEYS = ["done", "revenue", "payouts", "fee", "late", "accruedPaid", "paidOut", "cancelled", "refusals", "takeMs", "takeN", "workMs", "workN"] as const;
 export type ExKey = (typeof EX_KEYS)[number];
 /** По оператору: его заявки, сколько стали заказом и деньги выполненных заказов из них. */
-export const OP_KEYS = ["leads", "converted", "revenue", "payouts"] as const;
+export const OP_KEYS = ["leads", "converted", "revenue", "payouts", "fee"] as const;
 export type OpKey = (typeof OP_KEYS)[number];
 
 export type Counts<K extends string> = Partial<Record<K, number>>;
@@ -145,7 +146,7 @@ class Days {
 
 export type FactOrder = Pick<
   Order,
-  "status" | "category" | "source" | "city" | "createdAt" | "doneAt" | "deadline" | "clientPrice" | "payoutMode" | "payoutValue" | "payments" | "refunds" | "payoutPaid" | "payoutPaidAt" | "executorId" | "assignedAt"
+  "status" | "category" | "source" | "city" | "createdAt" | "doneAt" | "deadline" | "clientPrice" | "payoutMode" | "payoutValue" | "payments" | "refunds" | "payoutPaid" | "payoutPaidAt" | "executorId" | "assignedAt" | "platformFee"
 >;
 
 /** Смена статуса из истории заказа. byExecutor — мастер, который сам сделал этот шаг (отказ). */
@@ -190,11 +191,13 @@ export function orderFacts(o: FactOrder, x: OrderContext = {}): Map<string, Cell
   if (done && o.doneAt) {
     const revenue = revenueOf(o);
     const pay = payout(o);
+    const fee = platformFeeOf(o);
     const late = o.doneAt > o.deadline ? 1 : 0;
     const paid = o.payoutPaid ? pay : 0;
     bump(done.t, "done");
     bump(done.t, "revenue", revenue);
     bump(done.t, "payouts", pay);
+    if (fee) bump(done.t, "fee", fee);
     bump(done.t, "late", late);
     bump(done.t, "accruedPaid", paid);
     if (x.repeat) {
@@ -206,6 +209,7 @@ export function orderFacts(o: FactOrder, x: OrderContext = {}): Map<string, Cell
       bump(e, "done");
       bump(e, "revenue", revenue);
       bump(e, "payouts", pay);
+      if (fee) bump(e, "fee", fee);
       bump(e, "late", late);
       bump(e, "accruedPaid", paid);
       const take = takeMsOf(o, events);
@@ -252,7 +256,7 @@ export function orderFacts(o: FactOrder, x: OrderContext = {}): Map<string, Cell
 
 /** operatorId — пусто у заявок, которые пришли сами и которых ещё никто не взял. */
 export type FactLead = Pick<Lead, "status" | "source" | "city" | "createdAt" | "orderId"> & { operatorId?: string };
-export type LeadOrder = Pick<Order, "status" | "createdAt" | "payoutMode" | "payoutValue"> & RevenueLike;
+export type LeadOrder = Pick<Order, "status" | "createdAt" | "payoutMode" | "payoutValue" | "platformFee"> & RevenueLike;
 
 export interface LeadContext {
   /** Направление услуги заявки (по справочнику). */
@@ -288,6 +292,7 @@ export function leadFacts(l: FactLead, x: LeadContext): Map<string, Cell> {
     if (isFinished(order)) {
       bump(op.c, "revenue", revenueOf(order));
       bump(op.c, "payouts", payout(order));
+      if (platformFeeOf(order)) bump(op.c, "fee", platformFeeOf(order));
     }
   }
   normalize(days.cells.values());
@@ -423,7 +428,7 @@ export const funnelOfTotals = (t: Counts<TotalKey>) =>
   funnelOf({ leads: n(t, "leads"), qualified: n(t, "qualified"), withOrder: n(t, "withOrder"), orderDone: n(t, "orderDone"), orderPaid: n(t, "orderPaid") });
 
 /** Деньги выполненных заказов: выручка, начислено мастерам, маржа, число и средний чек — как sums(doneWithin(...)). */
-export const moneyOf = (t: Counts<TotalKey>) => sumsOf(n(t, "revenue"), n(t, "payouts"), n(t, "done"));
+export const moneyOf = (t: Counts<TotalKey>) => sumsOf(n(t, "revenue"), n(t, "payouts"), n(t, "done"), n(t, "fee"));
 
 /** «Получено от клиентов» за период — как receivedWithin. */
 export const cashOf = (t: Counts<TotalKey>) => ({ received: n(t, "received"), refunded: n(t, "refunded"), net: n(t, "received") - n(t, "refunded") });
@@ -434,14 +439,14 @@ export function sourceRowsOf(s: StatsSummary, spend: Partial<Record<SourceId, nu
   return visibleSources(
     SOURCE_IDS.map((source) => {
       const t = by.get(source) ?? {};
-      return sourceRow(source, { leads: n(t, "leads"), converted: n(t, "converted"), done: n(t, "done"), revenue: n(t, "revenue"), payouts: n(t, "payouts") }, spend[source] ?? 0);
+      return sourceRow(source, { leads: n(t, "leads"), converted: n(t, "converted"), done: n(t, "done"), revenue: n(t, "revenue"), payouts: n(t, "payouts"), fee: n(t, "fee") }, spend[source] ?? 0);
     }),
   );
 }
 
 /** Операторы за период — как operatorRows. */
 export function operatorRowsOf(s: StatsSummary): { rows: OperatorRow[]; auto: OperatorRow | null } {
-  const row = (o: OpCell) => operatorRowOf(o.id || undefined, { leads: n(o.c, "leads"), converted: n(o.c, "converted"), revenue: n(o.c, "revenue"), payouts: n(o.c, "payouts"), waits: o.waits });
+  const row = (o: OpCell) => operatorRowOf(o.id || undefined, { leads: n(o.c, "leads"), converted: n(o.c, "converted"), revenue: n(o.c, "revenue"), payouts: n(o.c, "payouts"), fee: n(o.c, "fee"), waits: o.waits });
   const auto = s.operators.find((o) => !o.id);
   return { rows: s.operators.filter((o) => o.id && n(o.c, "leads") > 0).map(row).sort(byOperatorLoad), auto: auto && n(auto.c, "leads") > 0 ? row(auto) : null };
 }
@@ -494,7 +499,7 @@ export function executorRowsOf(s: StatsSummary, meta: readonly ExecutorMeta[], m
       avgWorkMs: n(c, "workN") ? n(c, "workMs") / n(c, "workN") : null,
     };
     if (!money) return row;
-    const sums = sumsOf(n(c, "revenue"), n(c, "payouts"), done);
+    const sums = sumsOf(n(c, "revenue"), n(c, "payouts"), done, n(c, "fee"));
     return { ...row, revenue: sums.revenue, margin: sums.margin, accrued: sums.payouts, paidOut: n(c, "paidOut") };
   });
 }

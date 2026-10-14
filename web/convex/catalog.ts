@@ -106,8 +106,8 @@ export const publicList = query({
   },
 });
 
-/** Перенести значения по умолчанию в базу перед первой правкой. */
-async function materialize(ctx: MutationCtx) {
+/** Перенести значения по умолчанию в базу перед первой правкой (и при регистрации компании — её справочник). */
+export async function materialize(ctx: MutationCtx) {
   if ((await ctx.db.query("categories").first()) || (await ctx.db.query("services").first())) return;
   for (const [i, c] of DEFAULT_CATEGORIES.entries()) await ctx.db.insert("categories", { key: c.id, label: c.label, tone: c.tone, order: i, active: true, skills: c.skills ?? [] });
   for (const [i, s] of withDefaultPrices(DEFAULT_SERVICES).entries()) {

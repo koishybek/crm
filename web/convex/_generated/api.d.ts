@@ -121,6 +121,7 @@ import type * as payments from "../payments.js";
 import type * as payouts from "../payouts.js";
 import type * as pbx from "../pbx.js";
 import type * as permissions from "../permissions.js";
+import type * as platform from "../platform.js";
 import type * as publicApi from "../publicApi.js";
 import type * as push from "../push.js";
 import type * as receivables from "../receivables.js";
@@ -258,6 +259,7 @@ declare const fullApi: ApiFromModules<{
   payouts: typeof payouts;
   pbx: typeof pbx;
   permissions: typeof permissions;
+  platform: typeof platform;
   publicApi: typeof publicApi;
   push: typeof push;
   receivables: typeof receivables;

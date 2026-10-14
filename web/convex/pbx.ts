@@ -24,6 +24,7 @@ import { cleanExtension, isPbxProvider, ONLINEPBX_DOMAIN, PBX_INFO, PBX_PROVIDER
 import { ROLE_LABEL } from "../src/data/catalog";
 import { actionFor } from "./lib/tenantDb";
 import { lockText } from "../src/data/plans";
+import { requireModuleAction } from "./lib/tenant";
 
 const KEY = { provider: "pbx.provider", public: "pbx.public", secrets: "pbx.secrets", session: "pbx.sessionKey" } as const;
 const pbxProvider = v.union(...PBX_PROVIDERS.map((p) => v.literal(p)));
@@ -155,6 +156,7 @@ export const save = action({
   args: { provider: pbxProvider, fields: v.record(v.string(), v.string()) },
   handler: async (ctx, { provider, fields }): Promise<void> => {
     if ((await ctx.runQuery(internal.users._viewerRole, {})) !== "owner") throw new ConvexError("Нет доступа");
+    await requireModuleAction(ctx, "telephony");
     const state: PbxState = await ctx.runQuery(internal.pbx._state, {});
     const same = state.provider === provider && !!state.sealed;
     const { pub, secret } = cleanFields(provider, fields, same);
@@ -299,6 +301,8 @@ export const _dialed = internalMutation({
 
 /** Звонок через АТС: АТС звонит сотруднику на внутренний номер и соединяет с клиентом; не подключено — tel: с телефона. */
 export async function dialHandler(ctx: ActionCtx, phone: string, context?: string): Promise<DialResult> {
+  // Звонок через АТС — модуль «Телефония» (ТЗ §24.3).
+  await requireModuleAction(ctx, "telephony");
   const start: DialStart = await ctx.runMutation(internal.pbx._dialStart, { phone });
   const href = `tel:+${start.phone}`;
   if (!start.state?.provider) return { mode: "tel", href, reason: "АТС не подключена — звоните с телефона" };

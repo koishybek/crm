@@ -47,6 +47,7 @@ import { Logo } from "./icons";
 import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
 import { WorkerShell } from "./worker/WorkerShell";
+import { useTenant } from "../data/tenant";
 
 /** perm — раздел виден только с этим правом (ТЗ п.5.12); ownerOnly — только владельцу. */
 type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; perm?: Permission; ownerOnly?: boolean; notOwner?: boolean; notManager?: boolean };
@@ -66,6 +67,8 @@ const STAFF_NAV: NavItem[] = [
   { to: "/audit", label: "Журнал действий", icon: ScrollText, ownerOnly: true },
   { to: "/settings", label: "Настройки", icon: SettingsIcon, ownerOnly: true },
 ];
+/** Администратору платформы (PLATFORM_ADMINS) — компании платформы, тарифы и модули (ТЗ §24). */
+const PLATFORM_NAV: NavItem = { to: "/platform", label: "Платформа", icon: Building2 };
 const EXEC_NAV: NavItem[] = [
   { to: "/w", label: "Доступные заказы", icon: Box, end: true },
   { to: "/w/my", label: "Мои заказы", icon: ClipboardList },
@@ -392,7 +395,8 @@ export function Shell({ me, children }: { me: User; children?: ReactNode }) {
 }
 
 function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
-  const items = navFor(me);
+  const tenant = useTenant();
+  const items = tenant?.platformAdmin ? [...navFor(me), PLATFORM_NAV] : navFor(me);
   const ui = useUi();
   const unread = useInboxUnread(me);
   const badges = { "/inbox": unread };

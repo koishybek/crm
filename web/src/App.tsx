@@ -32,6 +32,8 @@ const Analytics = lazy(() => import("./screens/Analytics"));
 const AuditLog = lazy(() => import("./screens/AuditLog"));
 const Payouts = lazy(() => import("./screens/Payouts"));
 const PublicReview = lazy(() => import("./screens/PublicReview"));
+const Register = lazy(() => import("./screens/Register"));
+const Platform = lazy(() => import("./screens/Platform"));
 // Печатные документы заказа (ТЗ п.19.9): страница сотрудника и ссылка клиента — отдельный чанк, без меню.
 const documentPages = () => import("./screens/DocumentPage");
 const StaffDocumentPage = lazy(() => documentPages().then((m) => ({ default: m.StaffDocumentPage })));
@@ -61,7 +63,7 @@ function Blocked() {
   return (
     <Splash>
       <div className="text-[18px] font-semibold text-ink">Доступ отключён</div>
-      <p className="max-w-sm text-[14.5px] text-muted">Ваш аккаунт отключён владельцем компании. Если это ошибка — свяжитесь с ним.</p>
+      <p className="max-w-sm text-[14.5px] text-muted">Ваш аккаунт отключён владельцем компании или работа компании приостановлена. Если это ошибка — свяжитесь с владельцем.</p>
       <Button variant="secondary" onClick={() => void signOut()}>
         Выйти
       </Button>
@@ -133,6 +135,8 @@ const router = createBrowserRouter([
   { path: "/login", element: <LoginRoute /> },
   // Публичная форма заявки для клиентов (ссылка и iframe на сайте) — без входа.
   { path: "/zayavka", element: <PublicRequest /> },
+  // Регистрация компании (ТЗ §23.7): открыта при SAAS_SIGNUP=1, иначе — «по приглашению».
+  { path: "/register", element: <Suspense fallback={<Splash />}><Register /></Suspense> },
   {
     element: <Guard roles={["owner", "operator", "manager"]} />,
     children: [
@@ -142,6 +146,8 @@ const router = createBrowserRouter([
       { path: "/orders/:id", element: <OrderDetail /> },
       { path: "/executors", element: <Executors /> },
       { path: "/executors/:id", element: <ExecutorDetail /> },
+      // Администратор платформы (PLATFORM_ADMINS) — экран сам проверяет право и уводит остальных на «Главную».
+      { path: "/platform", element: <Suspense fallback={<Splash />}><Platform /></Suspense> },
     ],
   },
   // Клиентская база, звонки, переписка, аналитика, выплаты и справочник — по правам (по умолчанию: клиенты, звонки

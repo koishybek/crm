@@ -25,7 +25,7 @@ import { aiDraft, aiSummary } from "./schema";
 import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
 import { boundTenant, tenantOf, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
-import { hasModule } from "./lib/tenant";
+import { hasModule, requireModule } from "./lib/tenant";
 import { safeEqual } from "./lib/crypto";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
@@ -403,6 +403,7 @@ export const regeneratePbxSecret = mutation({
   args: {},
   handler: async (ctx) => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "telephony");
     const value = Array.from(crypto.getRandomValues(new Uint8Array(20)), (b) => b.toString(16).padStart(2, "0")).join("");
     const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique();
     if (row) await ctx.db.patch(row._id, { value });

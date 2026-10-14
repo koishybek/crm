@@ -16,6 +16,7 @@ import { LEAD_STATUS, SOURCES, URGENCY } from "../src/data/catalog";
 import { deadlineByUrgency } from "../src/data/leadRules";
 import { money, shortName } from "../src/lib/format";
 import { tenantOf } from "./lib/tenantDb";
+import { assertLimit } from "./lib/tenant";
 
 const CAP = 2000;
 /** Границы полей заявки: описание — до пары страниц, комментарий — до страницы. */
@@ -342,6 +343,8 @@ export const convert = mutation({
     if (!l) throw new ConvexError("Заявка не найдена");
     if (l.orderId) throw new ConvexError("Заказ уже создан");
     if (l.status === "rejected") throw new ConvexError("Заявка закрыта отказом — сначала верните её в работу");
+    // Лимит тарифа (ТЗ §24.4): заказов в месяц.
+    await assertLimit(ctx, me.tenantId, "ordersPerMonth");
     const c = (await ctx.db.get(l.clientId))!;
     const svc = (await loadCatalog(ctx)).service(l.serviceId);
     assertScope(me, svc.category);

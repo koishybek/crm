@@ -29,6 +29,7 @@ import {
   type WebhookInfo,
   type WebhooksView,
 } from "../src/data/webhookEvents";
+import { requireModuleAction } from "./lib/tenant";
 
 const MAX_WEBHOOKS = 10;
 const MAX_URL = 500;
@@ -114,6 +115,7 @@ export const create = action({
   args: { url: v.string(), events: v.array(v.string()), description: v.optional(v.string()) },
   handler: async (ctx, a): Promise<{ id: Id<"webhooks">; secret: string }> => {
     if ((await ctx.runQuery(internal.users._viewerRole, {})) !== "owner") throw new ConvexError("Нет доступа");
+    await requireModuleAction(ctx, "api");
     const url = checkWebhookUrl(a.url);
     if (!url.ok) throw new ConvexError(url.error);
     const events = cleanEvents(a.events);

@@ -20,6 +20,7 @@ import type { ApiKeyInfo, OlxSettings, WhatsAppSettings } from "../data/types";
 import { dateTime, phone } from "../lib/format";
 import { copy, CopyRow } from "./Integrations";
 import { CheckOptions, WebhooksSection } from "./WebhooksSection";
+import { ModuleGate } from "../components/ModuleGate";
 
 /** Встраивание формы: iframe + скрипт, который передаёт рекламные метки страницы и подгоняет высоту. */
 const embedCode = (formUrl: string, origin: string) => `<iframe id="hms-form" src="${formUrl}${formUrl.includes("?") ? "&" : "?"}embed=1" title="Заявка" loading="lazy"
@@ -111,7 +112,7 @@ export function ApiAndSiteCard() {
         </section>
 
         <section className="min-w-0 space-y-3">
-          <ApiKeys keys={keys?.keys} />
+          <ModuleGate module="api"><ApiKeys keys={keys?.keys} /></ModuleGate>
           {keys && (
             <Toggle checked={keys.servicePrices} onChange={(v) => void setApiServicePrices(v).then((r) => report(r, v ? "Справочник в API — с ценами" : "Справочник в API — без цен"))} label="Цены услуг в /api/v1/services" />
           )}

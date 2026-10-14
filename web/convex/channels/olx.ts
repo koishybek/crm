@@ -70,7 +70,7 @@ import {
   type TokenLease,
 } from "../lib/olxApi";
 import { hitLimit } from "../lib/rateLimit";
-import { perTenantAction } from "../lib/tenant";
+import { actionHasModule, perTenantAction, requireModule } from "../lib/tenant";
 import { bindTenant, tenantOfDoc, unscopedDb } from "../lib/tenantDb";
 import { integrationsKeyIssue, isSealed, sealSecret } from "../lib/secretBox";
 import { safeFileName, storageMime } from "../lib/whatsapp";
@@ -205,6 +205,7 @@ export const connectUrl = mutation({
   args: {},
   handler: async (ctx): Promise<string> => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "olx");
     const cfg = olxConfig();
     if (!cfg) throw new ConvexError("OLX ещё не настроен: на сервере нет ключей приложения (OLX_CLIENT_ID и OLX_CLIENT_SECRET)");
     // Токены OLX храним только зашифрованными: без ключа подключение бессмысленно — говорим об этом до страницы OLX.
@@ -783,6 +784,8 @@ export const sync = internalAction({
 async function syncTenant(ctx: ActionCtx): Promise<void> {
   const cfg = olxConfig();
   if (!cfg) return;
+  // Модуль OLX выключен у компании (ТЗ §24.3) — её подключение не синхронизируем.
+  if (!(await actionHasModule(ctx, "olx"))) return;
   // Без ключа шифрования токены не открыть и новые не сохранить: в OLX не ходим, токены не трогаем — с ключом всё продолжится.
   // Причину владелец видит в карточке OLX и в «Состоянии системы» (там она считается по окружению).
   if (integrationsKeyIssue()) return;

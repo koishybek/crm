@@ -9,7 +9,7 @@ import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { withDefaultPrices } from "../convex/lib/defaultPrices";
 import { buildSeed } from "../src/data/seed";
-import { ACTIVE_STATUSES, DEFAULT_CATEGORIES, DEFAULT_SERVICES, serviceById, setCatalog, WORK_STATUSES } from "../src/data/catalog";
+import { ACTIVE_STATUSES, APP_NAME, DEFAULT_CATEGORIES, DEFAULT_SERVICES, serviceById, setCatalog, WORK_STATUSES } from "../src/data/catalog";
 import { DEFAULT_MAX_ACTIVE, paidAmount, payout } from "../src/data/logic";
 import { bayesianRating } from "../src/data/reviews";
 import type { Actor } from "../src/data/types";
@@ -93,11 +93,13 @@ async function main() {
   const tgLinks = new Map([...links.map((l) => [l.name, l.chatId] as const), ...links.map((l) => [l.login, l.chatId] as const)]);
   if (process.argv.includes("--wipe")) {
     console.log("Очищаю базу…");
-    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "campaignSpend", "webhookDeliveries", "webhooks", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits", "statsFacts", "dailyStats", "statsDirty", "statsState", "pushSubscriptions", "clientErrors", "offsiteFiles", "paymentIntents", "documents"] as const) {
+    for (const t of ["categories", "services", "notifications", "clientNotes", "interactions", "history", "messages", "calls", "botChats", "clientNotices", "conversationMessages", "conversations", "apiLeads", "apiKeys", "audit", "reviews", "reviewRequests", "adSpend", "payouts", "rateLimits", "telegramUpdates", "escalations", "systemStatus", "backups", "oauthStates", "uploads", "exports", "campaignSpend", "webhookDeliveries", "webhooks", "orders", "leads", "clients", "users", "executors", "counters", "authAccounts", "authSessions", "authRefreshTokens", "authVerificationCodes", "authVerifiers", "authRateLimits", "statsFacts", "dailyStats", "statsDirty", "statsState", "pushSubscriptions", "clientErrors", "offsiteFiles", "paymentIntents", "documents", "tenants"] as const) {
       while ((await call(internal.seed.wipe, { table: t })) > 0);
     }
     while ((await call(internal.seed.wipeFiles, {})) > 0);
   }
+  // Демо-компания (ТЗ §2.5): строка в реестре компаний, тариф «Про» со всеми модулями — всё работает как до SaaS.
+  await call(internal.seed.tenant, { name: APP_NAME });
   // Цены справочника по умолчанию живут только на сервере (convex/lib/defaultPrices.ts) — генератору демо-данных они нужны.
   setCatalog(DEFAULT_CATEGORIES, withDefaultPrices(DEFAULT_SERVICES));
   const db = buildSeed(new Date());

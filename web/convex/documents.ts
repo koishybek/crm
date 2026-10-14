@@ -36,6 +36,7 @@ import { netReceived } from "../src/data/money";
 import type { OrderClientSend } from "../src/data/orderClientChat";
 import { money } from "../src/lib/format";
 import { unscopedDb } from "./lib/tenantDb";
+import { requireModule } from "./lib/tenant";
 
 const REQUISITES_KEY = "company.requisites";
 /** Ссылок клиенту на сотрудника в час. */
@@ -158,6 +159,7 @@ export const issue = mutation({
   args: { orderId: v.id("orders"), kind: documentKind, reissue: v.optional(v.boolean()) },
   handler: async (ctx, { orderId, kind, reissue }): Promise<Id<"documents">> => {
     const me = await requirePerm(ctx, "money.view", STAFF);
+    await requireModule(ctx, me.tenantId, "documents");
     const o = await ctx.db.get(orderId);
     if (!o) throw new ConvexError("Заказ не найден");
     if (kind === "act" && !ACT_STATUSES.includes(o.status)) throw new ConvexError(`Акт выпускают, когда работа сдана, а заказ — «${ORDER_STATUS[o.status].label}»`);
@@ -216,6 +218,7 @@ export const share = mutation({
   args: { id: v.id("documents"), send: v.boolean() },
   handler: async (ctx, { id, send }): Promise<{ url: string; delivery: OrderClientSend | null }> => {
     const me = await requirePerm(ctx, "money.view", STAFF);
+    await requireModule(ctx, me.tenantId, "documents");
     const d = await ctx.db.get(id);
     if (!d) throw new ConvexError("Документ не найден");
     if (d.replacedAt) throw new ConvexError("Документ заменён новым — отправьте актуальный");

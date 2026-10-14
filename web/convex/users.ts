@@ -17,6 +17,7 @@ import { PASSWORD_MAX, passwordProblem } from "../src/data/passwordRules";
 import type { Role } from "../src/data/types";
 import { shortName } from "../src/lib/format";
 import { tenantOf, unscopedDb } from "./lib/tenantDb";
+import { assertLimit, tenantView } from "./lib/tenant";
 
 /** Роли сотрудников, которые назначает владелец. Исполнители заводятся в разделе «Исполнители». */
 const staffRole = v.union(v.literal("owner"), v.literal("operator"), v.literal("manager"));
@@ -26,7 +27,9 @@ export const me = query({
   args: {},
   handler: async (ctx) => {
     const u = await signedInUser(ctx);
-    return u ? toUser(u) : null;
+    // Работа компании приостановлена платформой — как отключённый доступ: экран «Доступ отключён».
+    if (!u || (await tenantView(ctx, u.tenantId)).status !== "active") return null;
+    return toUser(u);
   },
 });
 
@@ -93,6 +96,7 @@ export const _insertUser = internalMutation({
     categories: v.optional(v.array(v.string())),
     mustChangePassword: v.optional(v.boolean()),
     firstOwner: v.optional(v.boolean()),
+    tenantId: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
     if (a.firstOwner && (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).first())) {
@@ -104,6 +108,8 @@ export const _insertUser = internalMutation({
       .withIndex("email", (q) => q.eq("email", a.login))
       .first();
     if (exists) throw new ConvexError("Такой логин уже занят");
+    // Лимит тарифа (ТЗ §24.4): сотрудников; исполнителей считает executors._insert.
+    if (a.role !== "executor" && !a.firstOwner) await assertLimit(ctx, tenantOf(ctx), "users");
     const name = cleanText(a.name, 120, "Имя");
     const { keys, label } = await cleanCategories(ctx, a.categories);
     const categories = a.role === "manager" ? keys : undefined;

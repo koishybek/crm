@@ -11,7 +11,7 @@ import { hitLimit } from "./lib/rateLimit";
 import { env } from "./env";
 import type { ApiKeyInfo } from "../src/data/types";
 import { API_SCOPE_LABEL, isApiScope, LEGACY_SCOPES, scopesOf, type ApiScope } from "../src/data/apiScopes";
-import { hasModule } from "./lib/tenant";
+import { hasModule, requireModule } from "./lib/tenant";
 import { bindTenant, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
 import { lockText } from "../src/data/plans";
 
@@ -68,6 +68,7 @@ export const create = mutation({
   args: { name: v.string(), scopes: v.optional(v.array(v.string())) },
   handler: async (ctx, { name, scopes: wanted }): Promise<{ id: Id<"apiKeys">; key: string; prefix: string }> => {
     const me = await requireRole(ctx, OWNER);
+    await requireModule(ctx, me.tenantId, "api");
     const title = name.trim().slice(0, 60);
     if (!title) throw new ConvexError("Назовите ключ — например, «Сайт» или «Рекламный кабинет»");
     const active = (await ctx.db.query("apiKeys").collect()).filter((k) => !k.revokedAt).length;

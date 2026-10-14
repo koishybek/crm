@@ -76,3 +76,43 @@ export const platformFeeFor = (fee: PlatformFee | undefined, clientPrice: number
   if (!fee || fee.value <= 0) return 0;
   return fee.mode === "fixed" ? Math.round(fee.value) : Math.round((clientPrice * fee.value) / 100);
 };
+
+/** Шаги «С чего начать» для владельца новой компании. */
+export const ONBOARDING_STEPS = ["catalog", "staff", "executors", "channels"] as const;
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+export const ONBOARDING_INFO: Record<OnboardingStep, { label: string; hint: string; link: string }> = {
+  catalog: { label: "Проверьте справочник услуг", hint: "Направления, услуги, цены и доля исполнителя", link: "/catalog" },
+  staff: { label: "Добавьте сотрудников", hint: "Операторы и руководители направлений", link: "/settings" },
+  executors: { label: "Добавьте исполнителей", hint: "Мастера получат свои логины", link: "/executors" },
+  channels: { label: "Подключите каналы заявок", hint: "Форма на сайте, телефония, OLX, мессенджеры", link: "/settings" },
+};
+
+/** Компания вошедшего пользователя — для замков модулей, карточки «Компания» и «С чего начать». */
+export interface TenantInfo {
+  slug: string;
+  name: string;
+  plan: Plan;
+  modules: TenantModule[];
+  status: "active" | "suspended";
+  /** Администратор платформы (PLATFORM_ADMINS) — экран «Платформа». */
+  platformAdmin: boolean;
+  /** Только владельцу: лимиты тарифа и сколько уже занято, комиссия платформы, шаги «С чего начать» (null — скрыты). */
+  owner?: {
+    usage: Record<LimitKind, { used: number; cap: number | null }>;
+    platformFee: PlatformFee | null;
+    onboarding: { step: OnboardingStep; done: boolean }[] | null;
+  };
+}
+
+/** Строка экрана «Платформа». */
+export interface PlatformTenantRow {
+  slug: string;
+  name: string;
+  plan: Plan;
+  modules: TenantModule[];
+  status: "active" | "suspended";
+  createdAt: string;
+  platformFee: PlatformFee | null;
+  usage: Record<LimitKind, number>;
+  owner: string | null;
+}

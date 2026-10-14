@@ -39,7 +39,10 @@ export function termsFor(rates: ExecutorRates | undefined, o: RateOrder): Payout
 
 /** Сколько получит мастер за заказ по своей ставке — для ленты, «Нового заказа» и подбора. */
 export const payoutFor = (rates: ExecutorRates | undefined, o: RateOrder): number => payout({ clientPrice: o.clientPrice, ...termsFor(rates, o) });
-export const margin = (o: Pick<Order, "clientPrice" | "payoutMode" | "payoutValue">) => o.clientPrice - payout(o);
+/** Комиссия платформы с заказа (ТЗ §24.2) — снимок при выполнении (orders.platformFee); до выполнения и без комиссии — 0. */
+export const platformFeeOf = (o: { platformFee?: number }): number => o.platformFee ?? 0;
+/** Маржа = цена клиента − выплата исполнителю − комиссия платформы. */
+export const margin = (o: Pick<Order, "clientPrice" | "payoutMode" | "payoutValue"> & { platformFee?: number }) => o.clientPrice - payout(o) - platformFeeOf(o);
 export const marginPct = (o: Order) => (o.clientPrice > 0 ? Math.round((margin(o) / o.clientPrice) * 1000) / 10 : 0);
 /** Оплачено клиентом: сторнированные платежи не считаются. Возвраты долг не меняют — см. ./money. */
 export const paidAmount = (o: Pick<Order, "payments">) => o.payments.reduce((s, p) => (p.voidedAt ? s : s + p.amount), 0);
@@ -61,7 +64,7 @@ export function revenueOf(o: RevenueLike): number {
   return o.clientPrice - Math.max(0, refunded - overpaid);
 }
 /** Маржа заказа с учётом возвратов: выручка минус выплата исполнителю. */
-export const netMargin = (o: RevenueLike & Pick<Order, "payoutMode" | "payoutValue">) => revenueOf(o) - payout(o);
+export const netMargin = (o: RevenueLike & Pick<Order, "payoutMode" | "payoutValue"> & { platformFee?: number }) => revenueOf(o) - payout(o) - platformFeeOf(o);
 
 export const isActive = (o: Pick<Order, "status">) => ACTIVE_STATUSES.includes(o.status);
 export const isInWork = (o: Pick<Order, "status">) => WORK_STATUSES.includes(o.status);

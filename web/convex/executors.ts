@@ -18,6 +18,7 @@ import { shortName } from "../src/lib/format";
 import { category } from "./schema";
 import { tenantOf, unscopedDb } from "./lib/tenantDb";
 import { perTenant } from "./lib/tenant";
+import { assertLimit } from "./lib/tenant";
 
 const COOPERATION: Record<Doc<"executors">["cooperation"], string> = { freelance: "фрилансер", staff: "в штате" };
 
@@ -170,6 +171,8 @@ export const _insert = internalMutation({
   handler: async (ctx, a) => {
     const phone = normalizeLogin(a.phone);
     if (await ctx.db.query("executors").withIndex("by_phone", (q) => q.eq("phone", phone)).first()) throw new ConvexError("Исполнитель с таким телефоном уже есть");
+    // Лимит тарифа (ТЗ §24.4): исполнителей.
+    await assertLimit(ctx, tenantOf(ctx), "executors");
     // Логин — один на всю платформу.
     if (await unscopedDb(ctx).query("users").withIndex("email", (q) => q.eq("email", phone)).first()) throw new ConvexError("Этот телефон уже используется как логин");
     const skills = await cleanExecutorSkills(ctx, a.skills);

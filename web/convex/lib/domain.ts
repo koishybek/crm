@@ -9,6 +9,9 @@ import { orderTouched } from "./stats";
 import { queuePush } from "./push";
 import type { TgButton } from "./tg";
 import { emitEvent } from "./webhookEvents";
+import { tenantRow } from "./tenant";
+import { tenantOfDoc } from "./tenantDb";
+import { platformFeeFor } from "../../src/data/plans";
 
 export const nowIso = () => new Date().toISOString();
 export const uid = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -114,7 +117,12 @@ export async function notify(
 export async function setStatus(ctx: MutationCtx, o: Doc<"orders">, to: OrderStatus, actor: Actor, text?: string, extra: Partial<Doc<"orders">> = {}) {
   const at = nowIso();
   const patch: Partial<Doc<"orders">> = { status: to, ...extra };
-  if (to === "done") patch.doneAt = at;
+  if (to === "done") {
+    patch.doneAt = at;
+    // Комиссия платформы (ТЗ §24.2) — снимок на момент выполнения: смена условий потом заказ не меняет.
+    const fee = platformFeeFor((await tenantRow(ctx, tenantOfDoc(o)))?.platformFee, extra.clientPrice ?? o.clientPrice);
+    if (fee > 0) patch.platformFee = fee;
+  }
   if (to === "paid") patch.paidAt = at;
   if (to === "closed") patch.closedAt = at;
   await ctx.db.patch(o._id, patch);

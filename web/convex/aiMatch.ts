@@ -28,6 +28,8 @@ import {
 } from "../src/data/aiMatch";
 import { WORK_STATUSES } from "../src/data/catalog";
 import { payoutFor, rankExecutors, type Load } from "../src/data/logic";
+import { actionHasModule } from "./lib/tenant";
+import { lockText } from "../src/data/plans";
 
 const KEY = "aiMatch.enabled";
 /** Запросов к AI на одного сотрудника в час — защита от случайных повторов и расходов. */
@@ -166,6 +168,7 @@ export const recommend = action({
     const prepared: MatchContext = await ctx.runMutation(internal.aiMatch._prepare, { orderId, ai: true });
     if (prepared.candidates.length < 2) return byRules(prepared, prepared.candidates.length ? "Подходит один исполнитель — выбирать не из кого." : undefined);
     if (!prepared.enabled) return byRules(prepared, "AI-подбор выключен владельцем — рекомендация по правилам.");
+    if (!(await actionHasModule(ctx, "ai"))) return byRules(prepared, `${lockText("ai")} — рекомендация по правилам.`);
     if (!canChat()) return byRules(prepared, "AI не подключён — рекомендация по правилам.");
     if (prepared.limited) return byRules(prepared, "Слишком много запросов к AI за час — рекомендация по правилам.");
     const labels = prepared.candidates.map((c) => c.facts.label);

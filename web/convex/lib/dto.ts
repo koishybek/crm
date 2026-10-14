@@ -201,6 +201,7 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   payoutBase: o.payoutBase,
   payoutManual: o.payoutManual,
   campaign: o.campaign,
+  platformFee: o.platformFee,
 });
 
 /** Заказ без выплаты мастеру (значит, и без маржи): сумма, ставка, отметки о выплате. */
@@ -214,6 +215,7 @@ const withoutPayouts = (o: Order): Order => ({
   acceptedPayout: undefined,
   payoutBase: undefined,
   payoutManual: undefined,
+  platformFee: undefined,
 });
 
 /** Заказ без денег: ни цены клиента, ни оплат и возвратов, ни выплаты — только статусы и сроки. */
