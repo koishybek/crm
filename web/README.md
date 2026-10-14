@@ -1,19 +1,20 @@
-# Home Max Service — CRM для сервисного бизнеса
+# Home Max Service — заявки, заказы и мастера для сервисной компании
 
 По ТЗ `../CRM_AI_Service_Platform_TZ.docx`.
 Этап 1 (MVP): заявки → заказы → лента исполнителей → выполнение → оплата → аналитика.
 Этап 2: Telegram-бот (команда и клиенты), AI-разбор звонков и обращений, телефония (АТС), раздел «Звонки».
+Этап 3: единые «Сообщения» (Telegram, WhatsApp, OLX, сайт, API), навыки, журнал действий, отзывы и рейтинг, деньги (оплаты, сторно, возвраты, выплаты мастерам), регламенты и эскалации, кабинет мастера как приложение (PWA), бэкапы, «Состояние системы», защита данных — см. раздел «Этап 3».
 
 - **Фронт:** React 19 + Vite + Tailwind 4, статикой на Cloudflare Workers (`wrangler.jsonc`).
 - **Бэкенд:** Convex (база, функции, файлы, кроны, вебхук Telegram), проект `servicepro` в команде `koishybek-o`.
 - **Вход:** Convex Auth, логин (email или телефон) + пароль. Регистрации нет — аккаунты создаёт владелец.
-- **AI:** `../ai-service` — Worker на Cloudflare Workers AI (Whisper large v3 turbo + Llama 3.3 70B), `https://servicepro-ai.koishybek-o.workers.dev`.
+- **AI:** разбор обращений — OpenAI-совместимый LLM (`LLM_*`, сейчас TokenLayer `gpt-5.6-luna`; шлюз принимает только роль `user`), запасной — `../ai-service`: Worker на Cloudflare Workers AI (Whisper large v3 turbo + Llama 3.3 70B), `https://servicepro-ai.koishybek-o.workers.dev`; расшифровка — Whisper там же.
 - **Название** — константа `APP_NAME` в `src/data/catalog.ts`; профиль бота — `node scripts/setup-telegram.mjs --profile`.
 - **Бот:** @oolx_crm_bot («Home Max Service»), вебхук → `https://fleet-weasel-433.convex.site/telegram`.
 
 | | Адрес |
 |---|---|
-| Рабочий стенд (демо-данные; руководитель — erlan@homemax.kz) | https://servicepro-app.koishybek-o.workers.dev |
+| Рабочий стенд (демо-данные; руководитель — erlan@homemax.kz) | https://homemax-service.koishybek-o.workers.dev (старый адрес https://servicepro-app.koishybek-o.workers.dev показывает то же) |
 | Convex prod | `fleet-weasel-433` |
 | Convex dev | `dependable-sheep-588` (адрес в `.env.local`) |
 | Старый кликабельный прототип (без сервера) | https://servicepro-demo.koishybek-o.workers.dev |
@@ -48,8 +49,12 @@ CONVEX_DEPLOY_KEY='dev:…|…' DEMO_PASSWORD='не-короче-10-символ
 npm run deploy:convex                                   # функции → prod
 VITE_CONVEX_URL=https://fleet-weasel-433.convex.cloud \
 VITE_CONVEX_SITE_URL=https://fleet-weasel-433.convex.site \
-npm run deploy                                          # фронт → servicepro-app (wrangler)
+npx vite build                                          # сборка против prod (в .env.local — адрес dev)
+npx wrangler deploy --name homemax-service              # фронт → основной адрес
+npx wrangler deploy --name servicepro-app               # и на старый
 ```
+
+wrangler в зависимостях проекта нет — `npx wrangler` (или глобальный); «malformed response» при выкладке — просто повторить.
 
 Переменные Convex (`npx convex env set [--prod] …`, ключи — `node scripts/setup-auth-env.mjs [--prod] SITE_URL=…`):
 
@@ -60,6 +65,11 @@ npm run deploy                                          # фронт → service
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME`, `TELEGRAM_WEBHOOK_SECRET` | бот: `node scripts/setup-telegram.mjs [--prod]` берёт токен из `.env.local`, ставит переменные, вебхук и команды |
 | `AI_URL`, `AI_SECRET` | AI-сервис (`../ai-service`, секрет — `wrangler secret put AI_SECRET`) |
 | `AI_PROVIDER=openai`, `AI_API_KEY` [, `AI_BASE_URL`, `AI_STT_MODEL`, `AI_LLM_MODEL`] | вместо нашего сервиса — любой OpenAI-совместимый API |
+| `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT` | основной LLM разбора обращений: `node scripts/setup-llm.mjs` берёт ключ из `.env.local` (`Token_layer_api_key`) и ставит на dev и prod; при сбое — запасной Llama на `AI_URL` |
+| `FILES_SIGNING_KEY` | подпись ссылок на файлы и записи (`GET /files/…`, живут 15 минут); без него ключ создаётся сам и хранится в настройках |
+| `EMAIL_API_KEY`, `EMAIL_FROM` [, `EMAIL_REPLY_TO`, `EMAIL_REDIRECT_TO`] | копии важных уведомлений на email (Resend); без них письма не отправляются, карточка «Email» в настройках объясняет, как подключить |
+| `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` [, `WHATSAPP_GRAPH_VERSION`] | WhatsApp Cloud API; в Meta: Callback URL `https://<deployment>.convex.site/whatsapp/webhook`, подписка `messages` |
+| `OLX_CLIENT_ID`, `OLX_CLIENT_SECRET` | OLX Partner API (developer.olx.kz); адрес возврата `https://<deployment>.convex.site/olx/callback`, нужен и `INTEGRATIONS_KEY` |
 | `INTEGRATIONS_KEY` | ключ шифрования токенов интеграций (OLX) в базе, AES-GCM: 32 случайных байта в base64 — `node scripts/setup-auth-env.mjs [--prod] INTEGRATIONS_KEY=random32`. Без него OLX не подключается («Состояние системы» и карточка OLX показывают причину). Смена ключа = подключить OLX заново |
 | `ALLOW_SEED=1` | заливка демо-данных (`npm run seed`); на боевой базе заказчика не ставить |
 
@@ -89,6 +99,17 @@ npm run deploy                                          # фронт → service
 
   Понимаются и другие названия полей (`caller`, `callee`, `call_id`, `billsec`, `record_url`, …) и form-data. Входящий звонок всплывает карточкой у владельца и операторов (клиент, заказы, «Новая заявка»), пропущенный — уведомление. Запись по ссылке CRM скачивает в своё хранилище и отдаёт AI.
 - Диагностика AI с сервера: `npx convex run aiCheck:run '{"text":"…"}'` (или `storageId` записи).
+
+## Этап 3
+
+- **Сообщения** (`convex/inbox.ts`, `convex/channels/*`, `lib/outbound.ts`): один список переписок Telegram, WhatsApp (Cloud API, окно 24 ч), OLX (Partner API, опрос раз в минуту), формы сайта `/zayavka` (`POST /public/lead`, антиспам) и REST API (`/api/v1/leads`, ключи в «Настройках»). Из переписки — заявка в один клик с AI-черновиком.
+- **Клиенту в его канал** (`convex/clientNotify.ts`): «мастер приедет …», «работа выполнена» со ссылкой на оценку (в Telegram — кнопки ⭐), «заказ отменён». Отзывы — `/otzyv/:token`, рейтинг мастера байесовский (`convex/reviews.ts`).
+- **Навыки и подбор** — одно правило `fitsOrder` (`src/data/logic.ts`): город, направление, навыки, приём заказов, лимит заказов в работе. Автораспределение «AI-подбор» и эскалации по срокам — крон `operations` (`convex/autoAssign.ts`, `convex/escalations.ts`), пороги — «Настройки → Сроки реакции».
+- **Деньги** (`convex/finance.ts`, `convex/payouts.ts`, `lib/money.ts`): оплаты с датой и сторно, возвраты записями, статус идёт за деньгами («Ожидает оплаты» ↔ «Оплачен»), сумма мастера фиксируется при взятии, реестр «Выплаты мастерам», аналитика по датам денег. Деньги на сервере видит только владелец.
+- **Мастер видит только своё**: без цен компании и внутренней переписки, канал «С мастером», файлы — с отметкой «Показать мастеру», контакты клиента — после подтверждения. Все файлы и записи — по подписанным ссылкам (`convex/files.ts`), загрузки проверяются по типу и размеру.
+- **Журнал действий** (`convex/audit.ts`, раздел владельца), **архив заказов**, **долги клиентов**, **экспорт CSV на сервере** (`convex/exports.ts`, защита от формул, ссылка на сутки).
+- **Надёжность**: ночная резервная копия (`convex/backup.ts`, 14 последних), «Состояние системы» по подсистемам, удаление данных клиента по его просьбе (`clients.anonymize`), токены OLX в базе зашифрованы, временные пароли с обязательной сменой, отключённый сотрудник теряет доступ сразу.
+- **Кабинет мастера** (`src/screens/worker/*`, `convex/executorApp.ts`): лента в стиле Яндекс Про, «Мои заказы», «Доход» с выплатами, профиль с приёмом заказов «до …»; ставится на телефон (PWA, `public/manifest.webmanifest`).
 
 ## Устройство
 
