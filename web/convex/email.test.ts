@@ -208,7 +208,7 @@ describe("сбои отправки", () => {
     expect((await s.health())?.okAt).toBeDefined();
   });
 
-  test("без EMAIL_API_KEY и EMAIL_FROM: письма не ставятся, send честно отвечает «не настроено»", async () => {
+  test("ни Resend, ни ящика: письма не ставятся, send честно отвечает «не настроено»", async () => {
     vi.stubEnv("EMAIL_API_KEY", "");
     vi.stubEnv("EMAIL_FROM", "");
     const s = await setup();
@@ -217,9 +217,9 @@ describe("сбои отправки", () => {
     expect(calls).toHaveLength(0);
     expect(await s.t.run((ctx) => ctx.db.query("notifications").withIndex("by_user", (q) => q.eq("userId", s.ids.owner)).collect())).toHaveLength(1);
     const r = await s.t.action(internal.email.send, { to: "owner@test.kz", subject: "Тест", text: "Тест", html: "<p>Тест</p>" });
-    expect(r).toEqual({ status: "skipped", reason: "Email не настроен: не заданы EMAIL_API_KEY, EMAIL_FROM" });
+    expect(r).toEqual({ status: "skipped", reason: "Email не настроен: не заданы EMAIL_SMTP_HOST, EMAIL_SMTP_USER, EMAIL_SMTP_PASS" });
     expect(await s.health()).toBeNull();
-    expect(await s.as(s.ids.owner).query(api.email.settings, {})).toMatchObject({ configured: false, missing: ["EMAIL_API_KEY", "EMAIL_FROM"] });
+    expect(await s.as(s.ids.owner).query(api.email.settings, {})).toMatchObject({ configured: false, transport: null, missing: ["EMAIL_SMTP_HOST", "EMAIL_SMTP_USER", "EMAIL_SMTP_PASS"] });
   });
 });
 

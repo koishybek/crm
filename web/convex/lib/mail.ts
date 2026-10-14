@@ -1,38 +1,83 @@
 // Email-копии важных уведомлений (ТЗ п.18, п.19): правило «кому», адрес, само письмо и постановка в отправку.
-// Здесь — то, что нужно мутациям (notify в lib/domain.ts); отправка через Resend — convex/email.ts.
+// Здесь — то, что нужно мутациям (notify в lib/domain.ts): выбор транспорта (Resend или свой ящик по SMTP) и его
+// настройки из окружения. Отправка — convex/email.ts (Resend) и convex/emailSmtp.ts (SMTP, рантайм Node).
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "./functions";
 import { env } from "../env";
 import { APP_NAME } from "../../src/data/catalog";
 import type { EmailKind } from "../../src/data/notifyRules";
+import { smtpChosen, smtpServer, smtpServerMissing, SMTP_ENV, type Sender, type SmtpServer } from "./smtp";
 
 /** Ключ Resend. RESEND_API_KEY — то же значение под именем из исследования провайдера. */
 const apiKey = (): string | undefined => env("EMAIL_API_KEY") ?? env("RESEND_API_KEY");
 
-export interface EmailConfig {
-  apiKey: string;
-  /** «Home Max Service <noreply@notify.домен>» — домен подтверждён в Resend. */
+/**
+ * Чем отправляем: Resend, если задан его ключ; иначе обычный ящик по SMTP, если задана хоть одна EMAIL_SMTP_*;
+ * иначе — ничем (null).
+ */
+export type EmailTransport = "resend" | "smtp";
+
+export const emailTransport = (): EmailTransport | null => (apiKey() ? "resend" : smtpChosen() ? "smtp" : null);
+
+interface EmailCommon {
+  /** От кого — как в заголовке: «Home Max Service <noreply@notify.домен>». */
   from: string;
   replyTo?: string;
   /** Тестовый деплоймент: все письма — на этот адрес, а не сотрудникам. */
   redirectTo?: string;
 }
 
+export type EmailConfig =
+  | (EmailCommon & { transport: "resend"; apiKey: string })
+  | (EmailCommon & { transport: "smtp"; smtp: SmtpServer; sender: Sender });
+
+/** Итог одной попытки отправки (общий для Resend и SMTP); note — текст для мониторинга, без адресов и писем. */
+export type Outcome = { kind: "sent" } | { kind: "retry"; delayMs: number; note: string } | { kind: "fail"; note: string };
+
+/** Паузы перед повторами (сеть, таймаут, 5xx/4xx, 429): у Resend повтор — с тем же Idempotency-Key, у SMTP — с тем же Message-ID. */
+export const RETRY_MS = [30_000, 120_000, 600_000];
+export const backoff = (attempt: number): number => RETRY_MS[Math.min(Math.max(attempt, 1), RETRY_MS.length) - 1]!;
+
 /** Тестовый адрес задан, но с ошибкой: письма не шлём совсем — иначе они ушли бы настоящим сотрудникам. */
 const badRedirect = (): boolean => !!env("EMAIL_REDIRECT_TO") && !normalizeEmail(env("EMAIL_REDIRECT_TO"));
 
-/** Какие переменные не заданы (или заданы с ошибкой) — имена, без значений. */
+/** «Имя <адрес>» или просто адрес → отправитель; null — адрес с ошибкой. */
+export function parseSender(raw: string): Sender | null {
+  const m = /^\s*(?:"?([^"<>]*?)"?\s*)?<([^<>\s]+)>\s*$/.exec(raw);
+  const address = normalizeEmail(m ? m[2] : raw);
+  if (!address) return null;
+  const name = m?.[1]?.trim();
+  return name ? { address, name } : { address };
+}
+
+/** Отправитель SMTP: EMAIL_FROM, а без него — сам ящик (логин) от имени компании. */
+function smtpSender(): Sender | null {
+  const from = env("EMAIL_FROM");
+  if (from) return parseSender(from);
+  const address = normalizeEmail(env("EMAIL_SMTP_USER"));
+  return address ? { address, name: APP_NAME } : null;
+}
+
+/** Какие переменные не заданы (или заданы с ошибкой) — имена, без значений. Ничего не выбрано — подсказываем SMTP. */
 export function emailMissing(): string[] {
-  return [...(apiKey() ? [] : ["EMAIL_API_KEY"]), ...(env("EMAIL_FROM") ? [] : ["EMAIL_FROM"]), ...(badRedirect() ? ["EMAIL_REDIRECT_TO"] : [])];
+  const redirect = badRedirect() ? ["EMAIL_REDIRECT_TO"] : [];
+  if (emailTransport() === "resend") return [...(env("EMAIL_FROM") ? [] : ["EMAIL_FROM"]), ...redirect];
+  if (emailTransport() === null) return [...SMTP_ENV, ...redirect];
+  const sender = env("EMAIL_FROM") || !env("EMAIL_SMTP_USER") || smtpSender() ? [] : ["EMAIL_FROM (логин ящика — не email, укажите адрес отправителя)"];
+  const badFrom = env("EMAIL_FROM") && !smtpSender() ? ["EMAIL_FROM (адрес с ошибкой)"] : [];
+  return [...smtpServerMissing(), ...sender, ...badFrom, ...redirect];
 }
 
 /** null — email не настроен: письма не ставятся и не отправляются. */
 export function emailConfig(): EmailConfig | null {
-  const key = apiKey();
-  const from = env("EMAIL_FROM");
-  if (!key || !from || badRedirect()) return null;
-  return { apiKey: key, from, replyTo: normalizeEmail(env("EMAIL_REPLY_TO")) ?? undefined, redirectTo: normalizeEmail(env("EMAIL_REDIRECT_TO")) ?? undefined };
+  if (emailMissing().length) return null;
+  const common = { replyTo: normalizeEmail(env("EMAIL_REPLY_TO")) ?? undefined, redirectTo: normalizeEmail(env("EMAIL_REDIRECT_TO")) ?? undefined };
+  if (emailTransport() === "resend") return { transport: "resend", apiKey: apiKey()!, from: env("EMAIL_FROM")!, ...common };
+  const smtp = smtpServer();
+  const sender = smtpSender();
+  if (!smtp || !sender) return null;
+  return { transport: "smtp", smtp, sender, from: sender.name ? `${sender.name} <${sender.address}>` : sender.address, ...common };
 }
 
 /** ASCII-адрес: локальная часть ≤ 64, домен с точкой, всего ≤ 254. Телефон-логин и кириллические адреса — null. */
@@ -114,7 +159,7 @@ export function renderEmail(body: string, link: string | undefined): RenderedEma
   return { subject, text: plain, html };
 }
 
-/** Пауза между письмами одного notify: у Resend не больше 10 запросов в секунду на всю команду. */
+/** Пауза между письмами одного notify: у Resend не больше 10 запросов в секунду на всю команду; почтовым ящикам тоже не нравятся пачки. */
 const SPACING_MS = 150;
 
 /**

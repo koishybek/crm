@@ -635,8 +635,29 @@ export function OlxCard() {
 
 // ── Email ────────────────────────────────────────────────────────────────────
 
+/** Готовые настройки популярных почт: везде порт 465 (SSL) и пароль приложения, а не обычный пароль ящика. */
+const SMTP_PRESETS = [
+  { name: "Gmail", host: "smtp.gmail.com", where: "Аккаунт Google → Безопасность → двухэтапная аутентификация → «Пароли приложений»" },
+  { name: "Яндекс", host: "smtp.yandex.ru", where: "Яндекс ID → Безопасность → «Пароли приложений» → Почта" },
+  { name: "Mail.ru", host: "smtp.mail.ru", where: "Настройки → Безопасность → «Пароли для внешних приложений»" },
+];
+
+/** Подключение обычного ящика (SMTP) по шагам. */
+const SMTP_STEPS = [
+  <>Заведите ящик для писем системы, например <code>noreply@ваш-домен.kz</code> или отдельный Gmail, и выпустите для него пароль приложения (где — в таблице выше).</>,
+  <>
+    Задайте переменные Convex: <code>node scripts/setup-email.mjs [--prod] smtp.gmail.com 465 ящик@gmail.com</code> — пароль скрипт спросит сам и в консоль не
+    напечатает. Или вручную: <code>EMAIL_SMTP_HOST</code>, <code>EMAIL_SMTP_PORT</code> (465 — SSL, 587 — STARTTLS), <code>EMAIL_SMTP_USER</code>, <code>EMAIL_SMTP_PASS</code>.
+  </>,
+  <>
+    По желанию: <code>EMAIL_FROM</code> — имя и адрес отправителя (по умолчанию — сам ящик от имени «{APP_NAME}»; у Gmail и Яндекса адрес должен совпадать с ящиком),{" "}
+    <code>EMAIL_REPLY_TO</code> — ящик офиса для ответов.
+  </>,
+  <>Нажмите «Отправить проверочное письмо» — оно придёт на ваш email из логина.</>,
+];
+
 /** Подключение Resend по шагам — значения потом задаются в окружении Convex. */
-const EMAIL_STEPS = [
+const RESEND_STEPS = [
   <>
     <b>resend.com</b> → Domains → Add domain: поддомен только для писем, например <code>notify.ваш-домен.kz</code>, регион <b>eu-west-1</b>.
   </>,
@@ -656,6 +677,12 @@ const EMAIL_STEPS = [
   </>,
   <>Нажмите «Отправить проверочное письмо» — оно придёт на ваш email из логина.</>,
 ];
+
+function transportLabel(s: EmailSettings): string {
+  if (s.transport === "resend") return "Resend (ключ API)";
+  if (s.transport === "smtp") return s.smtp ? `Почтовый ящик · ${s.smtp.host}:${s.smtp.port}, ${s.smtp.security} · вход ${s.smtp.user}` : "Почтовый ящик (SMTP) — настроен не до конца";
+  return "не выбрана";
+}
 
 function emailBadge(s: EmailSettings, error: ReturnType<typeof lastError>): { tone: "green" | "amber" | "red" | "gray"; label: string } {
   if (!s.configured) return { tone: "gray", label: "Не настроен" };
@@ -684,13 +711,15 @@ export function EmailCard() {
   return (
     <Card icon={Mail} title="Email">
       <p className="text-[13.5px] text-muted">
-        Копии важных уведомлений сотрудникам — через Resend. Каждый включает их сам: меню профиля → «Дублировать на email». В письмах нет данных клиентов — номер, услуга и ссылка в кабинет.
+        Копии важных уведомлений сотрудникам — через обычный почтовый ящик компании (SMTP) или Resend. Каждый включает их сам: меню профиля → «Дублировать на email». В письмах нет данных клиентов — номер, услуга и ссылка в кабинет.
       </p>
       <div className="mt-4 space-y-3">
         <div>
           <Badge tone={badge.tone}>{badge.label}</Badge>
         </div>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[13.5px]">
+          <dt className="text-muted">Отправка</dt>
+          <dd className="min-w-0 break-words text-ink-2">{transportLabel(s)}</dd>
           <dt className="text-muted">Отправитель</dt>
           <dd className="min-w-0 font-medium break-words text-ink">{s.from ?? "не задан"}</dd>
           {s.replyTo && (
@@ -730,11 +759,45 @@ export function EmailCard() {
           </Button>
         )}
         <details className="rounded-[12px] border border-line" open={!s.configured}>
-          <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Как подключить</summary>
+          <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Как подключить почтовый ящик (логин и пароль)</summary>
+          <div className="space-y-3 border-t border-line px-3.5 py-3 text-[13px] text-ink-2">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[420px] text-left">
+                <thead className="text-muted">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">Почта</th>
+                    <th className="py-1 pr-3 font-medium">Сервер и порт</th>
+                    <th className="py-1 font-medium">Где взять пароль приложения</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SMTP_PRESETS.map((p) => (
+                    <tr key={p.name} className="border-t border-line align-top">
+                      <td className="py-1.5 pr-3 font-medium text-ink">{p.name}</td>
+                      <td className="py-1.5 pr-3 whitespace-nowrap">
+                        <code>{p.host}</code> · 465
+                      </td>
+                      <td className="py-1.5">{p.where}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>Свой домен — сервер и порт из настроек хостинга почты. Обычный пароль ящика не подойдёт: Gmail, Яндекс и Mail.ru пускают по SMTP только с паролем приложения.</p>
+            <ol className="list-decimal space-y-1.5 pl-5">
+              {SMTP_STEPS.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        </details>
+        <details className="rounded-[12px] border border-line">
+          <summary className="cursor-pointer list-none px-3.5 py-2.5 text-[13.5px] font-semibold text-ink">Или через Resend (свой домен, ключ API)</summary>
           <ol className="list-decimal space-y-1.5 border-t border-line py-3 pr-3.5 pl-8 text-[13px] text-ink-2">
-            {EMAIL_STEPS.map((step, i) => (
+            {RESEND_STEPS.map((step, i) => (
               <li key={i}>{step}</li>
             ))}
+            <li>Если заданы и ключ Resend, и почтовый ящик, письма идут через Resend.</li>
           </ol>
         </details>
       </div>

@@ -4,7 +4,7 @@ import { useQuery } from "convex/react";
 import { Archive, CloudUpload, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../convex/_generated/api";
-import { OFFSITE_STEPS } from "../data/offsite";
+import { OFFSITE_S3_NOTE, OFFSITE_STEPS } from "../data/offsite";
 import { saveRetention, setOffsiteFiles } from "../data/reliabilityActions";
 import { RETENTION_MAX_DAYS, retentionLabel, retentionProblem } from "../data/retention";
 import { report } from "../data/store";
@@ -40,12 +40,15 @@ export function OffsitePanel() {
               <li key={t}>{t}</li>
             ))}
           </ol>
+          <p className="mt-1.5 text-[12.5px] text-muted">{OFFSITE_S3_NOTE}</p>
           {s.missing.length > 0 && <p className="mt-2 text-[12.5px] break-words text-muted">Не заданы: {s.missing.join(", ")}</p>}
         </>
       ) : (
         <>
           <p className="mt-1 text-[13px] break-words text-ink-2">
-            После каждой ночной копии та же копия уходит в {s.host} (бакет {s.bucket}). Там храним {s.keep} последних.
+            {s.provider === "worker"
+              ? `Cloudflare Worker с Workers KV (${s.host}): после каждой ночной копии та же копия уходит туда. Там храним ${s.keep} последних.`
+              : `S3-хранилище: после каждой ночной копии та же копия уходит в ${s.host} (бакет ${s.bucket}). Там храним ${s.keep} последних.`}
           </p>
           {failing && s.health?.error && (
             <p className="mt-1.5 flex items-start gap-1.5 text-[13px] text-bad-ink">
@@ -72,7 +75,10 @@ export function OffsitePanel() {
                 setBusy(false);
               }}
             />
-            <p className="mt-1 text-[12.5px] text-muted">Каждый файл копируется один раз; удалённые у нас (по сроку хранения или по просьбе клиента) удаляются и там. Объём хранилища растёт — за него платит владелец хранилища.</p>
+            <p className="mt-1 text-[12.5px] text-muted">
+              Каждый файл копируется один раз; удалённые у нас (по сроку хранения или по просьбе клиента) удаляются и там. Объём хранилища растёт — за него платит владелец хранилища.
+              {s.maxFileMb ? ` Файлы больше ${s.maxFileMb} МБ Workers KV не хранит — они пропускаются (видно в отметке выгрузки).` : ""}
+            </p>
           </div>
         </>
       )}

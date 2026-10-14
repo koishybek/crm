@@ -17,10 +17,14 @@ export const EMAIL_KINDS: Record<EmailKind, { label: string; to: string }> = {
   system_alert: { label: "Сбой подсистемы и восстановление", to: "владельцу" },
 };
 
-/** Карточка «Email» владельца. Ключ API сюда не попадает. */
+/** Карточка «Email» владельца. Ключ API и пароль ящика сюда не попадают. */
 export interface EmailSettings {
-  /** Заданы ключ и отправитель — письма уходят. */
+  /** Всё нужное задано — письма уходят. */
   configured: boolean;
+  /** Чем отправляем: Resend (ключ API) или обычный ящик по SMTP; null — ни то ни другое не выбрано. */
+  transport: "resend" | "smtp" | null;
+  /** Почтовый сервер ящика (SMTP). */
+  smtp?: { host: string; port: number; security: "SSL" | "STARTTLS"; user: string };
   /** Переменные окружения Convex, которые не заданы или заданы с ошибкой. */
   missing: string[];
   from?: string;
