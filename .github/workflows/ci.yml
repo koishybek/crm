@@ -1,0 +1,38 @@
+# Проверка каждого пуша и пулл-реквеста: типы (фронт, Convex, скрипты), все тесты, сборка.
+# Секреты не нужны: convex/_generated лежит в репозитории, тесты ходят только в заглушки.
+name: Проверки
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Типы — фронт и Convex
+        run: npm run typecheck
+      - name: Типы — скрипты заливки и восстановления
+        run: |
+          printf '{ "extends": "./tsconfig.json", "compilerOptions": { "noEmit": true, "types": ["node"] }, "include": ["scripts/seed-convex.ts", "scripts/restore.ts"] }' > tsconfig.scripts.json
+          npx tsc -p tsconfig.scripts.json
+      - name: Тесты
+        run: npm test
+      - name: Сборка
+        run: npm run build
