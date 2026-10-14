@@ -12,6 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p convex/tsconfig.json",
     "test": "vitest run",
     "seed": "tsx scripts/seed-convex.ts",
+    "e2e:audit": "node e2e/ui-audit.mjs",
+    "e2e:flow": "node e2e/flow.mjs",
     "deploy:convex": "convex deploy -y --typecheck disable",
     "deploy": "vite build && wrangler deploy"
   },
@@ -36,6 +38,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "convex-test": "^0.0.60",
+    "playwright-core": "1.64.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
