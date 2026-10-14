@@ -14,7 +14,7 @@ import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
 import { offsiteStore } from "./lib/offsiteStore";
-import { actionFor } from "./lib/tenantDb";
+import { actionFor, tenantOf, unscopedDb } from "./lib/tenantDb";
 import { fileSize, type BackupList } from "../src/data/systemHealth";
 
 /** Сколько последних копий храним. */
@@ -128,6 +128,20 @@ async function inventory(ctx: ActionCtx, refs: FileRef[]): Promise<FileEntry[]> 
   });
 }
 
+/** Компания копии: её запись (тариф, модули, «оплачено до») и оплаты подписки — без системных полей. Платформенные таблицы
+ * в копию компании не входят целиком, но своё компания после восстановления должна получить назад. */
+export type CompanySnapshot = { row: Record<string, Value> | null; payments: Record<string, Value>[] };
+const plain = (d: Record<string, Value>): Record<string, Value> => Object.fromEntries(Object.entries(d).filter(([k]) => k !== "_id" && k !== "_creationTime"));
+export const _company = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<CompanySnapshot> => {
+    const slug = tenantOf(ctx);
+    const row = await unscopedDb(ctx).query("tenants").withIndex("by_slug", (q) => q.eq("slug", slug)).unique();
+    const payments = await unscopedDb(ctx).query("subscriptionPayments").withIndex("t_by_paid", (q) => q.eq("tenantId", slug)).collect();
+    return { row: row ? plain(row as unknown as Record<string, Value>) : null, payments: payments.map((p) => plain(p as unknown as Record<string, Value>)) };
+  },
+});
+
 export const _page = internalQuery({
   args: { table: v.string(), cursor: v.union(v.string(), v.null()) },
   handler: async (ctx, { table, cursor }): Promise<Page> => {
@@ -175,7 +189,8 @@ async function backupTenant(ctx: ActionCtx, by: Id<"users"> | undefined): Promis
       docs += count;
     }
     // Опись файлов — после таблиц: сами файлы в JSON не входят.
-    parts.push(utf8.encode(`},"files":${JSON.stringify(await inventory(ctx, refs))}}`));
+    const company: CompanySnapshot = await ctx.runQuery(internal.backup._company, {});
+    parts.push(utf8.encode(`},"company":${JSON.stringify(company)},"files":${JSON.stringify(await inventory(ctx, refs))}}`));
     const blob = new Blob(parts, { type: "application/json" });
     parts.length = 0;
     fileId = await ctx.storage.store(blob);

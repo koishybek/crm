@@ -91,6 +91,10 @@ async function main(): Promise<void> {
   const r = await writeRestore(caller, data, s, (line) => console.log(line));
   if (r.deferred) console.log(`  взаимных ссылок дописано: ${r.deferred}`);
   console.log(`  настройки: ${r.settings}, подключения: ${r.integrations} (подключить заново)`);
+  if (data.company) {
+    const c = await call(internal.restore.company, { row: data.company.row, payments: data.company.payments });
+    console.log(`  компания: ${c.tenant === "created" ? "создана" : c.tenant === "updated" ? "обновлена" : "нет в копии"}, оплат подписки: ${c.payments}`);
+  } else console.log("  компании в копии нет (копия до 14.10.2026) — тариф и «оплачено до» задайте на экране «Платформа»");
 
   if (ownerLogin) {
     await call(internal.restore.ownerLogin, { login: ownerLogin, password: ownerPassword });

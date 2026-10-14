@@ -12,6 +12,8 @@ export interface BackupData {
   version: number;
   createdAt: string;
   tables: Record<string, BackupDoc[]>;
+  /** Запись компании и её оплаты подписки (копии с 14.10.2026); в старых копиях — нет. */
+  company?: { row: Record<string, unknown> | null; payments: Record<string, unknown>[] };
   /** Опись файлов (версия 2+); у версии 1 собирается по документам. */
   files: FileEntry[];
 }
@@ -40,7 +42,8 @@ export function parseBackup(raw: unknown): BackupData {
     tables[name] = docs as BackupDoc[];
   }
   const files = Array.isArray(raw.files) ? (raw.files as FileEntry[]) : Object.entries(tables).flatMap(([t, docs]) => docs.flatMap((d) => fileRefs(t, d)));
-  return { version, createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "", tables, files };
+  const company = isObj(raw.company) && Array.isArray(raw.company.payments) ? { row: isObj(raw.company.row) ? raw.company.row : null, payments: raw.company.payments.filter(isObj) } : undefined;
+  return { version, createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "", tables, files, company };
 }
 
 /** Все id документов копии → таблица. */

@@ -11,6 +11,7 @@ import { audit } from "./lib/audit";
 import { normalizeLogin } from "./lib/login";
 import { MERGED_TABLES, NOT_RESTORED } from "./lib/restorePlan";
 import { assertSeedAllowed } from "./seed";
+import { unscopedDb } from "./lib/tenantDb";
 import { createLogin } from "./users";
 import { passwordProblem } from "../src/data/passwordRules";
 
@@ -145,5 +146,33 @@ export const ownerLogin = internalAction({
     if (!userId) throw new ConvexError("Владельца с таким логином в восстановленных данных нет");
     await createLogin(ctx, login!, a.password);
     await ctx.runMutation(internal.restore._mustChange, { userId });
+  },
+});
+
+/** Компания из копии: запись (тариф, модули, «оплачено до») — по slug, обновляется или создаётся; оплаты подписки — без дублей. */
+export const company = internalMutation({
+  args: { row: v.any(), payments: v.array(v.any()) },
+  handler: async (ctx, a): Promise<{ tenant: "created" | "updated" | "none"; payments: number }> => {
+    await assertSeedAllowed();
+    const db = unscopedDb(ctx);
+    let tenant: "created" | "updated" | "none" = "none";
+    const row = a.row as (WithoutSystemFields<Doc<"tenants">> & { ownerUserId?: unknown }) | null;
+    if (row && typeof row.slug === "string") {
+      // Владелец в копии — id старой базы: после восстановления у него другой id, ссылку не переносим.
+      const { ownerUserId: _owner, ...fields } = row;
+      const existing = await db.query("tenants").withIndex("by_slug", (q) => q.eq("slug", row.slug)).unique();
+      if (existing) await db.patch(existing._id, fields);
+      else await db.insert("tenants", fields as WithoutSystemFields<Doc<"tenants">>);
+      tenant = existing ? "updated" : "created";
+    }
+    let added = 0;
+    for (const raw of a.payments as WithoutSystemFields<Doc<"subscriptionPayments">>[]) {
+      const same = (await db.query("subscriptionPayments").withIndex("t_by_paid", (q) => q.eq("tenantId", raw.tenantId).eq("paidAt", raw.paidAt)).collect()).some((x) => x.amount === raw.amount);
+      if (same) continue;
+      const { by: _by, ...fields } = raw as WithoutSystemFields<Doc<"subscriptionPayments">> & { by?: unknown };
+      await db.insert("subscriptionPayments", fields as WithoutSystemFields<Doc<"subscriptionPayments">>);
+      added++;
+    }
+    return { tenant, payments: added };
   },
 });
