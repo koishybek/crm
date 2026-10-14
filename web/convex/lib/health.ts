@@ -1,7 +1,7 @@
 // Состояние подсистем для владельца (ТЗ п.20 «мониторинг»): когда подсистема последний раз отработала и последняя ошибка.
 // Из мутаций — markOk/markError напрямую; из actions — через internal.health._mark.
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { alertDown, alertRecovered } from "./alerts";
 import { nowIso } from "./domain";
 

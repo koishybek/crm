@@ -11,7 +11,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 const CODE = "b".repeat(24);
 const WEBHOOK_SECRET = "tg-webhook-secret";

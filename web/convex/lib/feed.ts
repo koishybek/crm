@@ -1,7 +1,7 @@
 // Заказ снова в ленте (ТЗ п.18.1, E8): мастер снят с заказа, он узнаёт об этом, остальные подходящие мастера —
 // что заказ снова свободен. Один путь для «не подтвердил назначение вовремя» — у автораспределения и у эскалации.
 import type { Doc } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import type { Actor } from "../../src/data/types";
 import { announceOrder } from "../worker";
 import { executorUser, notify, setStatus } from "./domain";

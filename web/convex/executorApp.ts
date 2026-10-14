@@ -4,7 +4,7 @@
 // заказ собирает toWorkerOrder (lib/dto.ts), переписка — только канал «С мастером», файлы — только видимые мастеру.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { query, type QueryCtx } from "./_generated/server";
+import { query, type QueryCtx } from "./lib/functions";
 import { EXECUTOR, requireRole } from "./lib/access";
 import { executorFiles, executorThread, toWorkerOrder } from "./lib/dto";
 import { fileSigner, type FileSigner } from "./lib/files";

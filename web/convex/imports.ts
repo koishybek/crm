@@ -1,7 +1,7 @@
 // Импорт из Excel: таблицу разбирает браузер, сюда приходят готовые строки.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalMutation, mutation } from "./_generated/server";
+import { action, internalMutation, mutation } from "./lib/functions";
 import { currentUser, requirePerm, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { insertClient } from "./clients";

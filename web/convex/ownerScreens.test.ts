@@ -15,7 +15,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const SITE = "https://test.convex.site";
 const DAY = 86400_000;
 const iso = (t: number) => new Date(t).toISOString();

@@ -4,7 +4,7 @@
 // Новый канал = новый адаптер в ADAPTERS, остальной код не меняется.
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { ActionCtx, MutationCtx, QueryCtx } from "../_generated/server";
+import type { ActionCtx, MutationCtx, QueryCtx } from "./functions";
 import type { Channel } from "../../src/data/types";
 import { canSend as whatsappCanSend, sendWhatsApp } from "../channels/whatsapp";
 import { env } from "../env";

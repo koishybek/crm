@@ -3,7 +3,7 @@
 // когда подсистема снова отработала — одно сообщение «восстановилось». Вызовы — из markOk/markError (lib/health.ts)
 // и крона проверки (convex/alerts.ts).
 import type { Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { SUBSYSTEMS } from "../../src/data/systemHealth";
 import { audit } from "./audit";
 import { notify, nowIso, staffRoster } from "./domain";

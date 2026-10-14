@@ -2,7 +2,7 @@
 // окно сдвигается, и старые сдачи и отказы должны из него уходить, даже если у мастера не было событий.
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { refreshStats } from "./lib/stats90";
 
 /** Мастеров за один запуск: каждому — несколько чтений по индексу его заказов. */

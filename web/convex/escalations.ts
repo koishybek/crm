@@ -10,7 +10,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalAction, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalAction, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { log, notify } from "./lib/domain";
@@ -26,6 +26,8 @@ import { LEAD_ORIGIN } from "../src/data/leadRules";
 import type { Actor } from "../src/data/types";
 import { durationLabel } from "../src/data/workerTime";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
+import { perTenant } from "./lib/tenant";
+import { actionFor } from "./lib/tenantDb";
 
 const KEY = "escalations";
 const SYSTEM: Actor = { type: "system" };
@@ -291,7 +293,7 @@ export interface PassResult {
 /** Все эскалации за один проход. Тесты зовут его напрямую; крон — через run. */
 export const _pass = internalMutation({
   args: {},
-  handler: async (ctx): Promise<PassResult> => {
+  handler: async (cronCtx): Promise<PassResult> => perTenant(cronCtx, internal.escalations._pass, { feed: 0, unconfirmed: 0, returned: 0, overdue: 0, leads: 0, callbacks: 0 }, async (ctx) => {
     const now = Date.now();
     const p: Pass = { now, sla: await readSla(ctx), auto: await readAutoAssign(ctx), label: (await loadCatalog(ctx)).label };
     const feed = await feedPass(ctx, p);
@@ -308,7 +310,7 @@ export const _pass = internalMutation({
     const total = feed + unconfirmed.escalated + overdue + leads + callbacks;
     await markOk(ctx, "escalations", total ? `Эскалаций за проход: ${total}` : "Проверено, эскалаций нет");
     return res;
-  },
+  }),
 });
 
 const errorText = (e: unknown): string => (e instanceof ConvexError ? String(e.data) : "внутренняя ошибка");
@@ -321,18 +323,22 @@ export const run = internalAction({
   args: {},
   handler: async (ctx): Promise<{ failed: string[] }> => {
     const failed: string[] = [];
-    const steps = [
-      ["Автораспределение", () => ctx.runMutation(internal.autoAssign.run, {})],
-      ["Возвращение мастеров на смену", () => ctx.runMutation(internal.executors._restoreShifts, {})],
-      ["Эскалации", () => ctx.runMutation(internal.escalations._pass, {})],
-    ] as const;
-    for (const [name, step] of steps) {
-      try {
-        await step();
-      } catch (e) {
-        console.error(`escalations.run: шаг «${name}» не выполнен: ${e instanceof Error ? e.name : "ошибка"}`);
-        failed.push(name);
-        await ctx.runMutation(internal.health._mark, { key: "escalations", ok: false, note: `${name}: ${errorText(e)}` });
+    // Каждая компания — своими транзакциями (ТЗ §2.5): сбой у одной не мешает другим.
+    for (const tenantId of await ctx.runQuery(internal.tenants._active, {})) {
+      const tctx = actionFor(ctx, tenantId);
+      const steps = [
+        ["Автораспределение", () => tctx.runMutation(internal.autoAssign.run, {})],
+        ["Возвращение мастеров на смену", () => tctx.runMutation(internal.executors._restoreShifts, {})],
+        ["Эскалации", () => tctx.runMutation(internal.escalations._pass, {})],
+      ] as const;
+      for (const [name, step] of steps) {
+        try {
+          await step();
+        } catch (e) {
+          console.error(`escalations.run: шаг «${name}» не выполнен: ${e instanceof Error ? e.name : "ошибка"}`);
+          failed.push(name);
+          await tctx.runMutation(internal.health._mark, { key: "escalations", ok: false, note: `${name}: ${errorText(e)}` });
+        }
       }
     }
     return { failed };

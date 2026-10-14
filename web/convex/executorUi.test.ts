@@ -211,18 +211,18 @@ describe("отказы сервера понятны экрану мастера
     const t = convexTest(schema, modules);
     const at = new Date().toISOString();
     const ids = await t.run(async (ctx) => {
-      const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t", active: true });
+      const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-komfort", active: true });
       const mk = async (phone: string, available: boolean) => {
-        const ex = await ctx.db.insert("executors", { tenantId: "t", name: `Мастер ${phone}`, phone, city: "Алматы", categories: ["ac"], skills: [], available, rating: 5, reviews: 0, cooperation: "freelance", joinedAt: at });
-        const user = await ctx.db.insert("users", { name: `Мастер ${phone}`, email: phone, phone, role: "executor", executorId: ex, tenantId: "t", active: true });
+        const ex = await ctx.db.insert("executors", { tenantId: "t-komfort", name: `Мастер ${phone}`, phone, city: "Алматы", categories: ["ac"], skills: [], available, rating: 5, reviews: 0, cooperation: "freelance", joinedAt: at });
+        const user = await ctx.db.insert("users", { name: `Мастер ${phone}`, email: phone, phone, role: "executor", executorId: ex, tenantId: "t-komfort", active: true });
         return { ex, user };
       };
       const a = await mk("77000000011", true);
       const b = await mk("77000000012", true);
       const off = await mk("77000000013", false);
-      const client = await ctx.db.insert("clients", { tenantId: "t", name: "Клиент", kind: "person", phone: "77070000000", city: "Алматы", source: "olx", tags: [], createdAt: at, ordersCount: 0, activeCount: 0, lastActivityAt: at });
+      const client = await ctx.db.insert("clients", { tenantId: "t-komfort", name: "Клиент", kind: "person", phone: "77070000000", city: "Алматы", source: "olx", tags: [], createdAt: at, ordersCount: 0, activeCount: 0, lastActivityAt: at });
       const base = {
-        tenantId: "t",
+        tenantId: "t-komfort",
         clientId: client,
         clientName: "Клиент",
         clientPhone: "77070000000",

@@ -2,7 +2,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, type QueryCtx } from "./lib/functions";
 import { can, inScope, scopeOf, type Me } from "./lib/access";
 import { canSeeCompanyMoney } from "../src/data/permissions";
 import { almatyDayStart, esc, whenAlmaty } from "./lib/tg";
@@ -12,6 +12,7 @@ import { ACTIVE_STATUSES, APP_NAME, FINISHED_STATUSES, SOURCES } from "../src/da
 import { sums } from "../src/data/analytics";
 import { contactsOpen, paidAmount, payout } from "../src/data/logic";
 import { money } from "../src/lib/format";
+import { perTenant } from "./lib/tenant";
 
 async function activeOrders(ctx: QueryCtx) {
   const out: Doc<"orders">[] = [];
@@ -69,7 +70,7 @@ function staffText(me: Me, n: Awaited<ReturnType<typeof numbers>>, morning: bool
 /** Крон 9:00 по Алматы: сотрудникам — сводка, мастерам — заказы на сегодня. */
 export const run = internalMutation({
   args: {},
-  handler: async (ctx) => {
+  handler: async (cronCtx): Promise<void> => perTenant(cronCtx, internal.digest.run, undefined, async (ctx) => {
     const now = Date.now();
     const appUrl = env("APP_URL");
     const users = (await ctx.db.query("users").collect()).filter((u) => u.telegramChatId && u.active !== false && u.role);
@@ -91,7 +92,7 @@ export const run = internalMutation({
       const n = await numbers(ctx, u, now);
       await ctx.scheduler.runAfter(0, internal.telegram.send, { chatId: u.telegramChatId!, text: "", html: staffText(u, n, true), buttons: appUrl ? [[{ text: "Открыть кабинет", url: appUrl }]] : undefined });
     }
-  },
+  }),
 });
 
 /** /orders от сотрудника — сводка «сейчас». */

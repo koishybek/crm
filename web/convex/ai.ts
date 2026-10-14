@@ -8,7 +8,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalAction, query, type ActionCtx } from "./_generated/server";
+import { action, internalAction, query, type ActionCtx } from "./lib/functions";
 import { currentUser } from "./lib/access";
 import { fetchPublicFile } from "./lib/safeFetch";
 import { env } from "./env";

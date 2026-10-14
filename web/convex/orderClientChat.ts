@@ -5,7 +5,7 @@
 // диалогов клиента за период заказа. Только владелец и операторы: руководителю направления и мастеру переписка не видна.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { currentUser, requireRole, STAFF, type Me } from "./lib/access";
 import { log, nowIso, userActor } from "./lib/domain";
 import { fileSigner } from "./lib/files";

@@ -1,7 +1,7 @@
 // Наружу — только явные DTO в форме типов фронта (src/data/types.ts), никогда сырые документы.
 // Ссылки на файлы — подписанные и короткоживущие (lib/files.ts → fileSigner).
 import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { ORDER_STATUS } from "../../src/data/catalog";
 import { payout } from "../../src/data/logic";
 import { can, permissionsOf, type PermissionHolder } from "../../src/data/permissions";

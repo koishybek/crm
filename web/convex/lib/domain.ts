@@ -1,7 +1,7 @@
 // Общие шаги мутаций: нумерация, журнал, уведомления (в базе + Telegram), счётчики клиента.
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "./functions";
 import { ACTIVE_STATUSES, ORDER_STATUS } from "../../src/data/catalog";
 import type { Actor, HistoryKind, OrderStatus } from "../../src/data/types";
 import { queueEmail, type EmailEvent } from "./mail";
@@ -10,7 +10,6 @@ import { queuePush } from "./push";
 import type { TgButton } from "./tg";
 import { emitEvent } from "./webhookEvents";
 
-export const TENANT = "t-komfort";
 export const nowIso = () => new Date().toISOString();
 export const uid = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 export const userActor = (id: Id<"users">): Actor => ({ type: "user", id });

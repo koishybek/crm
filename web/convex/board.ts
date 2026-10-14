@@ -1,6 +1,6 @@
 // «Главная» сейчас (ТЗ п.5, §26.6): заказы в работе, просрочки, ждущие оплаты и последние заявки — то, что живёт минутами.
 // Показатели за период «Главная» берёт из предрасчёта (convex/stats.ts), поэтому здесь нет среза заказов за 90 дней.
-import { query } from "./_generated/server";
+import { query } from "./lib/functions";
 import type { Doc } from "./_generated/dataModel";
 import { loadCatalog } from "./catalog";
 import { inScope, requireRole, scopeOf, TEAM } from "./lib/access";

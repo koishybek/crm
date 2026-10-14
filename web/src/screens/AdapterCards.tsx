@@ -256,7 +256,7 @@ function PaymentsCard() {
           </Button>
         )}
       </div>
-      {s.siteUrl && <div className="mt-3"><CopyRow label="Адрес для уведомлений об оплате" value={`${s.siteUrl}${payWebhookPath(provider)}`} /></div>}
+      {s.siteUrl && <div className="mt-3"><CopyRow label="Адрес для уведомлений об оплате" value={`${s.siteUrl}${payWebhookPath(provider)}${s.company ? `?c=${encodeURIComponent(s.company)}` : ""}`} /></div>}
       <div className="mt-3">
         <Steps steps={info.steps} docs={info.docs} />
       </div>

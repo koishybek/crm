@@ -1,10 +1,10 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./lib/functions";
 import { assertScope, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
 import { almatyStamp, audit, ChangeLog, quote } from "./lib/audit";
 import { assertNotErased, cleanPhone, insertClient } from "./clients";
-import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
+import { log, nextNumber, notify, nowIso, refreshClient, staffIds, userActor } from "./lib/domain";
 import { orderFor, toLead } from "./lib/dto";
 import { districtFor } from "./lib/districts";
 import { queueStats } from "./lib/stats";
@@ -15,6 +15,7 @@ import { aiSummary, source, urgency } from "./schema";
 import { LEAD_STATUS, SOURCES, URGENCY } from "../src/data/catalog";
 import { deadlineByUrgency } from "../src/data/leadRules";
 import { money, shortName } from "../src/lib/format";
+import { tenantOf } from "./lib/tenantDb";
 
 const CAP = 2000;
 /** Границы полей заявки: описание — до пары страниц, комментарий — до страницы. */
@@ -130,7 +131,7 @@ export const create = mutation({
     const at = nowIso();
     const number = await nextNumber(ctx);
     const id = await ctx.db.insert("leads", {
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       number,
       clientId,
       clientName: c.name,
@@ -351,7 +352,7 @@ export const convert = mutation({
       due = new Date(t).toISOString();
     }
     const orderId = await ctx.db.insert("orders", {
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       number: l.number,
       clientId: l.clientId,
       clientName: c.name,

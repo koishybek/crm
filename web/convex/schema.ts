@@ -2,6 +2,7 @@ import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { PERMISSIONS } from "../src/data/permissions";
+import { MODULES } from "../src/data/plans";
 
 // Даты — ISO-строки в UTC: сортируются как строки и совпадают с типами фронта (src/data/types.ts).
 
@@ -171,6 +172,12 @@ export const statCell = {
   op: v.array(v.object({ id: v.string(), c: statCounts, waits: v.array(v.number()) })),
 };
 
+/** Тарифы и модули компании (src/data/plans.ts). */
+export const plan = v.union(v.literal("free"), v.literal("standard"), v.literal("pro"));
+export const tenantModule = v.union(...MODULES.map((m) => v.literal(m)));
+/** Комиссия платформы (ТЗ §24.2): процент от цены клиента или фиксированная сумма с выполненного заказа. */
+export const platformFee = v.object({ mode: v.union(v.literal("percent"), v.literal("fixed")), value: v.number() });
+
 /** Провайдеры онлайн-оплаты (ТЗ п.19.7): Freedom Pay и CloudPayments — по API, Kaspi — ссылка магазина без уведомлений. */
 export const payProvider = v.union(v.literal("freedompay"), v.literal("cloudpayments"), v.literal("kaspi"));
 /** Статусы счёта на оплату — переходы в src/data/payIntents.ts. */
@@ -204,6 +211,26 @@ export const documentData = v.object({
 
 export default defineSchema({
   ...authTables,
+
+  /**
+   * Компании платформы (ТЗ §2.5, §24): slug — неизменный id компании, он же tenantId во всех таблицах.
+   * Тариф и модули задаёт администратор платформы; комиссия платформы — с каждого выполненного заказа (§24.2).
+   */
+  tenants: defineTable({
+    slug: v.string(),
+    name: v.string(),
+    plan,
+    modules: v.array(tenantModule),
+    status: v.union(v.literal("active"), v.literal("suspended")),
+    createdAt: v.string(),
+    ownerUserId: v.optional(v.id("users")),
+    platformFee: v.optional(platformFee),
+    city: v.optional(v.string()),
+    /** Перенос данных до SaaS в компанию закончен (convex/tenants.ts migrate) — документы без tenantId больше не ожидаются. */
+    migratedAt: v.optional(v.string()),
+    /** Владелец скрыл список «С чего начать». */
+    onboardingDoneAt: v.optional(v.string()),
+  }).index("by_slug", ["slug"]),
 
   /** Сотрудники и исполнители. email — логин (email или телефон цифрами), пароль хранит Convex Auth. */
   users: defineTable({
@@ -268,7 +295,10 @@ export default defineSchema({
     refusals: v.optional(v.array(v.string())),
     /** Заказов в работе сейчас (назначен … ждёт клиента) — счётчик для подбора без перебора заказов (lib/stats.syncLoad). */
     activeCount: v.optional(v.number()),
-  }).index("by_phone", ["phone"]),
+  }).index("by_phone", ["phone"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_phone", ["tenantId", "phone"]),
 
   clients: defineTable({
     tenantId: v.string(),
@@ -293,7 +323,11 @@ export default defineSchema({
   })
     .index("by_phone", ["phone"])
     .index("by_activity", ["lastActivityAt"])
-    .searchIndex("search_name", { searchField: "name" }),
+    .searchIndex("search_name", { searchField: "name", filterFields: ["tenantId"] })
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_phone", ["tenantId", "phone"])
+    .index("t_by_activity", ["tenantId", "lastActivityAt"]),
 
   leads: defineTable({
     tenantId: v.string(),
@@ -333,7 +367,13 @@ export default defineSchema({
     .index("by_created", ["createdAt"])
     .index("by_status", ["status", "createdAt"])
     .index("by_client", ["clientId", "createdAt"])
-    .index("by_number", ["number"]),
+    .index("by_number", ["number"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_created", ["tenantId", "createdAt"])
+    .index("t_by_status", ["tenantId", "status", "createdAt"])
+    .index("t_by_client", ["tenantId", "clientId", "createdAt"])
+    .index("t_by_number", ["tenantId", "number"]),
 
   orders: defineTable({
     tenantId: v.string(),
@@ -394,6 +434,8 @@ export default defineSchema({
     campaign: v.optional(v.string()),
     /** Чей счётчик activeCount сейчас включает этот заказ — чтобы при смене мастера пересчитать и прежнего. */
     loadExecutorId: v.optional(v.id("executors")),
+    /** Комиссия платформы с этого заказа (ТЗ §24.2) — снимок в момент выполнения; входит в маржу как расход. */
+    platformFee: v.optional(v.number()),
   })
     .index("by_status", ["status", "deadline"])
     .index("by_executor", ["executorId", "status"])
@@ -403,9 +445,20 @@ export default defineSchema({
     .index("by_number", ["number"])
     // Долг исполнителям: невыплаченные выполненные заказы без перебора всей истории.
     .index("by_payout", ["payoutPaid", "doneAt"])
-    .index("by_money", ["moneyAt"]),
+    .index("by_money", ["moneyAt"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_status", ["tenantId", "status", "deadline"])
+    .index("t_by_executor", ["tenantId", "executorId", "status"])
+    .index("t_by_client", ["tenantId", "clientId", "createdAt"])
+    .index("t_by_created", ["tenantId", "createdAt"])
+    .index("t_by_done", ["tenantId", "doneAt"])
+    .index("t_by_number", ["tenantId", "number"])
+    .index("t_by_payout", ["tenantId", "payoutPaid", "doneAt"])
+    .index("t_by_money", ["tenantId", "moneyAt"]),
 
   messages: defineTable({
+    tenantId: v.optional(v.string()),
     orderId: v.id("orders"),
     author: actor,
     channel: messageChannel,
@@ -415,6 +468,7 @@ export default defineSchema({
   }).index("by_order", ["orderId", "at"]),
 
   history: defineTable({
+    tenantId: v.optional(v.string()),
     orderId: v.id("orders"),
     kind: historyKind,
     text: v.string(),
@@ -426,6 +480,7 @@ export default defineSchema({
   }).index("by_order", ["orderId", "at"]),
 
   interactions: defineTable({
+    tenantId: v.optional(v.string()),
     clientId: v.id("clients"),
     kind: v.union(v.literal("lead"), v.literal("call"), v.literal("message")),
     channel: source,
@@ -436,6 +491,7 @@ export default defineSchema({
   }).index("by_client", ["clientId", "at"]),
 
   clientNotes: defineTable({
+    tenantId: v.optional(v.string()),
     clientId: v.id("clients"),
     authorId: v.id("users"),
     text: v.string(),
@@ -443,6 +499,7 @@ export default defineSchema({
   }).index("by_client", ["clientId", "at"]),
 
   notifications: defineTable({
+    tenantId: v.optional(v.string()),
     userId: v.id("users"),
     text: v.string(),
     link: v.optional(v.string()),
@@ -455,6 +512,7 @@ export default defineSchema({
 
   /** Справочник: направления и услуги с типичными ценами (владелец правит в «Настройках»). */
   categories: defineTable({
+    tenantId: v.optional(v.string()),
     key: v.string(),
     label: v.string(),
     tone: v.string(),
@@ -464,6 +522,7 @@ export default defineSchema({
     skills: v.optional(v.array(v.string())),
   }).index("by_key", ["key"]),
   services: defineTable({
+    tenantId: v.optional(v.string()),
     key: v.string(),
     category: v.string(),
     label: v.string(),
@@ -506,13 +565,22 @@ export default defineSchema({
     .index("by_client", ["clientId", "startedAt"])
     // Звонки по номеру — при удалении данных клиента по его запросу (ТЗ п.26): звонок мог прийти раньше, чем клиента завели.
     .index("by_from", ["from"])
-    .index("by_to", ["to"]),
+    .index("by_to", ["to"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_started", ["tenantId", "startedAt"])
+    .index("t_by_external", ["tenantId", "externalId"])
+    .index("t_by_status", ["tenantId", "status", "startedAt"])
+    .index("t_by_client", ["tenantId", "clientId", "startedAt"])
+    .index("t_by_from", ["tenantId", "from"])
+    .index("t_by_to", ["tenantId", "to"]),
 
   /** Настройки компании ключ → значение (секрет вебхука АТС и т.п.). */
-  settings: defineTable({ key: v.string(), value: v.string() }).index("by_key", ["key"]),
+  settings: defineTable({ tenantId: v.optional(v.string()), key: v.string(), value: v.string() }).index("by_key", ["key"]),
 
   /** Диалоги бота с клиентами (не сотрудниками): черновик заявки до получения телефона. */
   botChats: defineTable({
+    tenantId: v.optional(v.string()),
     chatId: v.string(),
     state: v.union(v.literal("idle"), v.literal("awaiting_phone")),
     draft: v.optional(v.string()),
@@ -522,7 +590,7 @@ export default defineSchema({
   }).index("by_chat", ["chatId"]),
 
   /** Сквозная нумерация заявок и заказов. */
-  counters: defineTable({ name: v.string(), value: v.number() }).index("by_name", ["name"]),
+  counters: defineTable({ tenantId: v.optional(v.string()), name: v.string(), value: v.number() }).index("by_name", ["name"]),
 
   /**
    * Журнал ключевых действий (ТЗ п.20, п.26, п.27). Пишется в той же мутации, что и действие.
@@ -542,7 +610,12 @@ export default defineSchema({
   })
     .index("by_at", ["at"])
     .index("by_entity", ["entity", "entityId", "at"])
-    .index("by_actor", ["actorId", "at"]),
+    .index("by_actor", ["actorId", "at"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_at", ["tenantId", "at"])
+    .index("t_by_entity", ["tenantId", "entity", "entityId", "at"])
+    .index("t_by_actor", ["tenantId", "actorId", "at"]),
 
   /** Единый чат с клиентами: один диалог на собеседника в канале (чат Telegram, номер WhatsApp, тред OLX, форма сайта). */
   conversations: defineTable({
@@ -576,9 +649,18 @@ export default defineSchema({
     .index("by_last", ["lastMessageAt"])
     .index("by_status_last", ["status", "lastMessageAt"])
     .index("by_client", ["clientId", "lastMessageAt"])
-    .index("by_lead", ["leadId"]),
+    .index("by_lead", ["leadId"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_channel_external", ["tenantId", "channel", "externalId"])
+    .index("t_by_wa_user", ["tenantId", "waUserId"])
+    .index("t_by_last", ["tenantId", "lastMessageAt"])
+    .index("t_by_status_last", ["tenantId", "status", "lastMessageAt"])
+    .index("t_by_client", ["tenantId", "clientId", "lastMessageAt"])
+    .index("t_by_lead", ["tenantId", "leadId"]),
 
   conversationMessages: defineTable({
+    tenantId: v.optional(v.string()),
     conversationId: v.id("conversations"),
     direction: v.union(v.literal("in"), v.literal("out")),
     kind: messageKind,
@@ -597,6 +679,7 @@ export default defineSchema({
 
   /** Автоматические сообщения клиенту (clientNotify.ts): ключ события («order:<id>:done») — чтобы оно не ушло второй раз. */
   clientNotices: defineTable({
+    tenantId: v.optional(v.string()),
     key: v.string(),
     clientId: v.id("clients"),
     conversationId: v.id("conversations"),
@@ -606,6 +689,7 @@ export default defineSchema({
 
   /** Подключённые внешние аккаунты (OLX, WhatsApp, email). Токены отдаются только внутренним функциям. */
   integrations: defineTable({
+    tenantId: v.optional(v.string()),
     provider: v.union(v.literal("olx"), v.literal("whatsapp"), v.literal("email")),
     status: v.union(v.literal("disconnected"), v.literal("connected"), v.literal("error")),
     accountId: v.optional(v.string()),
@@ -628,10 +712,11 @@ export default defineSchema({
   }).index("by_provider", ["provider"]),
 
   /** Одноразовые state для OAuth (защита от CSRF при подключении OLX). */
-  oauthStates: defineTable({ state: v.string(), provider: v.string(), userId: v.id("users"), createdAt: v.string() }).index("by_state", ["state"]),
+  oauthStates: defineTable({ tenantId: v.optional(v.string()), state: v.string(), provider: v.string(), userId: v.id("users"), createdAt: v.string() }).index("by_state", ["state"]),
 
   /** Ключи публичного API (ТЗ «API-first»): храним только хэш, сам ключ показываем один раз. */
   apiKeys: defineTable({
+    tenantId: v.optional(v.string()),
     name: v.string(),
     prefix: v.string(),
     hash: v.string(),
@@ -644,7 +729,7 @@ export default defineSchema({
   }).index("by_hash", ["hash"]),
 
   /** Заявки, созданные через публичный API: ключ идемпотентности (externalId) и «свои» заявки ключа — статус отдаём только по ним. */
-  apiLeads: defineTable({ keyId: v.id("apiKeys"), leadId: v.id("leads"), number: v.number(), externalId: v.optional(v.string()), at: v.string() })
+  apiLeads: defineTable({ tenantId: v.optional(v.string()), keyId: v.id("apiKeys"), leadId: v.id("leads"), number: v.number(), externalId: v.optional(v.string()), at: v.string() })
     .index("by_key_external", ["keyId", "externalId"])
     .index("by_key_number", ["keyId", "number"]),
 
@@ -662,24 +747,30 @@ export default defineSchema({
   })
     .index("by_order", ["orderId"])
     .index("by_executor", ["executorId", "at"])
-    .index("by_at", ["at"]),
+    .index("by_at", ["at"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_order", ["tenantId", "orderId"])
+    .index("t_by_executor", ["tenantId", "executorId", "at"])
+    .index("t_by_at", ["tenantId", "at"]),
 
   /** Ссылка «оцените работу» для клиента: неугадываемый токен, одноразовая, со сроком. */
-  reviewRequests: defineTable({ token: v.string(), orderId: v.id("orders"), createdAt: v.string(), expiresAt: v.string(), usedAt: v.optional(v.string()) })
+  reviewRequests: defineTable({ tenantId: v.optional(v.string()), token: v.string(), orderId: v.id("orders"), createdAt: v.string(), expiresAt: v.string(), usedAt: v.optional(v.string()) })
     .index("by_token", ["token"])
     .index("by_order", ["orderId"]),
 
   /** Расходы на рекламу по источникам за месяц (YYYY-MM) — для стоимости заявки и заказа (ТЗ п.17). */
-  adSpend: defineTable({ month: v.string(), source, amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "source"]),
+  adSpend: defineTable({ tenantId: v.optional(v.string()), month: v.string(), source, amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "source"]),
 
   /** Расходы на рекламную кампанию за месяц (YYYY-MM) — для CPL/CPO/ROMI кампаний (ТЗ п.28.5). campaign — как в utm_campaign. */
-  campaignSpend: defineTable({ month: v.string(), campaign: v.string(), amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "campaign"]),
+  campaignSpend: defineTable({ tenantId: v.optional(v.string()), month: v.string(), campaign: v.string(), amount: v.number(), updatedAt: v.string(), updatedBy: v.id("users") }).index("by_month", ["month", "campaign"]),
 
   /**
    * Исходящие вебхуки (ТЗ п.20.7, п.26.7): подписка владельца на события. secret — зашифрован (lib/secretBox.ts),
    * им подписывается тело (X-HMS-Signature). failures — неудачных попыток подряд; на пороге подписка отключается.
    */
   webhooks: defineTable({
+    tenantId: v.optional(v.string()),
     url: v.string(),
     events: v.array(webhookEvent),
     secret: v.string(),
@@ -695,6 +786,7 @@ export default defineSchema({
   }).index("by_active", ["active"]),
   /** Доставки вебхуков: тело, попытки, ответ получателя. pending — ждёт попытки; failed — попытки кончились. */
   webhookDeliveries: defineTable({
+    tenantId: v.optional(v.string()),
     webhookId: v.id("webhooks"),
     event: webhookEvent,
     eventId: v.string(),
@@ -715,10 +807,11 @@ export default defineSchema({
   rateLimits: defineTable({ key: v.string(), windowStart: v.number(), count: v.number() }).index("by_key", ["key"]).index("by_window", ["windowStart"]),
 
   /** update_id принятых обновлений Telegram: повтор доставки вебхука не обрабатываем второй раз (аудит L-3). Живут 2 суток. */
-  telegramUpdates: defineTable({ updateId: v.number() }).index("by_update", ["updateId"]),
+  telegramUpdates: defineTable({ tenantId: v.optional(v.string()), updateId: v.number() }).index("by_update", ["updateId"]),
 
   /** Состояние подсистем для владельца (ТЗ п.20 «мониторинг»): когда работало, последняя ошибка. */
   systemStatus: defineTable({
+    tenantId: v.optional(v.string()),
     key: v.string(),
     okAt: v.optional(v.string()),
     okNote: v.optional(v.string()),
@@ -747,13 +840,18 @@ export default defineSchema({
     createdAt: v.string(),
   })
     .index("by_at", ["at"])
-    .index("by_executor", ["executorId", "at"]),
+    .index("by_executor", ["executorId", "at"])
+    // Компания первым полем: lib/tenantDb.ts подставляет t_<имя> вместо <имя> (старые индексы — до перехода всех вызовов).
+    .index("by_tenant", ["tenantId"])
+    .index("t_by_at", ["tenantId", "at"])
+    .index("t_by_executor", ["tenantId", "executorId", "at"]),
 
   /**
    * Выгрузки CSV владельца (ТЗ п.26.9): файл отдаётся только по подписанной ссылке и живёт сутки (expiresAt),
    * потом уборка (exports.cleanup) удаляет и файл, и строку. from/to — период выгрузки.
    */
   exports: defineTable({
+    tenantId: v.optional(v.string()),
     kind: v.string(),
     from: v.string(),
     to: v.string(),
@@ -767,6 +865,7 @@ export default defineSchema({
 
   /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
   backups: defineTable({
+    tenantId: v.optional(v.string()),
     at: v.string(),
     fileId: v.id("_storage"),
     size: v.number(),
@@ -777,10 +876,11 @@ export default defineSchema({
   }).index("by_at", ["at"]),
 
   /** Файлы, уже скопированные во внешнее хранилище (offsite.ts, по настройке владельца): копируются один раз. */
-  offsiteFiles: defineTable({ storageId: v.id("_storage"), key: v.string(), size: v.number(), at: v.string() }).index("by_storage", ["storageId"]),
+  offsiteFiles: defineTable({ tenantId: v.optional(v.string()), storageId: v.id("_storage"), key: v.string(), size: v.number(), at: v.string() }).index("by_storage", ["storageId"]),
 
   /** Подписки web push (ТЗ п.23.6): браузер сотрудника или мастера; endpoint и ключи шифрования выдаёт браузер. */
   pushSubscriptions: defineTable({
+    tenantId: v.optional(v.string()),
     userId: v.id("users"),
     endpoint: v.string(),
     p256dh: v.string(),
@@ -796,6 +896,7 @@ export default defineSchema({
    * Одинаковые за сутки — одна строка со счётчиком; старше двух недель уборка удаляет.
    */
   clientErrors: defineTable({
+    tenantId: v.optional(v.string()),
     sig: v.string(),
     message: v.string(),
     path: v.string(),
@@ -813,7 +914,7 @@ export default defineSchema({
    * Кто загрузил файл (аудит M-10): прикрепить к заказу или звонку можно только свою подтверждённую загрузку и один раз.
    * usedAt — когда прикрепили; неприкреплённые старше суток уборка удаляет вместе с файлом.
    */
-  uploads: defineTable({ storageId: v.id("_storage"), userId: v.id("users"), at: v.string(), usedAt: v.optional(v.string()) })
+  uploads: defineTable({ tenantId: v.optional(v.string()), storageId: v.id("_storage"), userId: v.id("users"), at: v.string(), usedAt: v.optional(v.string()) })
     .index("by_storage", ["storageId"])
     .index("by_used", ["usedAt", "at"]),
 
@@ -823,6 +924,7 @@ export default defineSchema({
    * уровни заново. Одна строка на сущность и вид; старше 30 дней уборка удаляет.
    */
   escalations: defineTable({
+    tenantId: v.optional(v.string()),
     kind: v.union(v.literal("feed"), v.literal("unconfirmed"), v.literal("overdue"), v.literal("lead"), v.literal("callback")),
     entityId: v.string(),
     since: v.string(),
@@ -834,15 +936,16 @@ export default defineSchema({
 
   // ── Предрасчёт аналитики (ТЗ §26.6, convex/stats.ts, правила — src/data/dailyStats.ts) ──
   /** Факты заказа или заявки за один день (по Алматы): из них складываются итоги дня. */
-  statsFacts: defineTable({ entity: v.union(v.literal("order"), v.literal("lead")), ref: v.string(), day: v.string(), ...statCell })
+  statsFacts: defineTable({ tenantId: v.optional(v.string()), entity: v.union(v.literal("order"), v.literal("lead")), ref: v.string(), day: v.string(), ...statCell })
     .index("by_entity", ["entity", "ref"])
     .index("by_day", ["day"]),
   /** Итоги дня (YYYY-MM-DD) или месяца (YYYY-MM) по направлению, источнику и городу — их читают «Аналитика» и «Главная». */
-  dailyStats: defineTable({ grain: v.union(v.literal("day"), v.literal("month")), period: v.string(), ...statCell }).index("by_period", ["grain", "period"]),
+  dailyStats: defineTable({ tenantId: v.optional(v.string()), grain: v.union(v.literal("day"), v.literal("month")), period: v.string(), ...statCell }).index("by_period", ["grain", "period"]),
   /** Очередь пересчёта: изменившиеся заказы и заявки, затем их дни и месяцы. */
-  statsDirty: defineTable({ kind: v.union(v.literal("order"), v.literal("lead"), v.literal("day"), v.literal("month")), ref: v.string() }).index("by_ref", ["kind", "ref"]),
+  statsDirty: defineTable({ tenantId: v.optional(v.string()), kind: v.union(v.literal("order"), v.literal("lead"), v.literal("day"), v.literal("month")), ref: v.string() }).index("by_ref", ["kind", "ref"]),
   /** Состояние предрасчёта: когда собран целиком и как идёт полный пересчёт (одна строка). */
   statsState: defineTable({
+    tenantId: v.optional(v.string()),
     builtAt: v.optional(v.string()),
     rebuild: v.optional(
       v.object({
@@ -861,6 +964,7 @@ export default defineSchema({
    * invoiceId — наш номер счёта у провайдера (pg_order_id / InvoiceId), externalId — номер у провайдера.
    */
   paymentIntents: defineTable({
+    tenantId: v.optional(v.string()),
     orderId: v.id("orders"),
     provider: payProvider,
     invoiceId: v.string(),
@@ -889,6 +993,7 @@ export default defineSchema({
    * повторная печать совпадает с первой, даже если заказ или реквизиты потом изменились. Ссылка клиенту — только хэш токена и срок.
    */
   documents: defineTable({
+    tenantId: v.optional(v.string()),
     orderId: v.id("orders"),
     kind: documentKind,
     number: v.number(),

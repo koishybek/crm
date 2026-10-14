@@ -3,10 +3,10 @@
 // Один отзыв на заказ; рейтинг мастера пересчитывается в той же мутации, что и отзыв.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { inScope, requireRole, scopeOf, STAFF, TEAM, type Me } from "./lib/access";
 import { almatyStamp, audit, type AuditActor } from "./lib/audit";
-import { log, notify, nowIso, TENANT, userActor } from "./lib/domain";
+import { log, notify, nowIso, userActor } from "./lib/domain";
 import { hitLimit } from "./lib/rateLimit";
 import { emitEvent } from "./lib/webhookEvents";
 import { loadCatalog } from "./catalog";
@@ -28,6 +28,8 @@ import {
 } from "../src/data/reviews";
 import type { ReviewVia } from "../src/data/types";
 import { firstName, shortName } from "../src/lib/format";
+import { tenantOf } from "./lib/tenantDb";
+import { forTenant, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
 
 const DAY_MS = 86400_000;
 /** Токен ссылки — 24 случайных байта в base64url (32 символа): угадать или перебрать нельзя. */
@@ -123,7 +125,7 @@ async function createReview(ctx: MutationCtx, o: Doc<"orders">, r: NewReview): P
   const executorId = o.executorId!;
   const before = await ctx.db.get(executorId);
   const id = await ctx.db.insert("reviews", {
-    tenantId: TENANT,
+    tenantId: tenantOf(ctx),
     orderId: o._id,
     executorId,
     clientId: o.clientId,
@@ -260,12 +262,14 @@ export const requestLink = mutation({
   },
 });
 
-async function findRequest(ctx: QueryCtx, token: string): Promise<Doc<"reviewRequests"> | null> {
+/** Ссылка клиента по токену — среди всех компаний (вход без пользователя); ctx — уже компании этой ссылки. */
+async function findRequest<C extends QueryCtx>(pub: C, token: string): Promise<{ ctx: C; req: Doc<"reviewRequests"> } | null> {
   if (!TOKEN_RE.test(token)) return null;
-  return ctx.db
+  const req = await unscopedDb(pub)
     .query("reviewRequests")
     .withIndex("by_token", (q) => q.eq("token", token))
     .first();
+  return req ? { ctx: forTenant(pub, tenantOfDoc(req)), req } : null;
 }
 
 /** Уже оценено (по этой ссылке или иначе) важнее срока: клиенту — «спасибо», а не «ссылка устарела». */
@@ -278,10 +282,12 @@ async function linkState(ctx: QueryCtx, req: Doc<"reviewRequests">, o: Doc<"orde
 /** Публичная страница оценки (без входа): ни имени, ни телефона, ни адреса клиента. По неизвестной ссылке — только состояние. */
 export const byToken = query({
   args: { token: v.string() },
-  handler: async (ctx, { token }): Promise<ReviewLinkInfo> => {
-    const req = await findRequest(ctx, token);
-    const o = req ? await ctx.db.get(req.orderId) : null;
-    if (!req || !o) return { state: "invalid" };
+  handler: async (pub, { token }): Promise<ReviewLinkInfo> => {
+    const found = await findRequest(pub, token);
+    if (!found) return { state: "invalid" };
+    const { ctx, req } = found;
+    const o = await ctx.db.get(req.orderId);
+    if (!o) return { state: "invalid" };
     const ex = o.executorId ? await ctx.db.get(o.executorId) : null;
     return {
       state: await linkState(ctx, req, o),
@@ -296,10 +302,12 @@ export const byToken = query({
  */
 export const submitByToken = mutation({
   args: { token: v.string(), rating: v.number(), text: v.optional(v.string()) },
-  handler: async (ctx, a): Promise<ReviewSubmitResult> => {
-    const req = await findRequest(ctx, a.token);
-    const o = req ? await ctx.db.get(req.orderId) : null;
-    if (!req || !o) return { ok: false, state: "invalid", error: LINK_ERROR.invalid };
+  handler: async (pub, a): Promise<ReviewSubmitResult> => {
+    const found = await findRequest(pub, a.token);
+    if (!found) return { ok: false, state: "invalid", error: LINK_ERROR.invalid };
+    const { ctx, req } = found;
+    const o = await ctx.db.get(req.orderId);
+    if (!o) return { ok: false, state: "invalid", error: LINK_ERROR.invalid };
     if (!(await hitLimit(ctx, `review:${req._id}`, SUBMIT_LIMIT.max, SUBMIT_LIMIT.windowMs))) return { ok: false, state: "limited", error: "Слишком много попыток — попробуйте через час" };
     const state = await linkState(ctx, req, o);
     if (state !== "ok") return { ok: false, state, error: LINK_ERROR[state] };

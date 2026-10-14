@@ -1,11 +1,12 @@
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { almatyStamp, audit } from "./lib/audit";
 import { executorUser, notify, staffRoster } from "./lib/domain";
 import { markOk } from "./lib/health";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
+import { perTenant } from "./lib/tenant";
 
 const SOON_MS = 2 * 3600_000;
 /**
@@ -24,7 +25,7 @@ type Due = { o: Doc<"orders">; overdue: boolean };
  */
 export const run = internalMutation({
   args: {},
-  handler: async (ctx) => {
+  handler: async (cronCtx): Promise<void> => perTenant(cronCtx, internal.reminders.run, undefined, async (ctx) => {
     const now = Date.now();
     const horizon = new Date(now + SOON_MS).toISOString();
     let checked = 0;
@@ -79,5 +80,5 @@ export const run = internalMutation({
     if (more) await ctx.scheduler.runAfter(0, internal.reminders.run, {});
     // Отметка для «Состояния системы»: давно нет — крон не запускается или падает.
     await markOk(ctx, "reminders", `Проверено активных заказов: ${checked}`);
-  },
+  }),
 });

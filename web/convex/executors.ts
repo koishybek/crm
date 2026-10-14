@@ -1,10 +1,10 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { currentUser, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
 import { almatyStamp, audit, ChangeLog, listDiff, listDiffText, quote, type AuditActor } from "./lib/audit";
-import { executorUser, notify, nowIso, TENANT } from "./lib/domain";
+import { executorUser, notify, nowIso } from "./lib/domain";
 import { executorFor, orderFor, toUser } from "./lib/dto";
 import { executorDistricts } from "./lib/districts";
 import { cleanCity, cleanText } from "./lib/limits";
@@ -16,6 +16,8 @@ import { DEFAULT_MAX_ACTIVE } from "../src/data/logic";
 import { canonicalSkills, catalogSkills, normalizeSkills, skillsDiff, SKILLS_PER_EXECUTOR } from "../src/data/skills";
 import { shortName } from "../src/lib/format";
 import { category } from "./schema";
+import { tenantOf, unscopedDb } from "./lib/tenantDb";
+import { perTenant } from "./lib/tenant";
 
 const COOPERATION: Record<Doc<"executors">["cooperation"], string> = { freelance: "фрилансер", staff: "в штате" };
 
@@ -109,7 +111,7 @@ export const _backOnShift = internalMutation({
 /** Проверка крона (раз в 5 минут, escalations.run): все, у кого срок недоступности прошёл, — снова на смене. */
 export const _restoreShifts = internalMutation({
   args: {},
-  handler: async (ctx): Promise<number> => {
+  handler: async (cronCtx): Promise<number> => perTenant(cronCtx, internal.executors._restoreShifts, 0, async (ctx) => {
     const now = Date.now();
     let restored = 0;
     for (const ex of await ctx.db.query("executors").collect()) {
@@ -117,7 +119,7 @@ export const _restoreShifts = internalMutation({
       if (await backOnShift(ctx, ex)) restored++;
     }
     return restored;
-  },
+  }),
 });
 
 /** Исполнители + их активные заказы (только статус — чтобы посчитать «свободен / на выезде»). */
@@ -168,7 +170,8 @@ export const _insert = internalMutation({
   handler: async (ctx, a) => {
     const phone = normalizeLogin(a.phone);
     if (await ctx.db.query("executors").withIndex("by_phone", (q) => q.eq("phone", phone)).first()) throw new ConvexError("Исполнитель с таким телефоном уже есть");
-    if (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", phone)).unique()) throw new ConvexError("Этот телефон уже используется как логин");
+    // Логин — один на всю платформу.
+    if (await unscopedDb(ctx).query("users").withIndex("email", (q) => q.eq("email", phone)).first()) throw new ConvexError("Этот телефон уже используется как логин");
     const skills = await cleanExecutorSkills(ctx, a.skills);
     const { keys: categories } = await cleanCategories(ctx, a.categories);
     const name = cleanText(a.name, 120, "ФИО");
@@ -183,14 +186,14 @@ export const _insert = internalMutation({
       city,
       phone,
       districts: districts.length ? districts : undefined,
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       available: true,
       rating: 5,
       reviews: 0,
       joinedAt: nowIso(),
     });
     // Пароль выдаёт сотрудник (создание или импорт) — он временный: при первом входе мастер задаёт свой (аудит M-8).
-    await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: TENANT, active: true, mustChangePassword: true });
+    await ctx.db.insert("users", { name, email: phone, phone, role: "executor", executorId: id, tenantId: tenantOf(ctx), active: true, mustChangePassword: true });
     await audit(ctx, (await currentUser(ctx)) ?? "Система", "executor.created", `Добавлен исполнитель ${shortName(name)}${skills.length ? `, навыков: ${skills.length}` : ""}`, {
       entityId: id,
       meta: { categories, skills },

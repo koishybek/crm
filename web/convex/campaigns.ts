@@ -1,7 +1,7 @@
 // Кампании (ТЗ п.6.6, п.28.5): заявки, заказы, выручка, CPL/CPO/ROMI по рекламной кампании за период и расходы
 // на кампании по месяцам. Деньги компании — только владельцу. Формулы — src/data/campaigns.ts (общие с интерфейсом).
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";

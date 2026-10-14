@@ -6,7 +6,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalAction, internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import { action, internalAction, internalMutation, mutation, query, type MutationCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { randomToken } from "./lib/crypto";

@@ -2,7 +2,7 @@
 // (convex/push.ts). Здесь — то, что нужно мутации: проверка и постановка в очередь.
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { vapidConfig } from "./webpush";
 
 export async function queuePush(ctx: MutationCtx, userId: Id<"users">, text: string, link: string | undefined): Promise<void> {

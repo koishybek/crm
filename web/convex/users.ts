@@ -2,10 +2,10 @@ import { createAccount, getAuthSessionId, getAuthUserId, invalidateSessions, mod
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./lib/functions";
 import { currentUser, OWNER, requireRole, scopeOf, signedInUser, TEAM } from "./lib/access";
 import { audit, listDiff, listDiffText } from "./lib/audit";
-import { notify, TENANT } from "./lib/domain";
+import { notify } from "./lib/domain";
 import { executorFor, toExecutor, toUser } from "./lib/dto";
 import { cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
@@ -16,6 +16,7 @@ import { ROLE_LABEL } from "../src/data/catalog";
 import { PASSWORD_MAX, passwordProblem } from "../src/data/passwordRules";
 import type { Role } from "../src/data/types";
 import { shortName } from "../src/lib/format";
+import { tenantOf, unscopedDb } from "./lib/tenantDb";
 
 /** Роли сотрудников, которые назначает владелец. Исполнители заводятся в разделе «Исполнители». */
 const staffRole = v.union(v.literal("owner"), v.literal("operator"), v.literal("manager"));
@@ -97,10 +98,11 @@ export const _insertUser = internalMutation({
     if (a.firstOwner && (await ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "owner")).first())) {
       throw new ConvexError("Владелец уже есть — новых сотрудников добавляют в «Настройках»");
     }
-    const exists = await ctx.db
+    // Логин — один на всю платформу (вход общий для всех компаний).
+    const exists = await unscopedDb(ctx)
       .query("users")
       .withIndex("email", (q) => q.eq("email", a.login))
-      .unique();
+      .first();
     if (exists) throw new ConvexError("Такой логин уже занят");
     const name = cleanText(a.name, 120, "Имя");
     const { keys, label } = await cleanCategories(ctx, a.categories);
@@ -112,7 +114,7 @@ export const _insertUser = internalMutation({
       role: a.role,
       executorId: a.executorId,
       categories,
-      tenantId: TENANT,
+      tenantId: tenantOf(ctx),
       active: true,
       ...(a.mustChangePassword ? { mustChangePassword: true } : {}),
     });

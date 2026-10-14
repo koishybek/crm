@@ -22,7 +22,7 @@ import { copy, CopyRow } from "./Integrations";
 import { CheckOptions, WebhooksSection } from "./WebhooksSection";
 
 /** Встраивание формы: iframe + скрипт, который передаёт рекламные метки страницы и подгоняет высоту. */
-const embedCode = (formUrl: string, origin: string) => `<iframe id="hms-form" src="${formUrl}?embed=1" title="Заявка" loading="lazy"
+const embedCode = (formUrl: string, origin: string) => `<iframe id="hms-form" src="${formUrl}${formUrl.includes("?") ? "&" : "?"}embed=1" title="Заявка" loading="lazy"
   style="width:100%;max-width:560px;height:780px;border:0"></iframe>
 <script>
 (function () {
@@ -70,7 +70,7 @@ export function ApiAndSiteCard() {
   const site = useQuery(api.site.settings);
   const keys = useQuery(api.apiKeys.list);
   const origin = window.location.origin;
-  const formUrl = `${origin}/zayavka`;
+  const formUrl = `${origin}/zayavka${site ? `?c=${encodeURIComponent(site.company)}` : ""}`;
   const base = keys?.baseUrl ?? siteUrl() ?? "https://<адрес>.convex.site";
 
   return (

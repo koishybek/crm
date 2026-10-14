@@ -2,7 +2,7 @@
 // Правит только владелец; каждое изменение — в журнал «было → стало». Заказы, которые мастер уже взял, не меняются:
 // сумма зафиксирована снимком acceptedPayout, новая ставка действует на следующие назначения и ленту.
 import { ConvexError, v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { cleanRates, ratesText } from "./lib/rates";

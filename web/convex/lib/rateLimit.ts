@@ -1,7 +1,7 @@
 // Лимит «не больше N событий за окно» на ключ (телефон, токен, канал) — антиспам публичных форм и API.
 // Окно фиксированное: для защиты от перебора и флуда этого достаточно, а мутации Convex сериализуемы —
 // два одновременных запроса не проскочат лимит вместе.
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 
 /** true — событие разрешено (и учтено), false — лимит исчерпан. */
 export async function hitLimit(ctx: MutationCtx, key: string, max: number, windowMs: number): Promise<boolean> {

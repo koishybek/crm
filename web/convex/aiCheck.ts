@@ -1,7 +1,7 @@
 // Диагностика AI с сервера Convex (через `npx convex run`): проверка цепочки Convex → AI-сервис → Workers AI.
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation } from "./_generated/server";
+import { internalAction, internalMutation } from "./lib/functions";
 import { extract, toSummary, transcribe, type CatalogHint } from "./ai";
 
 export const uploadUrl = internalMutation({ args: {}, handler: async (ctx) => ctx.storage.generateUploadUrl() });

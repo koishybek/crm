@@ -4,7 +4,7 @@
 // Общие для крона эскалаций (escalations.ts) и автораспределения (autoAssign.ts): «предлагать больше некому» — тоже
 // эскалация, и вместе они не шлют одним и тем же людям одно и то же дважды.
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "./functions";
 import { nowIso } from "./domain";
 
 export type EscalationKind = Doc<"escalations">["kind"];

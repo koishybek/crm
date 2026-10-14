@@ -4,7 +4,7 @@
 import type { ExpressionOrValue, FilterBuilder, NamedTableInfo, PaginationOptions, PaginationResult } from "convex/server";
 import { ConvexError, v, type Infer } from "convex/values";
 import type { DataModel, Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { scopeOf, type Me } from "./access";
 import { orderFor } from "./dto";
 import { normalizeLogin } from "./login";

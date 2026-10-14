@@ -2,7 +2,7 @@
 // правит владелец в «Настройках». Мастера и заказы со старыми районами не трогаем: район, которого больше нет
 // в справочнике, просто перестаёт предлагаться в формах.
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./lib/functions";
 import { OWNER, requireRole, TEAM } from "./lib/access";
 import { audit, listDiff, listDiffText } from "./lib/audit";
 import { cleanDistrictMap, DISTRICTS_KEY, loadDistricts } from "./lib/districts";

@@ -1,11 +1,13 @@
+import { internal } from "./_generated/api";
 // Оповещения владельцу (ТЗ п.26.5), проверка по расписанию: подсистема «давно не отрабатывала» (крон напоминаний,
 // эскалации, ночная копия, синхронизация OLX) или сбой, о котором не сообщили из-за часовой паузы.
 // Сами сообщения и пауза — lib/alerts.ts; первая ошибка после успеха уходит сразу из markError (lib/health.ts).
-import { internalMutation } from "./_generated/server";
+import { internalMutation } from "./lib/functions";
 import { alertDown, alertThrottled } from "./lib/alerts";
 import { almatyStamp } from "./lib/audit";
 import type { HealthKey } from "./lib/health";
 import { SUBSYSTEMS, type SubsystemKey } from "../src/data/systemHealth";
+import { perTenant } from "./lib/tenant";
 
 const isKey = (k: string): k is HealthKey => Object.hasOwn(SUBSYSTEMS, k);
 
@@ -14,7 +16,7 @@ const CLIENT_ERRORS_TTL_MS = 14 * 86400_000;
 
 export const check = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ alerted: SubsystemKey[] }> => {
+  handler: async (cronCtx): Promise<{ alerted: SubsystemKey[] }> => perTenant(cronCtx, internal.alerts.check, { alerted: [] }, async (ctx) => {
     const now = Date.now();
     const olx = await ctx.db
       .query("integrations")
@@ -39,5 +41,5 @@ export const check = internalMutation({
       .take(200);
     for (const e of old) await ctx.db.delete(e._id);
     return { alerted };
-  },
+  }),
 });

@@ -8,7 +8,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 type Sent = { method: string; body: Record<string, unknown> };
 const AI_EXTRACT = { summary: "Стиральная машина не сливает воду", serviceId: "wm-repair", city: "Алматы", address: null, when: "сегодня после 19:00", budget: null, urgency: "high", clientName: "Ерлан", questions: ["Модель машины?"] };

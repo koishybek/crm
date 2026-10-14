@@ -2,9 +2,10 @@
 // и короткоживущие подписанные ссылки вместо вечных публичных (аудит M-10, E16).
 import { ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "./functions";
 import { env } from "../env";
 import { hmacSha256Hex, randomToken, safeEqual } from "./crypto";
+import { boundTenant, DEFAULT_TENANT } from "./tenantDb";
 
 /** Удалить файл; уже удалённый — не ошибка (на один файл бывает несколько ссылок). true — файл был и удалён. */
 export async function dropFile(ctx: MutationCtx, id: Id<"_storage">): Promise<boolean> {
@@ -153,17 +154,21 @@ export async function fileSigner(ctx: QueryCtx): Promise<FileSigner> {
   const key = await signingKey(ctx);
   const site = env("CONVEX_SITE_URL")?.replace(/\/+$/, "");
   if (!key || !site) return { url: () => undefined };
+  // Ключ подписи — свой у каждой компании: ссылка говорит, чьим ключом её проверять (без «c» — компания по умолчанию).
+  const tenant = boundTenant(ctx);
+  const c = tenant && tenant !== DEFAULT_TENANT ? `&c=${encodeURIComponent(tenant)}` : "";
   const exp = Math.ceil((Date.now() / 1000 + FILE_URL_TTL_S) / URL_GRID_S) * URL_GRID_S;
   return {
     url(storageId, name) {
       if (!storageId) return undefined;
       const n = name ? cleanFileName(name) : "";
-      return `${site}${FILES_PATH}${storageId}?exp=${exp}${n ? `&name=${encodeURIComponent(n)}` : ""}&sig=${fileSignature(key, storageId, exp, n)}`;
+      return `${site}${FILES_PATH}${storageId}?exp=${exp}${n ? `&name=${encodeURIComponent(n)}` : ""}${c}&sig=${fileSignature(key, storageId, exp, n)}`;
     },
   };
 }
 
-export type FileLink = { storageId: string; exp: number; name: string; sig: string };
+/** tenant — компания ссылки (?c=…): у каждой компании свой ключ подписи, если FILES_SIGNING_KEY не задан. */
+export type FileLink = { storageId: string; exp: number; name: string; sig: string; tenant?: string };
 
 /** Разбор ссылки /files/<id>?exp=…&sig=…[&name=…]. Мусор — null. */
 export function parseFileLink(url: URL): FileLink | null {
@@ -172,8 +177,10 @@ export function parseFileLink(url: URL): FileLink | null {
   const exp = url.searchParams.get("exp") ?? "";
   const sig = url.searchParams.get("sig") ?? "";
   const name = url.searchParams.get("name") ?? "";
+  const tenant = url.searchParams.get("c");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(storageId) || !/^\d{1,12}$/.test(exp) || !/^[0-9a-f]{64}$/.test(sig) || name.length > 200) return null;
-  return { storageId, exp: Number(exp), name, sig };
+  if (tenant !== null && !/^[a-z0-9-]{2,40}$/.test(tenant)) return null;
+  return { storageId, exp: Number(exp), name, sig, ...(tenant ? { tenant } : {}) };
 }
 
 /**

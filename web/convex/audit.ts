@@ -4,7 +4,7 @@
 import { paginationOptsValidator, type PaginationResult } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { query, type QueryCtx } from "./_generated/server";
+import { query, type QueryCtx } from "./lib/functions";
 import { inScope, OWNER, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
 import { loadCatalog } from "./catalog";
 import { auditEntity } from "./schema";

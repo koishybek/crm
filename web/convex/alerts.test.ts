@@ -43,8 +43,8 @@ afterEach(() => {
 async function setup() {
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => ({
-    owner: await ctx.db.insert("users", { name: "Владелец", email: "owner@homemax.kz", role: "owner", tenantId: "t-test", active: true, telegramChatId: "111", notifyEmail: true }),
-    operator: await ctx.db.insert("users", { name: "Оператор", email: "op@homemax.kz", role: "operator", tenantId: "t-test", active: true, telegramChatId: "222" }),
+    owner: await ctx.db.insert("users", { name: "Владелец", email: "owner@homemax.kz", role: "owner", tenantId: "t-komfort", active: true, telegramChatId: "111", notifyEmail: true }),
+    operator: await ctx.db.insert("users", { name: "Оператор", email: "op@homemax.kz", role: "operator", tenantId: "t-komfort", active: true, telegramChatId: "222" }),
   }));
   const mark = (key: HealthKey, ok: boolean, note: string) => t.mutation(internal.health._mark, { key, ok, note });
   const bell = async (userId: Id<"users">) => (await t.run((ctx) => ctx.db.query("notifications").collect())).filter((n) => n.userId === userId).map((n) => n.text);

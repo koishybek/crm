@@ -12,7 +12,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 const WA_SEND = "https://graph.facebook.com/v26.0/987654321098765/messages";

@@ -24,11 +24,11 @@ async function setup() {
   vi.setSystemTime(NOW);
   const t = convexTest(schema, modules);
   const ids = await t.run(async (ctx) => {
-    const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-test", active: true });
-    const operator = await ctx.db.insert("users", { name: "Оператор", email: "op@test.kz", role: "operator", tenantId: "t-test", active: true });
+    const owner = await ctx.db.insert("users", { name: "Владелец", email: "owner@test.kz", role: "owner", tenantId: "t-komfort", active: true });
+    const operator = await ctx.db.insert("users", { name: "Оператор", email: "op@test.kz", role: "operator", tenantId: "t-komfort", active: true });
     const call = async (days: number, extra: { transcript?: string; recordingUrl?: string } = {}) => {
       const recordingId = await ctx.storage.store(new Blob([`audio-${days}`], { type: "audio/mpeg" }));
-      const id = await ctx.db.insert("calls", { tenantId: "t-test", direction: "in", from: "77071234567", to: "77273450000", status: "completed", startedAt: ago(days), recordingId, transcript: "Здравствуйте, сломался холодильник", ...extra });
+      const id = await ctx.db.insert("calls", { tenantId: "t-komfort", direction: "in", from: "77071234567", to: "77273450000", status: "completed", startedAt: ago(days), recordingId, transcript: "Здравствуйте, сломался холодильник", ...extra });
       return { id, recordingId };
     };
     return { owner, operator, old: await call(400, { recordingUrl: "https://pbx.example/rec/1.mp3" }), mid: await call(100), fresh: await call(10) };

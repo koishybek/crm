@@ -5,7 +5,7 @@
 // Журнал действий не переписывается: это юридически значимая история действий сотрудников.
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { ACTIVE_STATUSES } from "../../src/data/catalog";
 import { nowIso } from "./domain";
 import { dropFile } from "./files";

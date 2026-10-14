@@ -1,6 +1,6 @@
 // Мониторинг подсистем: отметки из actions и сводка для владельца.
 import { v } from "convex/values";
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, query } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { markError, markOk, type HealthKey } from "./lib/health";
 import { s3Missing } from "./lib/s3";

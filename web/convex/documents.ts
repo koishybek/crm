@@ -4,7 +4,7 @@
 // (браузер → «Сохранить как PDF»). Клиенту — ссылка /d/<токен> на страницу только для чтения: в базе хэш токена и срок.
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requirePerm, requireRole, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { randomToken, sha256Hex } from "./lib/crypto";
@@ -35,6 +35,7 @@ import {
 import { netReceived } from "../src/data/money";
 import type { OrderClientSend } from "../src/data/orderClientChat";
 import { money } from "../src/lib/format";
+import { unscopedDb } from "./lib/tenantDb";
 
 const REQUISITES_KEY = "company.requisites";
 /** Ссылок клиенту на сотрудника в час. */
@@ -249,7 +250,8 @@ export const publicView = query({
   args: { token: v.string() },
   handler: async (ctx, { token }): Promise<DocumentSnapshot | null> => {
     if (!/^[A-Za-z0-9_-]{32,64}$/.test(token)) return null;
-    const d = await ctx.db
+    // Ссылка открывается без входа: документ ищем среди всех компаний — по неугадываемому токену.
+    const d = await unscopedDb(ctx)
       .query("documents")
       .withIndex("by_public_token", (q) => q.eq("publicTokenHash", sha256Hex(token)))
       .unique();

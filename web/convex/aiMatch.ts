@@ -6,7 +6,7 @@
 // ответил — рекомендация по правилам с объяснением.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
+import { action, internalMutation, mutation, query, type QueryCtx } from "./lib/functions";
 import { assertScope, can, OWNER, requireRole, TEAM } from "./lib/access";
 import { audit } from "./lib/audit";
 import { activeExecutorIds } from "./lib/matching";

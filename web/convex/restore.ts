@@ -5,7 +5,7 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { WithoutSystemFields } from "convex/server";
 import type { Doc, TableNames } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery } from "./lib/functions";
 import { BACKUP_TABLES } from "./backup";
 import { audit } from "./lib/audit";
 import { normalizeLogin } from "./lib/login";

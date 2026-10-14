@@ -2,7 +2,7 @@
 // Здесь — то, что нужно мутациям (notify в lib/domain.ts); отправка через Resend — convex/email.ts.
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
+import type { MutationCtx } from "./functions";
 import { env } from "../env";
 import { APP_NAME } from "../../src/data/catalog";
 import type { EmailKind } from "../../src/data/notifyRules";

@@ -11,7 +11,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const page = { numItems: 50, cursor: null };
 type Sent = { method: string; body: Record<string, unknown> };
 const AI_EXTRACT = { summary: "Течёт кран на кухне", serviceId: "leak-fix", city: "Алматы", address: "ул. Абая 10", when: null, budget: null, urgency: "high", clientName: "Айгерим", questions: ["Какой этаж?"] };

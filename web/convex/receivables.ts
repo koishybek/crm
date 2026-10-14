@@ -1,6 +1,6 @@
 // Долги клиентов (ТЗ п.5 «Dashboard: выручка, выплаты», п.13 «задолженность»): для плитки «Долги клиентов»
 // и списка должников на «Главной». Только с правом «Цена клиента и оплаты» (ТЗ п.5.12; аудит M-2).
-import { query } from "./_generated/server";
+import { query } from "./lib/functions";
 import { inScope, requirePerm, scopeOf } from "./lib/access";
 import { debt } from "../src/data/logic";
 import type { Debtor, Receivables } from "../src/data/receivables";

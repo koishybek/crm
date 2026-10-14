@@ -3,7 +3,7 @@
 // честно отвечает «не настроено» — успеха без отправки не бывает.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
-import { action, internalAction, internalQuery, query, type ActionCtx } from "./_generated/server";
+import { action, internalAction, internalQuery, query, type ActionCtx } from "./lib/functions";
 import { currentUser, OWNER, requireRole } from "./lib/access";
 import { emailConfig, emailMissing, emailRecipient, loginEmail, normalizeEmail, renderEmail, type EmailConfig } from "./lib/mail";
 import { env } from "./env";

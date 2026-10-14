@@ -5,7 +5,7 @@
 import { ConvexError, v } from "convex/values";
 import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./lib/functions";
 import { normalizeLogin } from "./lib/login";
 import { env } from "./env";
 import { createLogin } from "./users";

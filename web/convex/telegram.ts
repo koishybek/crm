@@ -3,8 +3,9 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { action, internalAction, internalMutation, mutation, query, type ActionCtx } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx } from "./lib/functions";
 import { currentUser } from "./lib/access";
+import { actionFor, bindTenant, DEFAULT_TENANT, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
 import { audit } from "./lib/audit";
 import { PLACEHOLDER } from "./lib/chat";
 import { findKzPhone } from "./lib/phone";
@@ -106,16 +107,19 @@ export const linkChat = internalMutation({
   args: { code: v.string(), chatId: v.string() },
   handler: async (ctx, { code, chatId }): Promise<LinkResult> => {
     if (!/^[0-9a-f]{24}$/.test(code)) return { ok: false, reason: "expired" };
-    const u = await ctx.db.query("users").withIndex("by_telegram_code", (q) => q.eq("telegramLinkCode", code)).first();
+    // Бот общий для всех компаний платформы: код ищем среди всех, дальше работаем в компании его владельца.
+    const all = unscopedDb(ctx);
+    const u = await all.query("users").withIndex("by_telegram_code", (q) => q.eq("telegramLinkCode", code)).first();
     if (!u) return { ok: false, reason: "expired" };
+    bindTenant(ctx, tenantOfDoc(u));
     // Код гасим при любой попытке: ссылка одноразовая.
     await ctx.db.patch(u._id, { telegramLinkCode: undefined, telegramLinkExpiresAt: undefined });
     // Просроченная ссылка, отключённый доступ или ещё не сменённый временный пароль — не привязываем.
     if (!u.telegramLinkExpiresAt || u.telegramLinkExpiresAt <= Date.now() || u.active === false || !u.role || u.mustChangePassword) return { ok: false, reason: "expired" };
     if (u.telegramChatId && u.telegramChatId !== chatId) return { ok: false, reason: "elsewhere" };
-    // Один чат — один аккаунт.
-    for (const other of await ctx.db.query("users").withIndex("by_telegram_chat", (q) => q.eq("telegramChatId", chatId)).collect()) {
-      if (other._id !== u._id) await ctx.db.patch(other._id, { telegramChatId: undefined });
+    // Один чат — один аккаунт (в любой компании).
+    for (const other of await all.query("users").withIndex("by_telegram_chat", (q) => q.eq("telegramChatId", chatId)).collect()) {
+      if (other._id !== u._id) await all.patch(other._id, { telegramChatId: undefined });
     }
     await ctx.db.patch(u._id, { telegramChatId: chatId });
     await audit(ctx, u, "user.telegram", `Telegram подключён: ${whoLinks(u)}`, { entityId: u._id, meta: { linked: true } });
@@ -123,9 +127,22 @@ export const linkChat = internalMutation({
   },
 });
 
+/**
+ * Компания чата: сотрудник или мастер с привязанным Telegram — его компания (бот общий для платформы);
+ * иначе null — пишет клиент, он обращается в компанию бота.
+ */
+export const _chatTenant = internalQuery({
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }): Promise<string | null> => {
+    const users = await unscopedDb(ctx).query("users").withIndex("by_telegram_chat", (q) => q.eq("telegramChatId", chatId)).collect();
+    const u = users.find((x) => x.role && x.active !== false);
+    return u ? tenantOfDoc(u) : null;
+  },
+});
+
 /** Обновление с этим update_id уже принимали (Telegram повторил доставку) — false. Записи чистит maintenance через 2 суток. */
 export const _firstSeen = internalMutation({
-  args: { updateId: v.number() },
+  args: { updateId: v.number(), tenantId: v.string() },
   handler: async (ctx, { updateId }): Promise<boolean> => {
     if (await ctx.db.query("telegramUpdates").withIndex("by_update", (q) => q.eq("updateId", updateId)).first()) return false;
     await ctx.db.insert("telegramUpdates", { updateId });
@@ -452,19 +469,21 @@ async function callback(ctx: ActionCtx, cb: NonNullable<TgUpdate["callback_query
 
 /** Входящее обновление от Telegram (вызывается из http.ts после проверки секрета). */
 export const handleUpdate = internalAction({
-  args: { update: v.any() },
-  handler: async (ctx, { update }) => {
+  args: { update: v.any(), botTenant: v.optional(v.string()) },
+  handler: async (raw, { update, botTenant }) => {
     const u = update as TgUpdate;
-    if (u.callback_query) return void (await callback(ctx, u.callback_query));
+    // Сотрудник или мастер — в своей компании, клиент — в компании бота (ТЗ §2.5).
+    const chatTenant = async (chatId: string) => actionFor(raw, (await raw.runQuery(internal.telegram._chatTenant, { chatId })) ?? botTenant ?? DEFAULT_TENANT);
+    if (u.callback_query) return void (await callback(await chatTenant(String(u.callback_query.from.id)), u.callback_query));
     const msg = u.message;
     if (!msg || msg.chat.type && msg.chat.type !== "private") return;
     const chatId = String(msg.chat.id);
     const text = (msg.text ?? "").trim();
 
-    // Привязка аккаунта сотрудника/мастера по одноразовой ссылке из кабинета.
+    // Привязка аккаунта сотрудника/мастера по одноразовой ссылке из кабинета (компанию определит сам код).
     const m = /^\/start\s+([0-9a-f]{24})$/.exec(text);
     if (m) {
-      const linked = await ctx.runMutation(internal.telegram.linkChat, { code: m[1]!, chatId });
+      const linked = await raw.runMutation(internal.telegram.linkChat, { code: m[1]!, chatId });
       if (!linked.ok) {
         return void (await sendHtml(
           chatId,
@@ -478,6 +497,7 @@ export const handleUpdate = internalAction({
       return;
     }
 
+    const ctx = await chatTenant(chatId);
     const who = await linkedUser(ctx, chatId);
     if (who.role) {
       // Сотрудник или мастер.

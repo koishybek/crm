@@ -10,7 +10,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 const DAY = 86400_000;
 const CLIENT = { name: "Айгерим Сапарова", phone: "77071234567", address: "ул. Абая, 15, кв. 7" };

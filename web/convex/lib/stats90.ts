@@ -2,7 +2,7 @@
 // мастера (by_executor), а не перебором всех заказов: при сдаче работы, отмене, отказе и раз в час кроном
 // (convex/executorStats.ts). Подбор и лента только читают готовые числа.
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "./functions";
 import { FINISHED_STATUSES } from "../../src/data/catalog";
 import { HISTORY } from "../../src/data/logic";
 import type { ExecutorStats90, OrderStatus } from "../../src/data/types";

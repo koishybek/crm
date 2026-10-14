@@ -12,7 +12,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 const at = new Date().toISOString();
 const SECRETS = ["olx-access-SECRET", "olx-refresh-SECRET", "pbx-SECRET-value", "site-token-SECRET", "tg-link-SECRET", "apikey-hash-SECRET", "review-token-SECRET", "auth-password-SECRET"];
 

@@ -225,7 +225,7 @@ describe("скачивание файла", () => {
 });
 
 describe("разбор звонка: запись по ссылке от АТС", () => {
-  const T = "t-test";
+  const T = "t-komfort";
   let fetched: string[] = [];
 
   beforeEach(() => {

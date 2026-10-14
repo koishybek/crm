@@ -3,7 +3,7 @@
 // Формулы — общие с интерфейсом (src/data/analytics.ts).
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./lib/functions";
 import { can, noAccess, requirePerm, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";

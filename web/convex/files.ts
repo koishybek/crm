@@ -4,10 +4,12 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { httpAction, internalMutation, internalQuery, mutation } from "./_generated/server";
+import { httpAction, internalMutation, internalQuery, mutation } from "./lib/functions";
 import { currentUser } from "./lib/access";
 import { audit } from "./lib/audit";
 import { checkFileLink, dropFile, ensureSigningKey, fileResponse, parseFileLink, registerUpload, signingKey, type UploadKind } from "./lib/files";
+import { perTenant } from "./lib/tenant";
+import { actionFor, DEFAULT_TENANT } from "./lib/tenantDb";
 
 /** Неприкреплённая загрузка живёт сутки. */
 const UNUSED_TTL_MS = 86400_000;
@@ -44,7 +46,7 @@ export const _meta = internalQuery({
 /** Крон: ключ подписи на месте (без FILES_SIGNING_KEY) и неприкреплённые загрузки старше суток удалены вместе с файлом. */
 export const maintain = internalMutation({
   args: {},
-  handler: async (ctx): Promise<{ removed: number }> => {
+  handler: async (cronCtx): Promise<{ removed: number }> => perTenant(cronCtx, internal.files.maintain, { removed: 0 }, async (ctx) => {
     await ensureSigningKey(ctx);
     const before = new Date(Date.now() - UNUSED_TTL_MS).toISOString();
     const stale = await ctx.db
@@ -56,7 +58,7 @@ export const maintain = internalMutation({
       await ctx.db.delete(u._id);
     }
     return { removed: stale.length };
-  },
+  }),
 });
 
 /** Сообщений за один шаг переноса. */
@@ -108,9 +110,11 @@ export const migrateExecutorChannel = internalMutation({
 const denied = (text: string) => new Response(text, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
 
 /** GET /files/<storageId>?exp=…&sig=… — файл по подписанной ссылке. Срок вышел или подпись не та — 403. */
-export const serveFile = httpAction(async (ctx, request) => {
+export const serveFile = httpAction(async (base, request) => {
   const link = parseFileLink(new URL(request.url));
   if (!link) return denied("Нет доступа");
+  // Ключ подписи — компании из ссылки (подделанная компания — чужой ключ, подпись не сойдётся).
+  const ctx = actionFor(base, link.tenant ?? DEFAULT_TENANT);
   const verdict = checkFileLink(link, await ctx.runQuery(internal.files._signingKey, {}), Date.now());
   if (verdict === "expired") return denied("Ссылка устарела — обновите страницу");
   if (verdict !== "ok") return denied("Нет доступа");

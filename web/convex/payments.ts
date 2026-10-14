@@ -6,7 +6,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { action, httpAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, httpAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requirePerm, requireRole, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { randomToken } from "./lib/crypto";
@@ -45,6 +45,9 @@ import {
   type PaySettingsView,
 } from "../src/data/payIntents";
 import { money } from "../src/lib/format";
+import { requireModule } from "./lib/tenant";
+import { actionFor, companyQuery, DEFAULT_TENANT } from "./lib/tenantDb";
+import { lockText } from "../src/data/plans";
 
 const KEY = { provider: "pay.provider", public: "pay.public", secrets: "pay.secrets", kaspi: "pay.kaspiTemplate" } as const;
 const onlineProvider = v.union(...ONLINE_PROVIDERS.map((p) => v.literal(p)));
@@ -113,9 +116,9 @@ export const _state = internalQuery({ args: {}, handler: (ctx): Promise<PayState
 export const settings = query({
   args: {},
   handler: async (ctx): Promise<PaySettingsView> => {
-    await requireRole(ctx, OWNER);
+    const me = await requireRole(ctx, OWNER);
     const s = await loadState(ctx);
-    return { provider: s.provider, config: s.config, hasSecrets: !!s.sealed, kaspiTemplate: s.kaspiTemplate, keyIssue: integrationsKeyIssue(), siteUrl: env("CONVEX_SITE_URL") ?? null };
+    return { provider: s.provider, config: s.config, hasSecrets: !!s.sealed, kaspiTemplate: s.kaspiTemplate, keyIssue: integrationsKeyIssue(), siteUrl: env("CONVEX_SITE_URL") ?? null, company: companyQuery(me.tenantId) ? me.tenantId : null };
   },
 });
 
@@ -247,12 +250,15 @@ interface Prepared {
   amount: number;
   description: string;
   state: PayState;
+  /** Компания счёта — в адрес уведомления провайдера (?c=…). */
+  tenantId: string;
 }
 
 export const _prepare = internalMutation({
   args: { orderId: v.id("orders"), provider: payProvider, amount: v.optional(v.number()) },
   handler: async (ctx, a): Promise<Prepared> => {
     const me = await requirePerm(ctx, "payments.add", STAFF);
+    await requireModule(ctx, me.tenantId, "online_payments");
     const o = await ctx.db.get(a.orderId);
     if (!o) throw new ConvexError("Заказ не найден");
     const blocked = PAYMENT_BLOCKED[o.status];
@@ -274,7 +280,7 @@ export const _prepare = internalMutation({
     ).find((x) => x.provider === a.provider && x.amount === amount && x.url && intentView(x.status, x.expiresAt, now) === "created");
     const cat = await loadCatalog(ctx);
     const description = `Заказ №${o.number}: ${cat.label(o.serviceId)}`.slice(0, 200);
-    if (open) return { intentId: open._id, ready: true, invoiceId: open.invoiceId, amount, description, state };
+    if (open) return { intentId: open._id, ready: true, invoiceId: open.invoiceId, amount, description, state, tenantId: me.tenantId };
     if (!(await hitLimit(ctx, `paylink:${me._id}`, LINKS_PER_HOUR, 3600_000))) throw new ConvexError("Слишком много счетов подряд — попробуйте позже");
     const at = nowIso();
     const invoiceId = `hms-${o.number}-${randomToken(6)}`;
@@ -292,7 +298,7 @@ export const _prepare = internalMutation({
       updatedAt: at,
     });
     await audit(ctx, me, "order.paymentLink", `Заказ №${o.number}: выставлен счёт на оплату ${money(amount)} (${PAY_INFO[a.provider].label})`, { entityId: o._id, meta: { intentId, provider: a.provider, amount } });
-    return { intentId, ready: kaspi, invoiceId, amount, description, state };
+    return { intentId, ready: kaspi, invoiceId, amount, description, state, tenantId: me.tenantId };
   },
 });
 
@@ -329,7 +335,7 @@ export const createLink = action({
         invoiceId: p.invoiceId,
         amount: p.amount,
         description: p.description,
-        resultUrl: `${site}${payWebhookPath(a.provider)}`,
+        resultUrl: `${site}${payWebhookPath(a.provider)}${companyQuery(p.tenantId)}`,
         lifetimeSeconds: Math.round(PAY_LINK_TTL_MS / 1000),
       });
       await ctx.runMutation(internal.payments._linked, { intentId: p.intentId, url: link.url, externalId: link.externalId });
@@ -466,12 +472,19 @@ const MAX_BODY = 64 * 1024;
 
 /** POST /pay/<провайдер>: проверка подписи адаптером → _notice → ответ провайдеру (Freedom Pay — подписанный XML). */
 export function payWebhook(provider: OnlineProvider) {
-  return httpAction(async (ctx, request) => {
+  return httpAction(async (raw, request) => {
     const label = PAY_INFO[provider].label;
+    // Компания — из адреса уведомления (?c=…, его задаём при создании счёта); без него — компания по умолчанию (как до SaaS).
+    // Подпись провайдера проверяется ключами этой компании: чужое уведомление не пройдёт.
+    const company = new URL(request.url).searchParams.get("c");
+    const tenantId = company ? await raw.runQuery(internal.site._publicTenant, { company }) : DEFAULT_TENANT;
+    if (!tenantId) return new Response("unknown company", { status: 404 });
+    const ctx = actionFor(raw, tenantId);
     const reject = async (status: number, why: string) => {
       await ctx.runMutation(internal.health._mark, { key: "payments", ok: false, note: why });
       return new Response("rejected", { status });
     };
+    if (!(await ctx.runQuery(internal.tenants._hasModule, { module: "online_payments" }))) return reject(403, lockText("online_payments"));
     if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY) return reject(413, `${label}: слишком большое уведомление`);
     const body = await request.text();
     if (body.length > MAX_BODY) return reject(413, `${label}: слишком большое уведомление`);

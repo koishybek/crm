@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
 import { EXECUTOR, requireRole } from "./lib/access";
 import { audit, lowerFirst } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, userActor, type StatusMove } from "./lib/domain";

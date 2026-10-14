@@ -10,7 +10,7 @@ const modules = Object.fromEntries(
   Object.entries(import.meta.glob("./**/*.*s")).filter(([path]) => !path.endsWith(".d.ts") && !path.includes(".test.")),
 );
 
-const T = "t-test";
+const T = "t-komfort";
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -121,7 +121,7 @@ describe("форма заявки с сайта", () => {
     expect(((await fourth.json()) as { error: string }).error).toContain("уже есть заявки");
     // Общий лимит: счётчик уже на пределе.
     await t.run(async (ctx) => {
-      const row = await ctx.db.query("rateLimits").withIndex("by_key", (q) => q.eq("key", "site:all")).unique();
+      const row = await ctx.db.query("rateLimits").withIndex("by_key", (q) => q.eq("key", "site:all:t-komfort")).unique();
       await ctx.db.patch(row!._id, { count: 60 });
     });
     const flood = await post(t, form({ phone: "+77019998877" }));
@@ -163,7 +163,7 @@ describe("форма заявки с сайта", () => {
 
   test("справочник для формы — без входа, только названия активных услуг, без цен", async () => {
     const { t } = await setup();
-    const list = await t.query(api.catalog.publicList, {});
+    const list = (await t.query(api.catalog.publicList, {}))!;
     expect(list.categories.length).toBeGreaterThan(0);
     expect(list.services.some((s) => s.id === "ac-clean")).toBe(true);
     expect(list.services.some((s) => s.id === "other")).toBe(false);

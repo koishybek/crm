@@ -8,7 +8,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { httpAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
+import { httpAction, internalMutation, internalQuery, type ActionCtx } from "./lib/functions";
 import { API_PRICES_SETTING, INVALID_KEY, KEY_PATTERN } from "./apiKeys";
 import { sha256Hex } from "./lib/crypto";
 import { nowIso } from "./lib/domain";
@@ -24,6 +24,7 @@ import type { ApiScope } from "../src/data/apiScopes";
 import { campaignOf, cleanUtmValue, utmFromRecord, type Utm } from "../src/data/utm";
 import { LEAD_STATUS, ORDER_STATUS, SOURCE_IDS } from "../src/data/catalog";
 import type { LeadStatus, OrderStatus, SourceId } from "../src/data/types";
+import { actionFor } from "./lib/tenantDb";
 
 const MAX_BODY = 16 * 1024;
 
@@ -73,14 +74,15 @@ export function parseApiLead(body: Record<string, unknown>, idempotencyKey: stri
 const apiError = (status: number, error: string, headers: Record<string, string> = {}) => json(status, { error }, headers);
 
 /** Ключ из заголовка → проверка по хэшу и лимит. Ответ-ошибка, если не пускаем. */
-async function authorize(ctx: ActionCtx, request: Request, scope: ApiScope): Promise<{ ok: true; keyId: Id<"apiKeys">; prefix: string } | { ok: false; response: Response }> {
+async function authorize(ctx: ActionCtx, request: Request, scope: ApiScope): Promise<{ ok: true; keyId: Id<"apiKeys">; prefix: string; ctx: ActionCtx } | { ok: false; response: Response }> {
   const m = /^Bearer\s+(\S+)\s*$/i.exec(request.headers.get("authorization") ?? "");
   if (!m) return { ok: false, response: apiError(401, "Нужен заголовок Authorization: Bearer <ключ API>", { "WWW-Authenticate": "Bearer" }) };
   const key = m[1]!;
   if (!KEY_PATTERN.test(key)) return { ok: false, response: apiError(401, INVALID_KEY, { "WWW-Authenticate": "Bearer" }) };
   const r = await ctx.runMutation(internal.apiKeys._authorize, { hash: sha256Hex(key), scope });
   if (!r.ok) return { ok: false, response: apiError(r.status, r.error, r.status === 429 ? { "Retry-After": "60" } : r.status === 401 ? { "WWW-Authenticate": "Bearer" } : {}) };
-  return { ok: true, keyId: r.keyId, prefix: r.prefix };
+  // Дальше всё — в компании ключа.
+  return { ok: true, keyId: r.keyId, prefix: r.prefix, ctx: actionFor(ctx, r.tenantId) };
 }
 
 const failure = async (ctx: ActionCtx, where: string, e: unknown) => {
@@ -98,11 +100,11 @@ export const createLeadHttp = httpAction(async (ctx, request) => {
   const parsed = parseApiLead(body.value, request.headers.get("idempotency-key"));
   if (!parsed.ok) return apiError(400, parsed.error);
   try {
-    const r = await ctx.runMutation(internal.publicApi._createLead, { keyId: auth.keyId, prefix: auth.prefix, ...parsed.data });
+    const r = await auth.ctx.runMutation(internal.publicApi._createLead, { keyId: auth.keyId, prefix: auth.prefix, ...parsed.data });
     if (!r.ok) return apiError(r.status, r.error);
     return json(r.replayed ? 200 : 201, { number: r.number, id: r.id });
   } catch (e) {
-    return failure(ctx, "создание заявки", e);
+    return failure(auth.ctx, "создание заявки", e);
   }
 });
 
@@ -112,10 +114,10 @@ export const getLeadHttp = httpAction(async (ctx, request) => {
   const m = /^\/api\/v1\/leads\/(\d{1,9})\/?$/.exec(new URL(request.url).pathname);
   if (!m) return apiError(400, "Номер заявки — число: /api/v1/leads/1024");
   try {
-    const r = await ctx.runQuery(internal.publicApi._leadStatus, { keyId: auth.keyId, number: Number(m[1]) });
+    const r = await auth.ctx.runQuery(internal.publicApi._leadStatus, { keyId: auth.keyId, number: Number(m[1]) });
     return r ? json(200, r) : apiError(404, "Заявка не найдена");
   } catch (e) {
-    return failure(ctx, "статус заявки", e);
+    return failure(auth.ctx, "статус заявки", e);
   }
 });
 
@@ -280,10 +282,10 @@ export const getOrderHttp = httpAction(async (ctx, request) => {
   const m = /^\/api\/v1\/orders\/(\d{1,9})\/?$/.exec(new URL(request.url).pathname);
   if (!m) return apiError(400, "Номер заказа — число: /api/v1/orders/1024");
   try {
-    const r = await ctx.runQuery(internal.publicApi._orderStatus, { number: Number(m[1]) });
+    const r = await auth.ctx.runQuery(internal.publicApi._orderStatus, { number: Number(m[1]) });
     return r ? json(200, r) : apiError(404, "Заказ не найден");
   } catch (e) {
-    return failure(ctx, "статус заказа", e);
+    return failure(auth.ctx, "статус заказа", e);
   }
 });
 
@@ -291,9 +293,9 @@ export const servicesHttp = httpAction(async (ctx, request) => {
   const auth = await authorize(ctx, request, "services:read");
   if (!auth.ok) return auth.response;
   try {
-    return json(200, await ctx.runQuery(internal.publicApi._services, {}));
+    return json(200, await auth.ctx.runQuery(internal.publicApi._services, {}));
   } catch (e) {
-    return failure(ctx, "справочник услуг", e);
+    return failure(auth.ctx, "справочник услуг", e);
   }
 });
 

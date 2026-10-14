@@ -3,7 +3,7 @@
 // формулы в ячейках обезвреживает toCsv (src/lib/csv.ts) при сборке файла. Деньги — формулами src/data/logic.ts.
 import type { PaginationResult } from "convex/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { QueryCtx } from "../_generated/server";
+import type { QueryCtx } from "./functions";
 import { loadCatalog } from "../catalog";
 import { almatyStamp } from "./audit";
 import { executorUser } from "./domain";

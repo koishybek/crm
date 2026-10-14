@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction } from "./lib/functions";
 import { auth } from "./auth";
 import { olxCallback } from "./channels/olx";
 import { whatsappVerify, whatsappWebhook, WEBHOOK_PATH as WHATSAPP_WEBHOOK } from "./channels/whatsapp";
@@ -8,6 +8,8 @@ import { env } from "./env";
 import { serveFile } from "./files";
 import { safeEqual } from "./lib/crypto";
 import { FILES_PATH } from "./lib/files";
+import { actionFor, DEFAULT_TENANT } from "./lib/tenantDb";
+import { lockText } from "../src/data/plans";
 import { OLX_CALLBACK_PATH } from "./lib/olxApi";
 import { createLeadHttp, getLeadHttp, getOrderHttp, openApiHttp, servicesHttp } from "./publicApi";
 import { leadOptions, leadPost } from "./site";
@@ -41,9 +43,10 @@ http.route({
     }
     // Повтор доставки (Telegram не дождался ответа) приходит с тем же update_id — второй раз не обрабатываем (аудит L-3).
     const updateId = updateIdOf(update);
-    if (updateId !== null && !(await ctx.runMutation(internal.telegram._firstSeen, { updateId }))) return new Response("ok", { status: 200 });
+    // Бот из окружения (TELEGRAM_BOT_TOKEN) — бот компании по умолчанию: клиенты, которые ему пишут, — её клиенты.
+    if (updateId !== null && !(await ctx.runMutation(internal.telegram._firstSeen, { updateId, tenantId: DEFAULT_TENANT }))) return new Response("ok", { status: 200 });
     // Отвечаем Telegram сразу, обработка — фоном (иначе он повторит запрос).
-    await ctx.scheduler.runAfter(0, internal.telegram.handleUpdate, { update });
+    await ctx.scheduler.runAfter(0, internal.telegram.handleUpdate, { update, botTenant: DEFAULT_TENANT });
     return new Response("ok", { status: 200 });
   }),
 });
@@ -76,21 +79,23 @@ http.route({
 http.route({
   path: "/pbx/events",
   method: "POST",
-  handler: httpAction(async (ctx, request) => {
+  handler: httpAction(async (base, request) => {
+    // Заголовок важнее адреса: если ключ есть в обоих, проверяем заголовок. Ключ определяет и компанию (ТЗ §2.5).
+    const header = request.headers.get("x-pbx-secret");
+    const given = header ?? new URL(request.url).searchParams.get("secret");
+    const found = await base.runQuery(internal.calls._pbxTenant, { given: (given ?? "").slice(0, 200) });
+    if (!found.configured) return new Response("not configured", { status: 503 });
+    if (!given || !found.tenantId) {
+      await base.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
+      return new Response("forbidden", { status: 403 });
+    }
+    const ctx = actionFor(base, found.tenantId);
     // Отказ АТС — красная отметка «Телефония» в «Состоянии системы»: владелец видит, что события не доходят и почему.
     const reject = async (status: number, body: string, why: string) => {
       await ctx.runMutation(internal.health._mark, { key: "pbx", ok: false, note: why });
       return new Response(body, { status });
     };
-    const expected = await ctx.runQuery(internal.calls._pbxSecret, {});
-    if (!expected) return new Response("not configured", { status: 503 });
-    // Заголовок важнее адреса: если ключ есть в обоих, проверяем заголовок.
-    const header = request.headers.get("x-pbx-secret");
-    const given = header ?? new URL(request.url).searchParams.get("secret");
-    if (!given || !safeEqual(given, expected)) {
-      await ctx.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
-      return new Response("forbidden", { status: 403 });
-    }
+    if (found.locked) return reject(403, "module disabled", lockText("telephony"));
     const tooLarge = "АТС прислала слишком большое событие (больше 64 КБ)";
     if (Number(request.headers.get("content-length") ?? 0) > PBX_MAX_BODY) return reject(413, "too large", tooLarge);
     const raw = await request.text();

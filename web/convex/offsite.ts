@@ -6,7 +6,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query, type ActionCtx, type QueryCtx } from "./lib/functions";
 import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";

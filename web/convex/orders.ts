@@ -1,7 +1,7 @@
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import { mutation, query, type QueryCtx } from "./lib/functions";
 import { assertScope, can, currentUser, inScope, noAccess, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
 import { canAddPayment, canEditPrice } from "../src/data/permissions";
 import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";

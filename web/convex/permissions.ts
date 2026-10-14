@@ -1,7 +1,7 @@
 // Права сотрудника поверх роли (ТЗ п.5.12, п.26.2): владелец включает и выключает их в окне «Доступ». Действуют сразу —
 // каждая функция читает права из базы при вызове (lib/access.ts: can, requirePerm), изменение пишется в журнал.
 import { ConvexError, v } from "convex/values";
-import { internalQuery, mutation } from "./_generated/server";
+import { internalQuery, mutation } from "./lib/functions";
 import { can, currentUser, OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { notify } from "./lib/domain";
