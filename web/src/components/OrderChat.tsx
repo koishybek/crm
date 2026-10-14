@@ -90,7 +90,7 @@ type Pending = Attachment & { storageId?: Id<"_storage"> };
 /** Лента заказа: сообщения заказа и переписка с клиентом из его мессенджера — по времени. */
 type TimelineItem = { key: string; at: string; order: Message } | { key: string; at: string; client: OrderClientMessage };
 
-const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: string; border: string; bubble: string; placeholder: string }[] = [
+const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: string; border: string; bubble: string; placeholder: string; hint?: string }[] = [
   { id: "client", label: "Переписка с клиентом", active: "bg-brand-soft text-brand-ink", border: "border-line-strong", bubble: "bg-[#f6f4ee]", placeholder: "Написать комментарий..." },
   {
     id: "executor",
@@ -99,7 +99,8 @@ const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: 
     active: "bg-blue-soft text-blue",
     border: "border-[#b9d6ff]",
     bubble: "bg-blue-soft",
-    placeholder: "Сообщение мастеру — он увидит его в приложении и в Telegram...",
+    placeholder: "Сообщение мастеру",
+    hint: "Мастер увидит его в приложении и в Telegram",
   },
   {
     id: "internal",
@@ -108,7 +109,8 @@ const CHANNELS: { id: MessageChannel; label: string; icon?: LucideIcon; active: 
     active: "bg-warn-bg text-warn-ink",
     border: "border-[#f5d9a8]",
     bubble: "bg-[#fff7e8]",
-    placeholder: "Заметка для команды — ни клиент, ни мастер её не увидят...",
+    placeholder: "Заметка для команды",
+    hint: "Ни клиент, ни мастер её не увидят",
   },
 ];
 const channelOf = (id: MessageChannel) => CHANNELS.find((c) => c.id === id) ?? CHANNELS[0]!;
@@ -224,7 +226,9 @@ export function OrderChat({ orderId, messages, me, nameOf, compact, executorName
                   void send();
                 }
               }}
-              placeholder={toClient ? (thread?.target ? "Сообщение клиенту — уйдёт в его мессенджер..." : "Заметка по клиенту — клиенту она не уйдёт...") : current.placeholder}
+              placeholder={toClient ? (thread?.target ? "Сообщение клиенту" : "Заметка по клиенту") : current.placeholder}
+              // Короткая подсказка в поле (на телефоне длинная обрезалась), кому уйдёт — во всплывающей подсказке.
+              title={toClient ? (thread?.target ? "Уйдёт клиенту в его мессенджер" : "Клиенту она не уйдёт") : current.hint}
               aria-label="Сообщение"
               className="max-h-32 min-h-[38px] flex-1 resize-none bg-transparent py-2 text-[14.5px] text-ink placeholder:text-faint focus:outline-none"
             />
