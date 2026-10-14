@@ -546,6 +546,8 @@ async function main() {
   await call(internal.seed.processCalls, { ids: callIds.slice(-liveRows.length) as Id<"calls">[] });
   console.log(`AI разбирает записи звонков: ${liveRows.length}. Через ~30–60 секунд появятся новые заявки.`);
   if (links.length) console.log(`Привязки Telegram сохранены: ${links.length}`);
+  // Аналитика соберётся заново по уже залитым данным (крон convex/stats.ts).
+  await call(internal.seed.resetStats, {});
   console.log(`Готово. Логины: ${logins.slice(0, 5).map((l) => l.login).join(", ")}… (пароль — из DEMO_PASSWORD)`);
 }
 

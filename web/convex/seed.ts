@@ -5,7 +5,7 @@
 import { ConvexError, v } from "convex/values";
 import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./lib/functions";
+import { internalAction, internalMutation, internalQuery } from "./lib/functions";
 import { normalizeLogin } from "./lib/login";
 import { env } from "./env";
 import { createLogin } from "./users";
@@ -61,13 +61,18 @@ const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));
 
 /**
  * Демо-данные идут мимо мутаций (и мимо очереди показателей): аналитику соберёт заново крон convex/stats.ts —
- * как при первом запуске. Идущий пересчёт без строки состояния останавливается и начинается снова.
+ * как при первом запуске. Сбрасываем состояние пересчёта один раз, в конце заливки (seed-convex.ts): сброс на каждой
+ * пачке конфликтовал с идущим пересчётом (оба пишут statsState) и ронял заливку большого объёма.
  */
-async function resetStats(ctx: MutationCtx, table: string): Promise<void> {
-  if (table !== "leads" && table !== "orders") return;
-  const stats = await ctx.db.query("statsState").first();
-  if (stats) await ctx.db.delete(stats._id);
-}
+export const resetStats = internalMutation({
+  args: {},
+  handler: async (base): Promise<void> => {
+    assertSeedAllowed();
+    const ctx = forTenant(base, DEFAULT_TENANT);
+    const stats = await ctx.db.query("statsState").first();
+    if (stats) await ctx.db.delete(stats._id);
+  },
+});
 
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
 export const ingest = internalMutation({
@@ -78,7 +83,6 @@ export const ingest = internalMutation({
     const ctx = forTenant(base, DEFAULT_TENANT);
     const ids: string[] = [];
     for (const r of rows) ids.push(await ctx.db.insert(table, r));
-    await resetStats(ctx, table);
     return ids;
   },
 });
@@ -92,7 +96,6 @@ export const patchMany = internalMutation({
       const id = ctx.db.normalizeId(table, p.id);
       if (id) await ctx.db.patch(id, p.fields);
     }
-    await resetStats(ctx, table);
   },
 });
 
