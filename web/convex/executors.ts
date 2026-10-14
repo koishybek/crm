@@ -142,10 +142,13 @@ export const list = query({
 });
 
 export const detail = query({
-  args: { id: v.id("executors") },
-  handler: async (ctx, { id }) => {
+  args: { id: v.string() },
+  handler: async (ctx, { id: raw }) => {
     const me = await requireRole(ctx, TEAM);
     const scope = scopeOf(me);
+    // id приходит из адреса страницы: чужая строка — «не найдено», а не падение экрана.
+    const id = ctx.db.normalizeId("executors", raw);
+    if (!id) return null;
     const e = await ctx.db.get(id);
     if (!e || (scope && !e.categories.some((c) => scope.includes(c)))) return null;
     const orders = await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", id)).collect();

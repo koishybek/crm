@@ -49,9 +49,12 @@ export const list = query({
 });
 
 export const detail = query({
-  args: { id: v.id("clients") },
-  handler: async (ctx, { id }) => {
+  args: { id: v.string() },
+  handler: async (ctx, { id: raw }) => {
     const me = await requirePerm(ctx, "clients.view");
+    // id приходит из адреса страницы: чужая строка — «не найдено», а не падение экрана.
+    const id = ctx.db.normalizeId("clients", raw);
+    if (!id) return null;
     const c = await ctx.db.get(id);
     if (!c) return null;
     const scope = scopeOf(me);

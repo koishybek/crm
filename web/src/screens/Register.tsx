@@ -90,7 +90,7 @@ export default function Register() {
                 {(id) => (
                   <div className="relative">
                     <Input id={id} icon={Lock} type={show ? "text" : "password"} autoComplete="new-password" maxLength={128} value={password} onChange={(e) => setPassword(e.target.value)} />
-                    <button type="button" onClick={() => setShow((v) => !v)} className="absolute top-1/2 right-3.5 -translate-y-1/2 text-muted hover:text-ink" aria-label={show ? "Скрыть пароль" : "Показать пароль"}>
+                    <button type="button" onClick={() => setShow((v) => !v)} className="hit absolute top-1/2 right-3.5 -translate-y-1/2 text-muted hover:text-ink" aria-label={show ? "Скрыть пароль" : "Показать пароль"}>
                       {show ? <EyeOff size={19} /> : <Eye size={19} />}
                     </button>
                   </div>

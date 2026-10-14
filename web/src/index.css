@@ -161,6 +161,13 @@
     scrollbar-width: thin;
     scrollbar-color: #ddd8cc transparent;
   }
+  /* Маленькая иконка-кнопка: область нажатия шире видимой (палец на телефоне), вёрстка не меняется.
+     Элемент должен быть позиционирован (relative или absolute). */
+  .hit::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
   /* Тёмный сайдбар: полоса прокрутки — приглушённая, не светлая. */
   .scroll-dark {
     scrollbar-color: #3d3a33 transparent;

@@ -273,7 +273,7 @@ function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: 
             <Menu
               width={240}
               trigger={(toggle) => (
-                <button onClick={toggle} aria-label="Действия с заказом" className="inline-flex h-7 w-7 items-center justify-center rounded-[7px] text-muted hover:bg-[#f4f2ec]">
+                <button onClick={toggle} aria-label="Действия с заказом" className="hit relative inline-flex h-7 w-7 items-center justify-center rounded-[7px] text-muted hover:bg-[#f4f2ec]">
                   <Ellipsis size={17} className="rotate-90" />
                 </button>
               )}

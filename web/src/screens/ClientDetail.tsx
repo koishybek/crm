@@ -369,7 +369,7 @@ function Row({ icon: Icon, label, children, copy }: { icon: LucideIcon; label: s
       <dt className="text-[14px] leading-snug text-muted">{label}</dt>
       <dd className="min-w-0 text-[14px] leading-snug font-medium break-words text-ink">{children}</dd>
       {copy ? (
-        <button onClick={copy} aria-label={`Скопировать: ${label}`} className="text-faint hover:text-brand-ink">
+        <button onClick={copy} aria-label={`Скопировать: ${label}`} className="hit relative text-faint hover:text-brand-ink">
           <Copy size={16} />
         </button>
       ) : (

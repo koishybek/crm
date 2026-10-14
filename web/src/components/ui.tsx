@@ -162,8 +162,9 @@ export function Card({ title, action, children, className, bodyClass, titleExtra
   return (
     <section className={cn("card min-w-0", className)}>
       {(title || action) && (
-        <header className="flex items-center justify-between gap-3 px-5 pt-[18px] pb-3">
-          <h2 className="flex min-w-0 items-center gap-3 text-[18px] font-semibold tracking-[-0.01em] text-ink">
+        <header className="flex flex-wrap items-center justify-between gap-3 px-5 pt-[18px] pb-3">
+          {/* Узкий экран: значок рядом с заголовком и кнопка действия переносятся строкой ниже, а не уходят за край. */}
+          <h2 className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 text-[18px] font-semibold tracking-[-0.01em] text-ink">
             {Icon && (
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#fff0c4] text-[#3a2c00]">
                 <Icon size={19} strokeWidth={1.9} aria-hidden />
@@ -402,16 +403,17 @@ export function Pagination({ page, total, perPage, onChange, noun = "запис�
       <div className="text-[13.5px] text-muted">
         Показано {from}–{to} из {total} {noun}
       </div>
-      <div className="flex items-center gap-1.5">
+      {/* На телефоне кнопки страниц переносятся, а не уходят за край экрана. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-1.5">
         <button className="inline-flex h-9 w-9 items-center justify-center rounded-[9px] border border-line text-ink-2 disabled:opacity-40" disabled={page === 1} onClick={() => onChange(page - 1)} aria-label="Назад">
           <ChevronLeft size={17} />
         </button>
         {uniq.map((p, i) => (
-          <span key={p} className="flex items-center gap-1.5">
+          <span key={p} className="flex items-center gap-1 sm:gap-1.5">
             {i > 0 && p - uniq[i - 1]! > 1 && <span className="px-0.5 text-muted">…</span>}
             <button
               onClick={() => onChange(p)}
-              className={cn("inline-flex h-9 min-w-9 items-center justify-center rounded-[9px] px-2 text-[14px] font-semibold", p === page ? "bg-brand text-on-brand" : "text-ink-2 hover:bg-[#f4f2ec]")}
+              className={cn("inline-flex h-9 min-w-8 items-center justify-center rounded-[9px] px-1.5 text-[14px] font-semibold sm:min-w-9 sm:px-2", p === page ? "bg-brand text-on-brand" : "text-ink-2 hover:bg-[#f4f2ec]")}
             >
               {p}
             </button>

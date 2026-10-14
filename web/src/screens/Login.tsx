@@ -162,7 +162,7 @@ export default function Login() {
                   placeholder="Введите пароль"
                   className="field h-[50px] pr-12 pl-12 text-[15px]"
                 />
-                <button type="button" onClick={() => setShow((v) => !v)} className="absolute top-1/2 right-3.5 -translate-y-1/2 text-muted hover:text-ink" aria-label={show ? "Скрыть пароль" : "Показать пароль"}>
+                <button type="button" onClick={() => setShow((v) => !v)} className="hit absolute top-1/2 right-3.5 -translate-y-1/2 text-muted hover:text-ink" aria-label={show ? "Скрыть пароль" : "Показать пароль"}>
                   {show ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               </div>

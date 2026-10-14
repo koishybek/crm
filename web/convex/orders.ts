@@ -72,10 +72,13 @@ export const list = query({
 
 /** Карточка заказа. t — метка обновления подписанных ссылок на файлы (src/data/files.ts). */
 export const detail = query({
-  args: { id: v.id("orders"), t: v.optional(v.number()) },
-  handler: async (ctx, { id }) => {
+  args: { id: v.string(), t: v.optional(v.number()) },
+  handler: async (ctx, { id: raw }) => {
     const me = await requireRole(ctx, TEAM);
     const scope = scopeOf(me);
+    // id приходит из адреса страницы: чужая строка — «не найдено», а не падение экрана.
+    const id = ctx.db.normalizeId("orders", raw);
+    if (!id) return null;
     const o = await ctx.db.get(id);
     if (!o || !inScope(scope, o.category)) return null;
     const [client, messages, history, all, active, reachable] = await Promise.all([

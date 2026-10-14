@@ -200,9 +200,12 @@ export const forOrder = query({
 
 /** Последний документ вида для печатной страницы /docs/<вид>/<заказ>: снимок, как выпущен. null — ещё не выпускали. */
 export const latest = query({
-  args: { orderId: v.id("orders"), kind: documentKind },
-  handler: async (ctx, { orderId, kind }): Promise<(DocumentSnapshot & { id: string; replaced: boolean; orderStatus: string }) | null> => {
+  args: { orderId: v.string(), kind: documentKind },
+  handler: async (ctx, { orderId: raw, kind }): Promise<(DocumentSnapshot & { id: string; replaced: boolean; orderStatus: string }) | null> => {
     await requirePerm(ctx, "money.view", STAFF);
+    // id приходит из адреса страницы: чужая строка — «не найдено», а не падение экрана.
+    const orderId = ctx.db.normalizeId("orders", raw);
+    if (!orderId) return null;
     const o = await ctx.db.get(orderId);
     if (!o) return null;
     const d = await current(ctx, orderId, kind);

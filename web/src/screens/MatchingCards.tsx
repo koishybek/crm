@@ -106,7 +106,7 @@ function DistrictsCard() {
               {(map[city] ?? []).map((d) => (
                 <span key={d} className="inline-flex items-center gap-1 rounded-[8px] bg-[#f4f2ec] py-1 pr-1 pl-2.5 text-[13px] text-ink">
                   {d}
-                  <button type="button" aria-label={`Убрать район ${d}`} className="rounded-[6px] p-0.5 text-muted hover:bg-white hover:text-bad" onClick={() => change(city, (map[city] ?? []).filter((x) => x !== d))}>
+                  <button type="button" aria-label={`Убрать район ${d}`} className="hit relative rounded-[6px] p-0.5 text-muted hover:bg-white hover:text-bad" onClick={() => change(city, (map[city] ?? []).filter((x) => x !== d))}>
                     <X size={14} aria-hidden />
                   </button>
                 </span>
