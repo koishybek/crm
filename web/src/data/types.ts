@@ -366,7 +366,7 @@ export interface DB {
 /** Каналы переписки с клиентами в едином чате «Сообщения». */
 export type Channel = "telegram" | "whatsapp" | "olx" | "site";
 
-export type AuditEntity = "lead" | "order" | "client" | "executor" | "user" | "catalog" | "settings" | "integration" | "call" | "conversation" | "review" | "system";
+export type AuditEntity = "lead" | "order" | "client" | "executor" | "user" | "catalog" | "settings" | "integration" | "call" | "conversation" | "review" | "system" | "export";
 
 /** Запись журнала действий. actorName — «Система», «AI», «OLX»… если действовал не человек. */
 export interface AuditEntry {

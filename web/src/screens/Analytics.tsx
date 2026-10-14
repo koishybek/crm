@@ -10,6 +10,7 @@ import { api } from "../../convex/_generated/api";
 import { useTeam } from "../data/hooks";
 import type { SourceId } from "../data/types";
 import { SourceIcon } from "../components/icons";
+import { ExportButton } from "../components/ExportButton";
 import { Avatar, Button, Card, KpiCard, Loading, PageHeader } from "../components/ui";
 import { PayoutsCard } from "../components/PayoutsCard";
 import { ExecutorRating } from "../components/Rating";
@@ -119,6 +120,7 @@ export default function Analytics() {
             <Button variant="secondary" icon={Download} className="h-[46px] bg-white" onClick={download}>
               Экспорт CSV
             </Button>
+            <ExportButton kinds={["payments", "orders", "payouts", "leads", "calls", "executors", "audit"]} label="Выгрузки за период" />
             <PeriodSelect value={period} onChange={setPeriod} options={["7d", "30d", "90d"]} />
           </>
         }

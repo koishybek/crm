@@ -4,16 +4,16 @@ import { usePaginatedQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { AuditObjectLink, auditRole, AuditWho } from "../components/AuditHistory";
+import { AuditObjectLink, AuditWho } from "../components/AuditHistory";
 import { Button, EmptyState, Input, Loading, PageHeader, Select } from "../components/ui";
 import { AUDIT_ENTITIES, AUDIT_ENTITY, AUDIT_QUERY_MAX } from "../data/audit";
-import { AUDIT_EXPORT_MAX, fetchAuditForExport, type AuditFilters } from "../data/auditLog";
+import type { AuditFilters } from "../data/auditLog";
+import { createExport, downloadFile, exportedText } from "../data/exportActions";
 import { ROLE_LABEL } from "../data/catalog";
 import { useNow, useTeam } from "../data/hooks";
 import { rangeOf } from "../data/metrics";
 import { report, toast } from "../data/store";
 import type { AuditEntity, AuditEntry, Role } from "../data/types";
-import { exportCsv, stamp } from "../lib/csv";
 import { date, dateTime, dayDiff, hm, num, plural } from "../lib/format";
 
 type Period = "today" | "7d" | "30d" | "90d" | "all";
@@ -29,6 +29,8 @@ const PAGE = 50;
 const AUTO_PAGES = 5;
 const STAFF_ORDER: Role[] = ["owner", "operator", "manager", "executor"];
 const FIELD = "[&_input]:h-[48px] [&_input]:border-line [&_select]:h-[48px] [&_select]:border-line";
+/** «За всё время» в выгрузке — с начала работы системы. */
+const ALL_TIME = "2020-01-01T00:00:00.000Z";
 
 export default function AuditLog() {
   const team = useTeam();
@@ -97,20 +99,14 @@ export default function AuditLog() {
     setQ("");
   };
 
+  // Файл собирает сервер по тем же фильтрам (ТЗ п.26.9): все записи периода, ссылка — подписанная, выгрузка — в журнале.
   const exportAll = async () => {
     setExporting(true);
-    const r = await fetchAuditForExport(filters);
+    const r = await createExport({ kind: "audit", from: filters.from ?? ALL_TIME, to: new Date().toISOString(), actorId: filters.actorId, entity: filters.entity, q: filters.q });
     setExporting(false);
     if (!report(r)) return;
-    if (!r.value.rows.length) return toast("За выбранный период записей нет", "info");
-    exportCsv(
-      [
-        ["Дата и время", "Кто", "Роль", "Объект", "Описание", "Действие", "ID объекта"],
-        ...r.value.rows.map((e) => [dateTime(e.at), e.actorName, auditRole(e), AUDIT_ENTITY[e.entity].one, e.summary, e.action, e.entityId]),
-      ],
-      `zhurnal-deystviy-${stamp()}.csv`,
-    );
-    if (r.value.truncated) toast(`Выгружены последние ${num(AUDIT_EXPORT_MAX)} записей — для остальных выберите период короче`, "info");
+    downloadFile(r.value.url);
+    toast(exportedText(r.value.rows, r.value.truncated), r.value.truncated ? "info" : "ok");
   };
 
   return (

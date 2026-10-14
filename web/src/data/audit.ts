@@ -1,12 +1,20 @@
 // Журнал действий: подписи, правила доступа к «Истории» и поиск — общие для сервера (convex/audit.ts)
 // и интерфейса, чтобы правило «кто что видит» было записано один раз.
+import { ROLE_LABEL } from "./catalog";
 import { textKey } from "./skills";
-import type { AuditEntity, Role } from "./types";
+import type { AuditEntity, AuditEntry, Role } from "./types";
 
 /** Автоматические авторы записей: действовал не сотрудник, а система, AI или канал. */
 export const AUDIT_SYSTEM_ACTORS = ["Система", "AI", "Telegram", "WhatsApp", "OLX", "Сайт", "API", "АТС"] as const;
 export type SystemActor = (typeof AUDIT_SYSTEM_ACTORS)[number];
 export const isSystemActor = (s: string): s is SystemActor => (AUDIT_SYSTEM_ACTORS as readonly string[]).includes(s);
+
+/** Роль автора на момент действия; у системы, AI и каналов — «автоматически» (экран журнала и выгрузка). */
+export function auditRoleLabel(w: Pick<AuditEntry, "actorId" | "actorName" | "actorRole">): string {
+  if (!w.actorId && isSystemActor(w.actorName)) return "автоматически";
+  const role = w.actorRole;
+  return role !== undefined && Object.prototype.hasOwnProperty.call(ROLE_LABEL, role) ? ROLE_LABEL[role as Role] : "сотрудник";
+}
 
 /** Типы объектов журнала: «one» — подпись ссылки на объект, «many» — пункт фильтра. */
 export const AUDIT_ENTITY: Record<AuditEntity, { one: string; many: string }> = {
@@ -21,7 +29,8 @@ export const AUDIT_ENTITY: Record<AuditEntity, { one: string; many: string }> = 
   call: { one: "Звонок", many: "Звонки" },
   conversation: { one: "Переписка", many: "Переписка" },
   review: { one: "Отзыв", many: "Отзывы" },
-  system: { one: "Система", many: "Система и выгрузки" },
+  system: { one: "Система", many: "Система и импорт" },
+  export: { one: "Выгрузка", many: "Выгрузки" },
 };
 export const AUDIT_ENTITIES = Object.keys(AUDIT_ENTITY) as AuditEntity[];
 

@@ -18,6 +18,7 @@ import { useNavigate, useSearchParams } from "react-router";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AiCard } from "../components/AiCard";
+import { ExportButton } from "../components/ExportButton";
 import { SignedAudio } from "../components/SignedMedia";
 import { Avatar, Badge, Button, Drawer, EmptyState, KpiCard, Loading, PageHeader, Pagination, Tabs } from "../components/ui";
 import type { Tone } from "../data/catalog";
@@ -131,6 +132,7 @@ export default function Calls() {
         subtitle="Входящие и исходящие, записи разговоров и AI-разбор"
         actions={
           <>
+            <ExportButton kinds={["calls"]} height={44} />
             <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.amr" className="hidden" onChange={(e) => (e.target.files?.[0] && void upload(e.target.files[0]), (e.target.value = ""))} />
             <Button variant="secondary" icon={Upload} disabled={uploading} onClick={() => fileRef.current?.click()}>
               {uploading ? "Загружаем…" : "Загрузить запись"}

@@ -12,6 +12,7 @@ import { api } from "../../convex/_generated/api";
 import { convertLead, report, setLeadStatus, toast } from "../data/store";
 import { useMe, useTeam } from "../data/hooks";
 import { Source } from "../components/icons";
+import { ExportButton } from "../components/ExportButton";
 import { Avatar, Badge, Button, EmptyState, KpiCard, Loading, Menu, MenuItem, PageHeader, Pagination, Select, Tabs } from "../components/ui";
 import { cn, dayDiff, phone, when } from "../lib/format";
 
@@ -105,7 +106,7 @@ export default function Leads() {
 
   return (
     <>
-      <PageHeader title="Заявки" subtitle="Все входящие заявки из разных источников" />
+      <PageHeader title="Заявки" subtitle="Все входящие заявки из разных источников" actions={<ExportButton kinds={["leads"]} />} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <KpiCard icon={FileText} tone="blue" label="Новые заявки" value={newCount} caption={newCount ? "ждут первого ответа" : "все разобраны"} onClick={() => (setTab("new"), setPeriod("all"))} />

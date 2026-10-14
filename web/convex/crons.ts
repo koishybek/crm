@@ -20,6 +20,9 @@ crons.interval("operations", { minutes: 5 }, internal.escalations.run, {});
 // ТЗ п.20, п.26: резервная копия данных каждую ночь — 21:00 UTC = 02:00 по Алматы.
 crons.cron("daily backup", "0 21 * * *", internal.backup.run, {});
 
+// Выгрузки CSV живут сутки: старше — удаляются вместе с файлом (convex/exports.ts).
+crons.interval("exports cleanup", { hours: 1 }, internal.exports.cleanup, {});
+
 // Уборка служебных таблиц: отжившие счётчики лимитов и принятые обновления Telegram.
 crons.interval("cleanup service tables", { hours: 1 }, internal.maintenance.cleanup, {});
 

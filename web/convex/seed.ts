@@ -31,6 +31,7 @@ const WIPE_TABLES = [
   "oauthStates",
   "uploads",
   "escalations",
+  "exports",
   "categories",
   "services",
   "authAccounts",

@@ -101,6 +101,7 @@ export const auditEntity = v.union(
   v.literal("conversation"),
   v.literal("review"),
   v.literal("system"),
+  v.literal("export"),
 );
 export const aiSummary = v.object({
   summary: v.string(),
@@ -590,6 +591,22 @@ export default defineSchema({
   })
     .index("by_at", ["at"])
     .index("by_executor", ["executorId", "at"]),
+
+  /**
+   * Выгрузки CSV владельца (ТЗ п.26.9): файл отдаётся только по подписанной ссылке и живёт сутки (expiresAt),
+   * потом уборка (exports.cleanup) удаляет и файл, и строку. from/to — период выгрузки.
+   */
+  exports: defineTable({
+    kind: v.string(),
+    from: v.string(),
+    to: v.string(),
+    rows: v.number(),
+    size: v.number(),
+    fileId: v.id("_storage"),
+    by: v.id("users"),
+    at: v.string(),
+    expiresAt: v.string(),
+  }).index("by_expires", ["expiresAt"]),
 
   /** Резервные копии данных (ТЗ п.20, п.26): JSON-снимок в хранилище. */
   backups: defineTable({ at: v.string(), fileId: v.id("_storage"), size: v.number(), docs: v.number(), by: v.optional(v.id("users")) }).index("by_at", ["at"]),
