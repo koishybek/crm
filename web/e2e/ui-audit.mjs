@@ -33,7 +33,7 @@ async function probe(p, label, phone) {
       if (e.scrollHeight > e.clientHeight + 4 && e.clientHeight > 120 && (cs.position === "fixed" || cs.position === "sticky" || e.tagName === "ASIDE" || e.tagName === "NAV") && !/(auto|scroll)/.test(cs.overflowY))
         out.stuck.push(`${e.tagName.toLowerCase()} «${name(e)}» ${e.scrollHeight}>${e.clientHeight}`);
       // Текст не влезает по ширине, обрезан без многоточия.
-      if (e.children.length === 0 && e.innerText && e.scrollWidth > e.clientWidth + 2 && cs.overflowX !== "visible" && cs.textOverflow !== "ellipsis" && !/(auto|scroll)/.test(cs.overflowX))
+      if (e.children.length === 0 && e.innerText && e.scrollWidth > e.clientWidth + 2 && cs.overflowX !== "visible" && (cs.textOverflow !== "ellipsis" || /flex/.test(cs.display)) && !/(auto|scroll)/.test(cs.overflowX))
         out.clipped.push(`«${name(e)}»`);
       if (phone && /^(BUTTON|A)$/.test(e.tagName) || (phone && e.getAttribute("role") === "button")) {
         const b = e.getBoundingClientRect();

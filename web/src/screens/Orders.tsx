@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { CITIES, KANBAN, ORDER_STATUS, serviceById, type Tone } from "../data/catalog";
 import { useMe, useNow } from "../data/hooks";
-import { isOverdue, orderBadge, payout } from "../data/logic";
+import { isOverdue, orderBadge, orderBadgeShort, payout } from "../data/logic";
 import { can } from "../data/permissions";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -159,7 +159,7 @@ export default function Orders() {
         <Loading />
       ) : view === "board" ? (
         <div className="scroll-x scroll-thin -mx-4 mt-4 px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0">
-          <div className="grid min-w-[1080px] grid-cols-4 gap-3.5">
+          <div className="grid min-w-[1000px] grid-cols-4 gap-3.5">
             {columns.map((col) => {
               const shown = col.id === "done" ? col.items.slice(0, doneLimit) : col.items;
               return (
@@ -257,7 +257,7 @@ function FilterCard({ label, children }: { label: string; children: ReactNode })
 function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: number }) {
   const nav = useNavigate();
   const seesMoney = can(useMe(), "money.view");
-  const b = orderBadge(o, now);
+  const b = orderBadgeShort(o, now);
   const late = isOverdue(o, now);
   return (
     <article className="card relative p-4 transition-shadow hover:shadow-[0_10px_28px_rgba(32,76,127,0.12)]">
@@ -340,8 +340,11 @@ function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: 
         ) : (
           <span />
         )}
-        <Badge tone={b.tone} className="max-w-[150px] truncate">
-          {b.label}
+        {/* Длинный статус («Ожидает исполнителя») в узкой колонке — с многоточием, полный — в подсказке. */}
+        <Badge tone={b.tone} className="min-w-0 max-w-[150px] shrink justify-start">
+          <span className="truncate" title={b.full}>
+            {b.label}
+          </span>
         </Badge>
       </div>
       <span className="sr-only">{serviceById(o.serviceId).label}</span>

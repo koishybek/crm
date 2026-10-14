@@ -64,6 +64,7 @@ import type * as lib_districts from "../lib/districts.js";
 import type * as lib_domain from "../lib/domain.js";
 import type * as lib_dto from "../lib/dto.js";
 import type * as lib_escalation from "../lib/escalation.js";
+import type * as lib_executorOrders from "../lib/executorOrders.js";
 import type * as lib_exportRows from "../lib/exportRows.js";
 import type * as lib_feed from "../lib/feed.js";
 import type * as lib_files from "../lib/files.js";
@@ -208,6 +209,7 @@ declare const fullApi: ApiFromModules<{
   "lib/domain": typeof lib_domain;
   "lib/dto": typeof lib_dto;
   "lib/escalation": typeof lib_escalation;
+  "lib/executorOrders": typeof lib_executorOrders;
   "lib/exportRows": typeof lib_exportRows;
   "lib/feed": typeof lib_feed;
   "lib/files": typeof lib_files;

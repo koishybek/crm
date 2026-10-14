@@ -14,6 +14,7 @@
     "seed": "tsx scripts/seed-convex.ts",
     "e2e:audit": "node e2e/ui-audit.mjs",
     "e2e:flow": "node e2e/flow.mjs",
+    "e2e:actions": "node e2e/actions.mjs",
     "deploy:convex": "convex deploy -y --typecheck disable",
     "deploy": "vite build && wrangler deploy"
   },

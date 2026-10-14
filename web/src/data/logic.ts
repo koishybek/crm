@@ -91,6 +91,19 @@ export const paymentState = (o: Order): PayState => {
 export const orderBadge = (o: Order, now = Date.now()): { label: string; tone: Tone } =>
   isOverdue(o, now) ? { label: "Просрочка", tone: "red" } : ORDER_STATUS[o.status];
 
+/** Короткие названия статусов для узких карточек доски (полное — в подсказке). */
+const SHORT_STATUS: Partial<Record<OrderStatus, string>> = {
+  awaiting_executor: "В ленте",
+  assigned: "Назначен",
+  accepted: "Принят",
+  awaiting_client: "Ждёт клиента",
+  awaiting_payment: "Ждёт оплаты",
+};
+export const orderBadgeShort = (o: Order, now = Date.now()): { label: string; full: string; tone: Tone } => {
+  const b = orderBadge(o, now);
+  return { ...b, full: b.label, label: isOverdue(o, now) ? b.label : (SHORT_STATUS[o.status] ?? b.label) };
+};
+
 /** Заявку после конвертации показываем по прогрессу её заказа — оператору так понятнее. */
 export const leadBadge = (l: Lead, order: Order | undefined, now = Date.now()): { label: string; tone: Tone } => {
   if (l.status !== "converted" || !order) return LEAD_STATUS[l.status];
