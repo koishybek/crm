@@ -10,6 +10,7 @@ import { insertClient } from "../clients";
 import { loadCatalog } from "../catalog";
 import { env } from "../env";
 import { audit, type AuditActor } from "./audit";
+import { districtOrNone } from "./districts";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./domain";
 
 /** Каналы, в которых клиенту удобно отвечать сообщением, — они становятся «предпочитаемым каналом» нового клиента. */
@@ -27,6 +28,8 @@ export interface IntakeInput {
   serviceId?: string;
   city?: string;
   address?: string;
+  /** Район, если клиент назвал его явно (AI-разбор); не из справочника города — без района. */
+  district?: string;
   /** Когда клиенту удобно — как он сказал (AI-разбор). */
   preferredTime?: string;
   /** Бюджет клиента, ₸ (AI-разбор) — только для сотрудников. */
@@ -113,6 +116,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     address,
     preferredTime: a.preferredTime?.trim().slice(0, 120) || undefined,
     budget: cleanBudget(a.budget),
+    district: await districtOrNone(ctx, city, a.district),
   });
   if (a.message) {
     await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: a.source, title: a.message.title, text: a.message.text.slice(0, 1000), at });

@@ -4,6 +4,7 @@ import { Ban, Flame, Lock, MapPin, TriangleAlert } from "lucide-react";
 import { memo } from "react";
 import { Link } from "react-router";
 import { serviceById } from "../../data/catalog";
+import { districtLabel } from "../../data/cities";
 import { isFresh, type FeedItem } from "../../data/workerFeed";
 import { isPast } from "../../data/workerTime";
 import { cn, money } from "../../lib/format";
@@ -62,7 +63,10 @@ export const OrderCard = memo(function OrderCard({ item, now, mode, highlighted,
           <DueText deadline={item.deadline} now={now} mode="feed" />
           <span className="inline-flex min-w-0 items-center gap-2 text-ink-2">
             <MapPin size={18} className="shrink-0" aria-hidden />
-            <span className="truncate">{item.city}</span>
+            <span className="truncate">
+              {item.city}
+              {item.district ? `, ${districtLabel(item.district)}` : ""}
+            </span>
           </span>
         </div>
         {item.description.trim() && <p className={cn("mt-2 line-clamp-2 text-[14.5px] leading-5 wrap-anywhere", MUTED)}>{item.description}</p>}

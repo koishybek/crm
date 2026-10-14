@@ -76,6 +76,8 @@ export interface WorkerProfile {
   unavailableReason?: string;
   cooperation: Executor["cooperation"];
   joinedAt: string;
+  /** Районы, где мастер берёт заказы; пусто — весь город. */
+  districts: string[];
   telegram: { enabled: boolean; linked: boolean };
   stats: ExecutorStats;
   /** Последние отзывы, новые сверху. */

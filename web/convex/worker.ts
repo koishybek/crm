@@ -8,13 +8,16 @@ import { describeForExecutor, executorThread, toExecutor, toMessage, toWorkerOrd
 import { fileSigner } from "./lib/files";
 import { loadOf, openOrdersFor, suitableUsers } from "./lib/matching";
 import { finishWork } from "./lib/money";
+import { baseTerms, rateTerms } from "./lib/rates";
+import { recordRefusal } from "./lib/stats";
 import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
 import { applyShift, shiftArgs } from "./executors";
 import { orderNotice } from "./clientNotify";
-import { contactsOpen, fitsOrder, maxActiveOf, payout } from "../src/data/logic";
+import { contactsOpen, fitsOrder, maxActiveOf, payout, payoutFor } from "../src/data/logic";
 import { ACTIVE_STATUSES, ORDER_STATUS } from "../src/data/catalog";
+import { districtLabel } from "../src/data/cities";
 import { money, plural, shortName } from "../src/lib/format";
 
 async function myExecutor(ctx: Parameters<typeof requireRole>[0]) {
@@ -34,7 +37,8 @@ export const feed = query({
     const { ex } = await myExecutor(ctx);
     return {
       executor: toExecutor(ex),
-      feed: (await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(o, { contacts: false })),
+      // В ленте — сумма по ставке этого мастера (ТЗ п.14.5): за неё он и возьмёт заказ.
+      feed: (await openOrdersFor(ctx, ex)).map((o) => toWorkerOrder(o, { contacts: false, payout: payoutFor(ex.rates, o) })),
       load: { active: await loadOf(ctx, ex._id), max: maxActiveOf(ex) },
     };
   },
@@ -70,8 +74,11 @@ export const order = query({
   },
 });
 
-/** Данные карточки для Telegram. Контакты — только пока заказ у мастера в работе (contactsOpen). */
-export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean): Promise<CardData> {
+/**
+ * Данные карточки для Telegram. Контакты — только пока заказ у мастера в работе (contactsOpen).
+ * sum — сколько получит этот мастер, если заказ ещё не его (лента, «Новый заказ»); иначе — выплата заказа.
+ */
+export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean, sum?: number): Promise<CardData> {
   const cat = await loadCatalog(ctx);
   return {
     id: o._id,
@@ -79,7 +86,7 @@ export async function cardOf(ctx: QueryCtx, o: Doc<"orders">, contacts: boolean)
     service: cat.label(o.serviceId),
     city: o.city,
     deadline: o.deadline,
-    payout: payout(o),
+    payout: sum ?? payout(o),
     description: describeForExecutor(o.description, contacts),
     status: o.status,
     urgent: o.priority === "urgent",
@@ -96,11 +103,22 @@ export async function announceOrder(ctx: MutationCtx, o: Doc<"orders">, users: I
   if (!users.length) return;
   const service = (await loadCatalog(ctx)).label(o.serviceId);
   const title = opts.again ? `Снова свободен заказ №${o.number}` : `Новый заказ №${o.number}`;
-  await notify(ctx, users, `${title}: ${service}, ${o.city}. Оплата исполнителю ${money(payout(o))}`, {
-    link: `/w/orders/${o._id}`,
-    html: cardHtml(await cardOf(ctx, o, false), `${opts.again ? "🔁" : "🆕"} ${title}`),
-    buttons: workerButtons("awaiting_executor", o._id),
-  });
+  const where = o.district ? `${o.city}, ${districtLabel(o.district)}` : o.city;
+  // У каждого мастера своя ставка (ТЗ п.14.5): одно сообщение на одну сумму.
+  const bySum = new Map<number, Id<"users">[]>();
+  for (const id of users) {
+    const u = await ctx.db.get(id);
+    const ex = u?.executorId ? await ctx.db.get(u.executorId) : null;
+    const sum = payoutFor(ex?.rates, o);
+    bySum.set(sum, [...(bySum.get(sum) ?? []), id]);
+  }
+  for (const [sum, to] of bySum) {
+    await notify(ctx, to, `${title}: ${service}, ${where}. Оплата исполнителю ${money(sum)}`, {
+      link: `/w/orders/${o._id}`,
+      html: cardHtml(await cardOf(ctx, o, false, sum), `${opts.again ? "🔁" : "🆕"} ${title}`),
+      buttons: workerButtons("awaiting_executor", o._id),
+    });
+  }
 }
 
 /**
@@ -160,8 +178,11 @@ export async function takeFor(ctx: MutationCtx, userId: Id<"users">, orderId: Id
   if (load >= max) throw new ConvexError(`У вас уже ${load} ${plural(load, "заказ", "заказа", "заказов")} в работе — это ваш лимит. Завершите текущий, чтобы взять новый`);
   const fit = fitsOrder(ex, o, load);
   if (!fit.fits) throw new ConvexError(`Этот заказ вам не подходит (${fit.reasons.join("; ")})`);
-  // acceptedPayout — сумма, за которую мастер взялся: дальше любая её правка приходит ему уведомлением (E7).
-  await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted", acceptedPayout: payout(o) });
+  // Выплата — по ставке мастера (ТЗ п.14.5); acceptedPayout — сумма, за которую он взялся: дальше любая её правка
+  // приходит ему уведомлением (E7).
+  const terms = rateTerms(o, ex, "executor");
+  const sum = payout({ ...o, ...terms });
+  await ctx.db.patch(orderId, { executorId: ex._id, assignedAt: nowIso(), status: "accepted", acceptedPayout: sum, ...terms });
   await log(ctx, orderId, "taken", "Исполнитель взял заказ из ленты", userActor(me._id), { from: o.status, to: "accepted" });
   await audit(ctx, me, "order.taken", `${shortName(ex.name)} взял заказ №${o.number} из ленты`, { entityId: orderId, meta: { executorId: ex._id } });
   await notify(ctx, await staffIds(ctx, o.category), `${shortName(ex.name)} взял заказ №${o.number}`, { link: `/orders/${orderId}`, tone: "ok", email: { kind: "order_assigned" } });
@@ -199,13 +220,16 @@ export async function actFor(ctx: MutationCtx, userId: Id<"users">, id: Id<"orde
   const step = FLOW[action];
   if (!(step.from as readonly string[]).includes(o.status)) throw new ConvexError("Статус уже изменился — обновите заказ");
   // Подтвердил — фиксируем выплату, на которую он согласился; отказался — заказ снова ничей.
+  // Отказ возвращает заказу его условия выплаты: ставка ушедшего мастера к следующему не относится.
   const extra: Partial<Doc<"orders">> =
-    action === "decline" ? { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined } : action === "accept" ? { acceptedPayout: payout(o) } : {};
+    action === "decline" ? { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined, ...baseTerms(o) } : action === "accept" ? { acceptedPayout: payout(o) } : {};
   const actor = userActor(me._id);
   // «Работа выполнена»: клиенту — «заказ выполнен», статус сразу по деньгам — «Ожидает оплаты» или «Оплачен».
   let settled: StatusMove | null = null;
   if (action === "done") settled = (await finishWork(ctx, o, actor, step.text)).settled;
   else await setStatus(ctx, o, step.to, actor, step.text, extra);
+  // Отказ — в историю мастера за 90 дней (ТЗ п.12.6): подбор учитывает его при следующих заказах.
+  if (action === "decline") await recordRefusal(ctx, ex._id);
   await audit(ctx, me, action === "decline" ? "order.declined" : "order.status", `Заказ №${o.number}: ${lowerFirst(step.text)} (${shortName(ex.name)})${settled ? `, статус «${ORDER_STATUS[settled.to].label}»` : ""}`, {
     entityId: id,
     meta: { from: o.status, to: step.to, ...(settled ? { then: settled.to } : {}) },
@@ -300,7 +324,7 @@ export const _forChat = internalQuery({
       role: u.role,
       name: u.name ?? "",
       available: ex.available,
-      cards: await Promise.all(rows.slice(0, 8).map((o) => cardOf(ctx, o, what === "orders" && contactsOpen(o)))),
+      cards: await Promise.all(rows.slice(0, 8).map((o) => (what === "feed" ? cardOf(ctx, o, false, payoutFor(ex.rates, o)) : cardOf(ctx, o, contactsOpen(o))))),
     };
   },
 });

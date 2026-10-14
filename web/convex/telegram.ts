@@ -375,6 +375,7 @@ async function finishLead(ctx: ActionCtx, chatId: string, conv: Id<"conversation
     urgency: parsed.draft?.urgency,
     description: parsed.draft?.description,
     preferredTime: parsed.draft?.when,
+    district: parsed.draft?.district,
     budget: parsed.draft?.budget,
   });
   if (!res.ok) {

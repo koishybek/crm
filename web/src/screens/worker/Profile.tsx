@@ -138,7 +138,9 @@ export function Profile() {
         )}
         <h3 className="mt-4 text-[15px] font-semibold text-ink">Город</h3>
         <p className="mt-0.5 text-[15px] text-ink-2">{p.city}</p>
-        <p className={cn("mt-4 text-[14px]", MUTED)}>Изменить услуги, навыки и город может оператор.</p>
+        <h3 className="mt-4 text-[15px] font-semibold text-ink">Районы</h3>
+        <p className="mt-0.5 text-[15px] text-ink-2">{p.districts.length ? p.districts.join(", ") : "Весь город"}</p>
+        <p className={cn("mt-4 text-[14px]", MUTED)}>Изменить услуги, навыки, город и районы может оператор.</p>
         <WLinkButton href={SUPPORT_TEL} icon={Headset} full className="mt-2">
           Позвонить в офис
         </WLinkButton>

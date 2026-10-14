@@ -36,6 +36,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import { api } from "../../../convex/_generated/api";
 import { categoryById, serviceById } from "../../data/catalog";
+import { districtLabel } from "../../data/cities";
 import { useFileQuery } from "../../data/files";
 import { useNow } from "../../data/hooks";
 import { toast } from "../../data/store";
@@ -559,7 +560,10 @@ function InfoRows({ order: o, mode, now, skills, contacts }: { order: WorkerOrde
           </div>
         ) : (
           <>
-            <span className="text-[16px] text-ink">{o.city}</span>
+            <span className="text-[16px] text-ink">
+              {o.city}
+              {o.district ? `, ${districtLabel(o.district)}` : ""}
+            </span>
             {mode === "feed"
               ? locked("Точный адрес откроется, когда заказ станет вашим")
               : contactsLocked(o)

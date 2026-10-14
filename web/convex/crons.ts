@@ -23,6 +23,9 @@ crons.cron("daily backup", "0 21 * * *", internal.backup.run, {});
 // Выгрузки CSV живут сутки: старше — удаляются вместе с файлом (convex/exports.ts).
 crons.interval("exports cleanup", { hours: 1 }, internal.exports.cleanup, {});
 
+// ТЗ п.12.6: история мастеров за 90 дней для подбора (кеш executors.stats90) — окно сдвигается раз в час.
+crons.interval("executor stats", { hours: 1 }, internal.executorStats.refreshBatch, {});
+
 // Уборка служебных таблиц: отжившие счётчики лимитов и принятые обновления Telegram.
 crons.interval("cleanup service tables", { hours: 1 }, internal.maintenance.cleanup, {});
 

@@ -51,6 +51,9 @@ export const toExecutor = (e: Doc<"executors">): Executor => ({
   reviews: e.reviews,
   cooperation: e.cooperation,
   joinedAt: e.joinedAt,
+  districts: e.districts,
+  rates: e.rates,
+  stats90: e.stats90,
 });
 
 export const toClient = (c: Doc<"clients">): Client => ({
@@ -100,6 +103,7 @@ export const toLead = (l: Doc<"leads">): Lead => ({
   address: l.address,
   preferredTime: l.preferredTime,
   budget: l.budget,
+  district: l.district,
 });
 
 type StoredFile = Doc<"orders">["files"][number];
@@ -187,6 +191,9 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   cancelReason: o.cancelReason,
   requiredSkills: o.requiredSkills,
   files: o.files.map((f) => ({ id: f.id, name: f.name, kind: f.kind, forExecutor: f.forExecutor === true })),
+  district: o.district,
+  payoutBase: o.payoutBase,
+  payoutManual: o.payoutManual,
 });
 
 /**
@@ -204,15 +211,18 @@ export const orderWithoutMoney = (o: Order): Order => ({
   payoutPaidAt: undefined,
   payoutId: undefined,
   acceptedPayout: undefined,
+  payoutBase: undefined,
+  payoutManual: undefined,
 });
 
 export const toOrderWithFiles = (o: Doc<"orders">, signer: FileSigner): Order => ({ ...toOrder(o), files: o.files.map((f) => toAttachment(f, signer)) });
 
 /**
  * Заказ глазами исполнителя: без цены клиента, маржи и платежей. Адрес и контакты — только пока заказ у него в работе
- * (contactsOpen в src/data/logic.ts). Файлы — только видимые мастеру и только если передан signer.
+ * (contactsOpen в src/data/logic.ts). Файлы — только видимые мастеру и только если передан signer. payout — сумма
+ * по ставке этого мастера для заказа из ленты (payoutFor); свой заказ уже идёт по его ставке — payout(o).
  */
-export function toWorkerOrder(o: Doc<"orders">, opts: { contacts: boolean; signer?: FileSigner }): WorkerOrder {
+export function toWorkerOrder(o: Doc<"orders">, opts: { contacts: boolean; signer?: FileSigner; payout?: number }): WorkerOrder {
   return {
     id: o._id,
     number: o.number,
@@ -227,13 +237,14 @@ export function toWorkerOrder(o: Doc<"orders">, opts: { contacts: boolean; signe
     assignedAt: o.assignedAt,
     doneAt: o.doneAt,
     cancelReason: o.cancelReason,
-    payout: payout(o),
+    payout: opts.payout ?? payout(o),
     payoutPaid: o.payoutPaid,
     address: opts.contacts ? o.address : undefined,
     clientName: opts.contacts ? o.clientName : undefined,
     clientPhone: opts.contacts ? o.clientPhone : undefined,
     requiredSkills: o.requiredSkills,
     files: opts.signer ? executorFiles(o.files).map((f) => toAttachment(f, opts.signer!, true)) : [],
+    district: o.district,
   };
 }
 

@@ -9,6 +9,7 @@
  */
 
 import type * as ai from "../ai.js";
+import type * as aiMatch from "../aiMatch.js";
 import type * as aiCheck from "../aiCheck.js";
 import type * as analytics from "../analytics.js";
 import type * as apiKeys from "../apiKeys.js";
@@ -26,10 +27,13 @@ import type * as clientRecords from "../clientRecords.js";
 import type * as clients from "../clients.js";
 import type * as crons from "../crons.js";
 import type * as digest from "../digest.js";
+import type * as districts from "../districts.js";
 import type * as email from "../email.js";
 import type * as env from "../env.js";
 import type * as escalations from "../escalations.js";
 import type * as executorApp from "../executorApp.js";
+import type * as executorRates from "../executorRates.js";
+import type * as executorStats from "../executorStats.js";
 import type * as executors from "../executors.js";
 import type * as exports from "../exports.js";
 import type * as files from "../files.js";
@@ -44,6 +48,7 @@ import type * as lib_audit from "../lib/audit.js";
 import type * as lib_chat from "../lib/chat.js";
 import type * as lib_crypto from "../lib/crypto.js";
 import type * as lib_defaultPrices from "../lib/defaultPrices.js";
+import type * as lib_districts from "../lib/districts.js";
 import type * as lib_domain from "../lib/domain.js";
 import type * as lib_dto from "../lib/dto.js";
 import type * as lib_escalation from "../lib/escalation.js";
@@ -65,8 +70,10 @@ import type * as lib_outbound from "../lib/outbound.js";
 import type * as lib_phone from "../lib/phone.js";
 import type * as lib_privacy from "../lib/privacy.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
+import type * as lib_rates from "../lib/rates.js";
 import type * as lib_safeFetch from "../lib/safeFetch.js";
 import type * as lib_secretBox from "../lib/secretBox.js";
+import type * as lib_stats from "../lib/stats.js";
 import type * as lib_tg from "../lib/tg.js";
 import type * as lib_whatsapp from "../lib/whatsapp.js";
 import type * as maintenance from "../maintenance.js";
@@ -93,6 +100,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
+  aiMatch: typeof aiMatch;
   aiCheck: typeof aiCheck;
   analytics: typeof analytics;
   apiKeys: typeof apiKeys;
@@ -110,10 +118,13 @@ declare const fullApi: ApiFromModules<{
   clients: typeof clients;
   crons: typeof crons;
   digest: typeof digest;
+  districts: typeof districts;
   email: typeof email;
   env: typeof env;
   escalations: typeof escalations;
   executorApp: typeof executorApp;
+  executorRates: typeof executorRates;
+  executorStats: typeof executorStats;
   executors: typeof executors;
   exports: typeof exports;
   files: typeof files;
@@ -128,6 +139,7 @@ declare const fullApi: ApiFromModules<{
   "lib/chat": typeof lib_chat;
   "lib/crypto": typeof lib_crypto;
   "lib/defaultPrices": typeof lib_defaultPrices;
+  "lib/districts": typeof lib_districts;
   "lib/domain": typeof lib_domain;
   "lib/dto": typeof lib_dto;
   "lib/escalation": typeof lib_escalation;
@@ -149,8 +161,10 @@ declare const fullApi: ApiFromModules<{
   "lib/phone": typeof lib_phone;
   "lib/privacy": typeof lib_privacy;
   "lib/rateLimit": typeof lib_rateLimit;
+  "lib/rates": typeof lib_rates;
   "lib/safeFetch": typeof lib_safeFetch;
   "lib/secretBox": typeof lib_secretBox;
+  "lib/stats": typeof lib_stats;
   "lib/tg": typeof lib_tg;
   "lib/whatsapp": typeof lib_whatsapp;
   maintenance: typeof maintenance;

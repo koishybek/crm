@@ -7,13 +7,37 @@ import {
   WORK_STATUSES,
   type Tone,
 } from "./catalog";
-import { cityKey } from "./cities";
+import { cityKey, districtKey } from "./cities";
 import { textKey } from "./skills";
 import { dateAlmaty, timeAlmaty } from "./workerTime";
-import type { Client, DB, Executor, Lead, Order, OrderStatus, User } from "./types";
+import type { Client, DB, Executor, ExecutorRates, ExecutorStats90, Lead, Order, OrderStatus, PayoutTerms, User } from "./types";
 
 export const payout = (o: Pick<Order, "payoutMode" | "payoutValue" | "clientPrice">) =>
   o.payoutMode === "fixed" ? o.payoutValue : Math.round((o.clientPrice * o.payoutValue) / 100);
+
+// ── Ставка исполнителя (ТЗ п.13, п.14.5) ────────────────────────────────────
+
+/** Что нужно знать о заказе, чтобы посчитать выплату конкретному мастеру. */
+export type RateOrder = PayoutTerms & Pick<Order, "serviceId" | "clientPrice"> & Partial<Pick<Order, "payoutBase" | "payoutManual">>;
+
+/**
+ * Условия выплаты мастеру по заказу — единственное правило ставок. База — условия самого заказа (ставка услуги или
+ * условия до того, как к заказу применили ставку прежнего мастера). Ручная правка выплаты в заказе (payoutManual) важнее
+ * ставок мастера. Дальше: ставка мастера на эту услугу (сумма или процент) → его общая ставка по режиму → база.
+ */
+export function termsFor(rates: ExecutorRates | undefined, o: RateOrder): PayoutTerms {
+  const base: PayoutTerms = o.payoutBase ?? { payoutMode: o.payoutMode, payoutValue: o.payoutValue };
+  if (!rates || o.payoutManual) return base;
+  const own = rates.perService?.[o.serviceId];
+  if (own?.fixed !== undefined) return { payoutMode: "fixed", payoutValue: own.fixed };
+  if (own?.percent !== undefined) return { payoutMode: "percent", payoutValue: own.percent };
+  if (rates.mode === "percent" && rates.percent !== undefined) return { payoutMode: "percent", payoutValue: rates.percent };
+  if (rates.mode === "fixed" && rates.fixed !== undefined) return { payoutMode: "fixed", payoutValue: rates.fixed };
+  return base;
+}
+
+/** Сколько получит мастер за заказ по своей ставке — для ленты, «Нового заказа» и подбора. */
+export const payoutFor = (rates: ExecutorRates | undefined, o: RateOrder): number => payout({ clientPrice: o.clientPrice, ...termsFor(rates, o) });
 export const margin = (o: Pick<Order, "clientPrice" | "payoutMode" | "payoutValue">) => o.clientPrice - payout(o);
 export const marginPct = (o: Order) => (o.clientPrice > 0 ? Math.round((margin(o) / o.clientPrice) * 1000) / 10 : 0);
 /** Оплачено клиентом: сторнированные платежи не считаются. Возвраты долг не меняют — см. ./money. */
@@ -124,9 +148,14 @@ export const DEFAULT_MAX_ACTIVE = 3;
 export const maxActiveOf = (e: Pick<Executor, "maxActiveOrders">): number => e.maxActiveOrders ?? DEFAULT_MAX_ACTIVE;
 
 /** Что нужно знать о мастере для подбора: и документ базы, и DTO подходят. */
-export type FitExecutor = Pick<Executor, "available" | "city" | "categories" | "skills"> & Partial<Pick<Executor, "maxActiveOrders" | "unavailableUntil">>;
+export type FitExecutor = Pick<Executor, "available" | "city" | "categories" | "skills"> &
+  Partial<Pick<Executor, "maxActiveOrders" | "unavailableUntil">> & { districts?: readonly string[] };
 /** Что нужно знать о заказе для подбора. */
-export type FitOrder = Pick<Order, "category" | "city"> & { requiredSkills?: readonly string[] };
+export type FitOrder = Pick<Order, "category" | "city"> & { requiredSkills?: readonly string[]; district?: string };
+
+/** Район подходит (ТЗ п.12.3): у мастера районы не заданы — весь город; у заказа района нет — не сужаем. */
+export const districtFits = (e: Pick<FitExecutor, "districts">, o: Pick<FitOrder, "district">): boolean =>
+  !e.districts?.length || !o.district || e.districts.some((d) => districtKey(d) === districtKey(o.district!));
 
 export interface Fit {
   fits: boolean;
@@ -141,15 +170,17 @@ export interface Fit {
 /**
  * Единственное правило «заказ подходит мастеру»: лента, уведомление «Новый заказ», «Взять заказ»
  * и подбор при ручном назначении считают одинаково. Мастер на смене (недоступность «до …» — тоже не на смене),
- * город тот же (в любом написании: «г. Алматы» = «Алматы»), направление заказа — его, все требуемые навыки
- * у него есть (сравнение без учёта регистра и пробелов). load — сколько заказов у мастера уже в работе: на лимите
- * заказ ему не подходит; не передан — лимит не проверяем (лента показывает работу и мастеру на лимите).
+ * город тот же (в любом написании: «г. Алматы» = «Алматы»), район — из его районов (если районы заданы и у мастера,
+ * и у заказа), направление заказа — его, все требуемые навыки у него есть (сравнение без учёта регистра и пробелов).
+ * load — сколько заказов у мастера уже в работе: на лимите заказ ему не подходит; не передан — лимит не проверяем
+ * (лента показывает работу и мастеру на лимите).
  */
 export function fitsOrder(e: FitExecutor, o: FitOrder, load?: number): Fit {
   const reasons: string[] = [];
   if (!e.available) reasons.push(e.unavailableUntil ? `недоступен до ${dateAlmaty(e.unavailableUntil)}, ${timeAlmaty(e.unavailableUntil)}` : "выходной");
   if (load !== undefined && load >= maxActiveOf(e)) reasons.push(`лимит заказов: в работе ${load} из ${maxActiveOf(e)}`);
   if (cityKey(e.city) !== cityKey(o.city)) reasons.push("другой город");
+  else if (!districtFits(e, o)) reasons.push("другой район");
   if (!e.categories.includes(o.category)) reasons.push("другая специализация");
   const own = new Set(e.skills.map(textKey));
   const required = o.requiredSkills ?? [];
@@ -187,19 +218,63 @@ export interface Candidate {
   fits: boolean;
   reasons: string[];
   matched: number;
+  /** Баллы качества: рейтинг и история за 90 дней (qualityScore). */
+  quality: number;
+}
+
+// ── История мастера за 90 дней (ТЗ п.12.6) ──────────────────────────────────
+
+/** Окно истории и веса баллов качества — одни для подбора, автораспределения и подсказки в «Настройках». */
+export const HISTORY = {
+  days: 90,
+  /** Меньше сданных заказов — «вовремя» не считаем: новичка не наказываем и не поощряем. */
+  minDone: 3,
+  /** «Вовремя» новичка для баллов. */
+  neutralOnTime: 80,
+  /** Балл за звезду рейтинга: 5,0 → 100. */
+  perStar: 20,
+  /** Минус за каждый отказ (отказался сам или не подтвердил назначение вовремя). */
+  perRefusal: 15,
+  /** Отказов в счёт — не больше: дальше мастер и так внизу. */
+  maxRefusals: 4,
+} as const;
+
+/** Доля заказов, сданных в срок, %; мало сданных — null. */
+export function onTimePct(s: Pick<ExecutorStats90, "done" | "onTime"> | undefined): number | null {
+  if (!s || s.done < HISTORY.minDone) return null;
+  return Math.round((s.onTime / s.done) * 100);
+}
+
+/**
+ * Баллы качества мастера: рейтинг × 20 (5,0 → 100) + сдано вовремя, % (новичку — 80) − 15 за каждый отказ за 90 дней.
+ * При прочих равных (подходит, свободен, загрузка) выше тот, у кого баллов больше.
+ */
+export function qualityScore(e: Pick<Executor, "rating"> & { stats90?: ExecutorStats90 }): number {
+  const onTime = onTimePct(e.stats90) ?? HISTORY.neutralOnTime;
+  const refusals = Math.min(e.stats90?.refusals ?? 0, HISTORY.maxRefusals);
+  return Math.round(e.rating * HISTORY.perStar + onTime - refusals * HISTORY.perRefusal);
+}
+
+/** «вовремя 92% · отказов 1 · в среднем 5 ч» — история мастера одной строкой; истории нет — null. */
+export function historyLine(s: ExecutorStats90 | undefined): string | null {
+  if (!s) return null;
+  const pct = onTimePct(s);
+  const parts = [pct === null ? `сдано ${s.done}` : `вовремя ${pct}%`, `отказов ${s.refusals}`];
+  if (s.avgHours !== undefined && s.done >= HISTORY.minDone) parts.push(`в среднем ${s.avgHours < 24 ? `${s.avgHours} ч` : `${Math.round(s.avgHours / 24)} дн`}`);
+  return parts.join(" · ");
 }
 
 /**
  * Кандидаты для ручного назначения (ТЗ п.12): сначала подходящие, затем у кого больше требуемых навыков,
- * свободные раньше занятых, меньше загрузка, выше рейтинг. Неподходящие остаются в списке с причинами —
- * среди них выше те, кому не хватает меньшего.
+ * свободные раньше занятых, меньше загрузка, больше баллов качества (рейтинг и история за 90 дней).
+ * Неподходящие остаются в списке с причинами — среди них выше те, кому не хватает меньшего.
  */
 export function rankExecutors(o: FitOrder, executors: Executor[], orders: Load[]): Candidate[] {
   return executors
     .map((e): Candidate => {
       const load = orders.filter((x) => x.executorId === e.id && isInWork(x)).length;
       const fit = fitsOrder(e, o, load);
-      return { e, state: executorState(e, orders), load, fits: fit.fits, reasons: fit.reasons, matched: fit.matched };
+      return { e, state: executorState(e, orders), load, fits: fit.fits, reasons: fit.reasons, matched: fit.matched, quality: qualityScore(e) };
     })
     .sort(
       (a, b) =>
@@ -208,6 +283,7 @@ export function rankExecutors(o: FitOrder, executors: Executor[], orders: Load[]
         b.matched - a.matched ||
         STATE_RANK[a.state] - STATE_RANK[b.state] ||
         a.load - b.load ||
+        b.quality - a.quality ||
         b.e.rating - a.e.rating ||
         a.e.name.localeCompare(b.e.name, "ru"),
     );

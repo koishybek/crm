@@ -14,6 +14,7 @@ import { CatalogEditor } from "./CatalogEditor";
 import { ApiAndSiteCard, NotifyCards, OlxCard, WhatsAppCard } from "./ChannelCards";
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 import { SystemCards } from "./SystemCards";
+import { MatchingCards } from "./MatchingCards";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
 
@@ -257,6 +258,7 @@ export default function Settings() {
       </div>
 
       <SystemCards />
+      <MatchingCards />
 
       <div className="mt-4">
         <CatalogEditor />

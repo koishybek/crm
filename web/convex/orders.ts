@@ -12,6 +12,9 @@ import { archiveArgs, archivePage } from "./lib/orderArchive";
 import { activeExecutorIds, suitableUsers } from "./lib/matching";
 import { hitLimit } from "./lib/rateLimit";
 import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
+import { districtFor } from "./lib/districts";
+import { baseTerms, rateTerms } from "./lib/rates";
+import { refreshStats } from "./lib/stats";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";
@@ -105,7 +108,7 @@ async function staffOrder(ctx: QueryCtx, id: Id<"orders">) {
 }
 
 /** Поля карточки, которые правит updateInfo, — для текста истории и журнала. */
-const INFO_FIELDS = { serviceId: "услуга", description: "описание", city: "город", address: "адрес", deadline: "срок", priority: "приоритет" } as const;
+const INFO_FIELDS = { serviceId: "услуга", description: "описание", city: "город", district: "район", address: "адрес", deadline: "срок", priority: "приоритет" } as const;
 type InfoField = keyof typeof INFO_FIELDS;
 type Info = Pick<Doc<"orders">, InfoField>;
 
@@ -119,6 +122,8 @@ function infoChange(k: InfoField, before: Info, after: Info, label: (serviceId: 
       return `услуга ${quote(label(before.serviceId))} → ${quote(label(after.serviceId))}`;
     case "city":
       return `город ${before.city} → ${after.city}`;
+    case "district":
+      return `район ${before.district ?? "—"} → ${after.district ?? "—"}`;
     case "address":
       return `адрес ${quote(before.address)} → ${quote(after.address)}`;
     case "deadline":
@@ -167,8 +172,10 @@ export const updateInfo = mutation({
     priority: urgency,
     /** Навыки, без которых заказ мастеру не показываем. Не передан — не меняются. */
     requiredSkills: v.optional(v.array(v.string())),
+    /** Район города (ТЗ п.12.3); пустая строка — без района. Не передан — прежний, если город тот же. */
+    district: v.optional(v.string()),
   },
-  handler: async (ctx, { id, requiredSkills, ...a }) => {
+  handler: async (ctx, { id, requiredSkills, district, ...a }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
     if (Number.isNaN(Date.parse(a.deadline))) throw new ConvexError("Неверная дата");
@@ -181,10 +188,14 @@ export const updateInfo = mutation({
     // Кому заказ из ленты подходил до правки — чтобы после неё позвать только новых подходящих.
     const before = isOpenForFeed(o) ? new Set(await suitableUsers(ctx, o)) : null;
 
+    const city = cleanCity(a.city);
     const info: Info = {
       serviceId: a.serviceId,
       description: cleanText(a.description, 4000, "Описание"),
-      city: cleanCity(a.city),
+      city,
+      // Сменили город — прежний район к нему не относится; тот же район того же города не перепроверяем
+      // (владелец мог убрать его из справочника — заказ от этого не ломается).
+      district: city === o.city && (district === undefined || district === (o.district ?? "")) ? o.district : await districtFor(ctx, city, district),
       address: cleanText(a.address, 300, "Адрес"),
       deadline: new Date(a.deadline).toISOString(),
       priority: a.priority,
@@ -265,7 +276,9 @@ export const updateFinance = mutation({
     // Выплату по реестру уже провели — её сумма зафиксирована; отменить выплату можно в «Выплатах мастерам» в течение суток.
     if (o.payoutPaid && payout(next) !== payout(o)) throw new ConvexError(`Исполнителю уже выплачено ${money(payout(o))} — эта сумма зафиксирована. Меняя цену, оставьте выплату прежней (фиксированной суммой)`);
     if (next.clientPrice === o.clientPrice && next.payoutMode === o.payoutMode && next.payoutValue === o.payoutValue) return;
-    await ctx.db.patch(id, next);
+    // Выплату поменяли руками — это ручная правка заказа (ТЗ п.13): ставки мастеров к нему больше не применяются.
+    const manual = next.payoutMode !== o.payoutMode || next.payoutValue !== o.payoutValue;
+    await ctx.db.patch(id, { ...next, ...(manual ? { payoutManual: true, payoutBase: undefined } : {}) });
 
     const actor = userActor(me._id);
     const fresh = (await ctx.db.get(id))!;
@@ -349,7 +362,7 @@ export const changeStatus = mutation({
       const previous = o.executorId ? (await executorUser(ctx, o.executorId))?._id : undefined;
       if (o.executorId) {
         await notify(ctx, [previous], `Заказ №${o.number} снят с вас и возвращён в ленту`, { link: "/w", tone: "warn" });
-        Object.assign(extra, { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined });
+        Object.assign(extra, { executorId: undefined, assignedAt: undefined, acceptedPayout: undefined, ...baseTerms(o) });
       }
       // Снятому мастеру уже сообщили — «Новый заказ» ему не шлём.
       recipients = (await suitableUsers(ctx, o)).filter((u) => u !== previous);
@@ -365,7 +378,7 @@ export const changeStatus = mutation({
     if (to === "cancelled") extra.cancelReason = why ?? "Без причины";
     // Отменённый заказ открыли заново — он снова ничей: у прежнего мастера он не висит в «Завершённых» (E5).
     if (to === "new" && o.status === "cancelled") {
-      Object.assign(extra, { cancelReason: undefined, executorId: undefined, assignedAt: undefined, acceptedPayout: undefined, autoOffered: undefined, autoAssignedAt: undefined, autoExhaustedAt: undefined });
+      Object.assign(extra, { cancelReason: undefined, executorId: undefined, assignedAt: undefined, acceptedPayout: undefined, autoOffered: undefined, autoAssignedAt: undefined, autoExhaustedAt: undefined, ...baseTerms(o) });
     }
     const reasonOf = to === "cancelled" ? extra.cancelReason : problems.length ? why : undefined;
     const published = recipients.length ? `Опубликован в ленту исполнителей — уведомлено: ${recipients.length}` : "Опубликован в ленту исполнителей — подходящих сейчас нет";
@@ -375,6 +388,8 @@ export const changeStatus = mutation({
     let settled: StatusMove | null = null;
     if (to === "done") settled = (await finishWork(ctx, o, actor)).settled;
     else await setStatus(ctx, o, to, actor, text, extra);
+    // Отмена заказа мастера — в его историю за 90 дней (сдача работы пересчитывает её в finishWork).
+    if (to === "cancelled") await refreshStats(ctx, o.executorId);
     await audit(
       ctx,
       me,
@@ -447,12 +462,13 @@ export const assign = mutation({
     }
     const fit = fitsOrder(e, o);
     const outside = fit.fits ? "" : ` (вне подбора: ${fit.reasons.join("; ")})`;
-    // Новый исполнитель ещё не подтвердил — прежний снимок выплаты к нему не относится.
-    await ctx.db.patch(id, { executorId, assignedAt: nowIso(), status: "assigned", acceptedPayout: undefined });
+    // Выплата — по ставке нового исполнителя (ТЗ п.14.5); он ещё не подтвердил — прежний снимок к нему не относится.
+    const terms = rateTerms(o, e, "staff");
+    await ctx.db.patch(id, { executorId, assignedAt: nowIso(), status: "assigned", acceptedPayout: undefined, ...terms });
     await log(ctx, id, "assigned", `Назначен исполнитель: ${shortName(e.name)}${outside}`, userActor(me._id), { from: o.status, to: "assigned" });
     await audit(ctx, me, "order.assigned", `Заказ №${o.number}: назначен ${shortName(e.name)}${previous ? ` вместо ${shortName(previous.name)}` : ""}${outside}`, {
       entityId: id,
-      meta: { executorId, previousExecutorId: o.executorId, fits: fit.fits, reasons: fit.reasons },
+      meta: { executorId, previousExecutorId: o.executorId, fits: fit.fits, reasons: fit.reasons, payout: payout({ ...o, ...terms }) },
     });
     await notifyAssigned(ctx, (await ctx.db.get(id))!);
   },

@@ -1,7 +1,8 @@
-// Автораспределение заказов (ТЗ п.23 «Автоматическое распределение», «AI-подбор исполнителя»).
-// Заказ N минут лежит в ленте и его никто не взял — система назначает лучшего подходящего мастера по тем же
-// правилам, что и подбор при ручном назначении: fitsOrder (смена, город, направление, навыки), затем свободные
-// раньше занятых, меньше заказов в работе, выше рейтинг (rankExecutors). Не подтвердил за N минут или отказался —
+// Автораспределение заказов (ТЗ п.23 «Автоматическое распределение») — «Автоподбор по правилам», без AI: AI только
+// советует в карточке заказа (convex/aiMatch.ts), решает человек. Заказ N минут лежит в ленте и его никто не взял —
+// система назначает лучшего подходящего мастера по тем же правилам, что и подбор при ручном назначении: fitsOrder
+// (смена, город и район, направление, навыки), затем свободные раньше занятых, меньше заказов в работе, больше баллов
+// качества — рейтинг и история за 90 дней (rankExecutors). Выплата — по ставке назначенного мастера (lib/rates.ts). Не подтвердил за N минут или отказался —
 // заказ снова в ленте, на следующем запуске его получает следующий. Предлагать больше некому — один раз сообщаем
 // владельцам и руководителям направления: это эскалация заказа в ленте (lib/escalation.ts), и крон эскалаций
 // (escalations.ts) тем же людям про тот же эпизод второй раз не пишет. Запускается из escalations.run — до эскалаций.
@@ -14,10 +15,11 @@ import { executorUser, log, notify, nowIso } from "./lib/domain";
 import { toExecutor } from "./lib/dto";
 import { markLevel, orderLevelRecipients, reachedLevel } from "./lib/escalation";
 import { releaseToFeed } from "./lib/feed";
+import { rateTerms } from "./lib/rates";
 import { notifyAssigned } from "./worker";
 import { AUTO_ASSIGN, autoAssignWhy, type AutoAssignSettings } from "../src/data/autoAssign";
 import { WORK_STATUSES } from "../src/data/catalog";
-import { payout, rankExecutors, type Candidate, type FitOrder, type Load } from "../src/data/logic";
+import { payout, payoutFor, rankExecutors, type Candidate, type FitOrder, type Load, type RateOrder } from "../src/data/logic";
 import type { Actor, Executor } from "../src/data/types";
 import { shortName } from "../src/lib/format";
 
@@ -100,11 +102,14 @@ async function loadPool(ctx: QueryCtx): Promise<Pool> {
   return { executors: docs.map(toExecutor), docs: new Map(docs.map((e) => [e._id, e])), reachable, load };
 }
 
-/** Лучший кандидат: подходит заказу, на связи и ещё не получал этот заказ от системы. Порядок — rankExecutors. */
-export function bestCandidate(o: FitOrder, pool: Pick<Pool, "executors" | "reachable" | "load">, offered: readonly string[]): Candidate | null {
+/**
+ * Лучший кандидат: подходит заказу, на связи, ещё не получал этот заказ от системы и его ставка не больше цены клиента
+ * (иначе маржа ушла бы в минус — такого назначит только человек, поправив выплату). Порядок — rankExecutors.
+ */
+export function bestCandidate(o: FitOrder & RateOrder, pool: Pick<Pool, "executors" | "reachable" | "load">, offered: readonly string[]): Candidate | null {
   const skip = new Set(offered);
   const fresh = pool.executors.filter((e) => pool.reachable.has(e.id) && !skip.has(e.id));
-  return rankExecutors(o, fresh, pool.load).find((c) => c.fits) ?? null;
+  return rankExecutors(o, fresh, pool.load).find((c) => c.fits && payoutFor(c.e.rates, o) <= o.clientPrice) ?? null;
 }
 
 // ── Шаги ─────────────────────────────────────────────────────────────────────
@@ -133,10 +138,11 @@ export async function inFeedSince(ctx: QueryCtx, o: Doc<"orders">): Promise<numb
 async function offer(ctx: MutationCtx, o: Doc<"orders">, e: Doc<"executors">, pick: Candidate, minutes: number): Promise<void> {
   const at = nowIso();
   const offered = [...(o.autoOffered ?? []), e._id];
-  await ctx.db.patch(o._id, { executorId: e._id, assignedAt: at, status: "assigned", autoAssignedAt: at, autoOffered: offered, autoExhaustedAt: undefined });
+  const terms = rateTerms(o, e, "staff");
+  await ctx.db.patch(o._id, { executorId: e._id, assignedAt: at, status: "assigned", autoAssignedAt: at, autoOffered: offered, autoExhaustedAt: undefined, ...terms });
   const why = autoAssignWhy(pick);
-  await log(ctx, o._id, "assigned", `AI-подбор: назначен ${shortName(e.name)} — ${why}. Ждём подтверждения ${minutes} мин`, SYSTEM, { from: o.status, to: "assigned" });
-  await audit(ctx, "Система", "order.autoAssigned", `Заказ №${o.number}: AI-подбор назначил ${shortName(e.name)} (${why})`, {
+  await log(ctx, o._id, "assigned", `Автоподбор: назначен ${shortName(e.name)} — ${why}. Ждём подтверждения ${minutes} мин`, SYSTEM, { from: o.status, to: "assigned" });
+  await audit(ctx, "Система", "order.autoAssigned", `Заказ №${o.number}: автоподбор назначил ${shortName(e.name)} (${why})`, {
     entityId: o._id,
     meta: { executorId: e._id, attempt: offered.length, state: pick.state, load: pick.load, rating: e.rating, minutes },
   });
@@ -152,7 +158,7 @@ async function returnToFeed(ctx: MutationCtx, o: Doc<"orders">, minutes: number)
     meta: { executorId: o.executorId, minutes },
   });
   await releaseToFeed(ctx, o, {
-    history: `AI-подбор: ${who} не подтвердил заказ за ${minutes} мин — заказ вернулся в ленту`,
+    history: `Автоподбор: ${who} не подтвердил заказ за ${minutes} мин — заказ вернулся в ленту`,
     executor: `Заказ №${o.number} снят с вас: не подтвердили за ${minutes} мин`,
   });
 }
@@ -165,8 +171,8 @@ async function exhausted(ctx: MutationCtx, o: Doc<"orders">): Promise<void> {
   await ctx.db.patch(o._id, { autoExhaustedAt: nowIso() });
   const tried = o.autoOffered?.length ?? 0;
   const why = tried ? `заказ не принял никто из подходящих мастеров (предлагали: ${tried})` : "подходящих мастеров на смене нет";
-  await log(ctx, o._id, "assigned", `AI-подбор: ${why} — нужно назначить исполнителя вручную`, SYSTEM);
-  await audit(ctx, "Система", "order.autoExhausted", `Заказ №${o.number}: AI-подбор — ${why}`, { entityId: o._id, meta: { offered: tried } });
+  await log(ctx, o._id, "assigned", `Автоподбор: ${why} — нужно назначить исполнителя вручную`, SYSTEM);
+  await audit(ctx, "Система", "order.autoExhausted", `Заказ №${o.number}: автоподбор — ${why}`, { entityId: o._id, meta: { offered: tried } });
   const since = new Date(await inFeedSince(ctx, o)).toISOString();
   const reached = await reachedLevel(ctx, "feed", o._id, since);
   await markLevel(ctx, "feed", o._id, since, 2);

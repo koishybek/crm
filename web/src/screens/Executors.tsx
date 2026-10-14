@@ -13,6 +13,7 @@ import type { CategoryId, Executor } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
 import { ExecutorReviews } from "../components/ExecutorReviews";
 import { ExecutorShiftCard } from "../components/ExecutorShift";
+import { ExecutorMatchCard } from "../components/ExecutorMatchCard";
 import { ExecutorRating } from "../components/Rating";
 import { ServiceGlyph } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
@@ -327,6 +328,7 @@ export function ExecutorDetail() {
         <KpiCard icon={Wallet} tone="amber" label="К выплате" value={money(s.toPay)} caption="выполнено, ещё не выплачено" />
       </div>
       <ExecutorShiftCard e={e} className="mt-4" />
+      <ExecutorMatchCard e={e} className="mt-4" />
       <ExecutorReviews e={e} className="mt-4" />
 
       <Modal open={!!creds} onClose={() => setCreds(null)} title="Новый пароль" width={440}>
