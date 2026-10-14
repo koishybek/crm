@@ -9,6 +9,7 @@ import { dismissOnboarding, renameCompany, useTenant } from "../data/tenant";
 import { LIMIT_TEXT, MODULE_LABEL, MODULES, ONBOARDING_INFO, PLAN_INFO, planFor, type LimitKind } from "../data/plans";
 import { report } from "../data/store";
 import { money } from "../lib/format";
+import { SubscriptionLine } from "./SubscriptionCards";
 
 const LIMIT_ROWS: { kind: LimitKind; label: string }[] = [
   { kind: "users", label: "Сотрудники" },
@@ -68,6 +69,7 @@ export function CompanyCard() {
             })}
           </ul>
         </div>
+        <SubscriptionLine />
         <div>
           <div className="text-[12.5px] font-medium text-muted">Модули</div>
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -89,7 +91,7 @@ export function CompanyCard() {
             Комиссия платформы с выполненного заказа: <span className="font-semibold text-ink">{owner.platformFee.mode === "percent" ? `${owner.platformFee.value}% от цены` : money(owner.platformFee.value)}</span> — в «Аналитике» вычитается из маржи.
           </p>
         )}
-        <p className="text-[12.5px] text-muted">Лимиты: {LIMIT_ROWS.map((r) => LIMIT_TEXT[r.kind]).join(", ")}. Тариф и модули меняет администратор платформы.</p>
+        <p className="text-[12.5px] text-muted">Лимиты: {LIMIT_ROWS.map((r) => LIMIT_TEXT[r.kind]).join(", ")}. Тариф, модули и подписку ведёт администратор платформы.</p>
       </div>
     </Card>
   );

@@ -59,7 +59,8 @@ export const team = query({
   },
 });
 
-function tempPassword(): string {
+/** Временный пароль, который выдают человеку (показать один раз): при первом входе он задаёт свой. */
+export function tempPassword(): string {
   const a = "abcdefghjkmnpqrstuvwxyz23456789";
   const bytes = crypto.getRandomValues(new Uint8Array(10));
   return Array.from(bytes, (b) => a[b % a.length]).join("");

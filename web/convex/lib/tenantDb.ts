@@ -17,9 +17,9 @@ import schema from "../schema";
 /** Компания, которой принадлежат данные, заведённые до SaaS (и документы без tenantId до миграции). */
 export const DEFAULT_TENANT = "t-komfort";
 
-/** Общие таблицы: вход, реестр компаний, счётчики лимитов (ключ лимита сам включает компанию, где нужно). */
+/** Общие таблицы: вход, реестр компаний, счётчики лимитов (ключ лимита сам включает компанию, где нужно), настройки платформы. */
 // authTables включает и users — но пользователи принадлежат компании (users.tenantId), их изолируем как всё остальное.
-export const GLOBAL_TABLES: ReadonlySet<string> = new Set([...Object.keys(authTables).filter((t) => t !== "users"), "tenants", "rateLimits"]);
+export const GLOBAL_TABLES: ReadonlySet<string> = new Set([...Object.keys(authTables).filter((t) => t !== "users"), "tenants", "rateLimits", "platformSettings"]);
 
 type Db = GenericDatabaseWriter<DataModel>;
 type Doc = Record<string, unknown> & { _id: string };

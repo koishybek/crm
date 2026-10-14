@@ -26,6 +26,7 @@ import OrderDetail from "./screens/OrderDetail";
 import Orders from "./screens/Orders";
 import PublicRequest from "./screens/PublicRequest";
 import Settings from "./screens/Settings";
+import { BlockedReason } from "./screens/SubscriptionCards";
 import { WorkerError } from "./screens/worker/WorkerError";
 
 const TEAM_ROLES: Role[] = ["owner", "operator", "manager"];
@@ -64,7 +65,7 @@ function Blocked() {
   return (
     <Splash>
       <div className="text-[18px] font-semibold text-ink">Доступ отключён</div>
-      <p className="max-w-sm text-[14.5px] text-muted">Ваш аккаунт отключён владельцем компании или работа компании приостановлена. Если это ошибка — свяжитесь с владельцем.</p>
+      <BlockedReason fallback={<p className="max-w-sm text-[14.5px] text-muted">Ваш аккаунт отключён владельцем компании или работа компании приостановлена. Если это ошибка — свяжитесь с владельцем.</p>} />
       <Button variant="secondary" onClick={() => void signOut()}>
         Выйти
       </Button>
