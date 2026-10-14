@@ -26,7 +26,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, Suspense } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
@@ -463,7 +463,11 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
           )}
         </header>
 
-        <main className={cn("mx-auto w-full max-w-[1480px] px-4 pt-6 sm:px-6 lg:px-8 lg:pt-7", isExec ? "pb-28 lg:pb-10" : "pb-24 lg:pb-10")}>{children ?? <Outlet />}</main>
+        <main className={cn("mx-auto w-full max-w-[1480px] px-4 pt-6 sm:px-6 lg:px-8 lg:pt-7", isExec ? "pb-28 lg:pb-10" : "pb-24 lg:pb-10")}>{children ?? (
+          <Suspense fallback={<div className="py-20 text-center text-muted">Загружаем…</div>}>
+            <Outlet />
+          </Suspense>
+        )}</main>
       </div>
 
       {/* Быстрое действие на телефоне */}

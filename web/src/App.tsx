@@ -13,21 +13,25 @@ import { useMe } from "./data/hooks";
 import { can, type Permission } from "./data/permissions";
 import { useServiceWorker } from "./data/serviceWorker";
 import type { Role } from "./data/types";
-import CatalogScreen from "./screens/CatalogScreen";
-import ClientDetail from "./screens/ClientDetail";
-import Calls from "./screens/Calls";
-import Clients from "./screens/Clients";
-import Dashboard from "./screens/Dashboard";
-import Executors, { ExecutorDetail } from "./screens/Executors";
-import Inbox from "./screens/Inbox";
-import Leads from "./screens/Leads";
 import Login from "./screens/Login";
-import OrderDetail from "./screens/OrderDetail";
-import Orders from "./screens/Orders";
-import PublicRequest from "./screens/PublicRequest";
-import Settings from "./screens/Settings";
 import { BlockedReason } from "./screens/SubscriptionCards";
 import { WorkerError } from "./screens/worker/WorkerError";
+
+// Экраны сотрудников — отдельными чанками (Suspense — вокруг Outlet в Shell): мастеру с телефона они не грузятся.
+const CatalogScreen = lazy(() => import("./screens/CatalogScreen"));
+const ClientDetail = lazy(() => import("./screens/ClientDetail"));
+const Calls = lazy(() => import("./screens/Calls"));
+const Clients = lazy(() => import("./screens/Clients"));
+const Dashboard = lazy(() => import("./screens/Dashboard"));
+const executorScreens = () => import("./screens/Executors");
+const Executors = lazy(executorScreens);
+const ExecutorDetail = lazy(() => executorScreens().then((m) => ({ default: m.ExecutorDetail })));
+const Inbox = lazy(() => import("./screens/Inbox"));
+const Leads = lazy(() => import("./screens/Leads"));
+const OrderDetail = lazy(() => import("./screens/OrderDetail"));
+const Orders = lazy(() => import("./screens/Orders"));
+const PublicRequest = lazy(() => import("./screens/PublicRequest"));
+const Settings = lazy(() => import("./screens/Settings"));
 
 const TEAM_ROLES: Role[] = ["owner", "operator", "manager"];
 const Analytics = lazy(() => import("./screens/Analytics"));
@@ -140,7 +144,7 @@ const router = createBrowserRouter([
     children: [
   { path: "/login", element: <LoginRoute /> },
   // Публичная форма заявки для клиентов (ссылка и iframe на сайте) — без входа.
-  { path: "/zayavka", element: <PublicRequest /> },
+  { path: "/zayavka", element: <Suspense fallback={<Splash />}><PublicRequest /></Suspense> },
   // Регистрация компании (ТЗ §23.7): открыта при SAAS_SIGNUP=1, иначе — «по приглашению».
   { path: "/register", element: <Suspense fallback={<Splash />}><Register /></Suspense> },
   {
