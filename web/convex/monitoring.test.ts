@@ -106,7 +106,8 @@ describe("сводка «Состояние системы»", () => {
     vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "wh-secret");
     const o = await as(ids.owner).query(api.health.overview, {});
     const by = Object.fromEntries(o.subsystems.map((s) => [s.key, s]));
-    expect(Object.keys(by).sort()).toEqual(["ai", "api", "backup", "email", "escalations", "offsite", "olx", "pbx", "reminders", "site", "telegram", "whatsapp"]);
+    expect(Object.keys(by).sort()).toEqual(["ai", "api", "backup", "email", "escalations", "offsite", "olx", "payments", "pbx", "reminders", "site", "telegram", "whatsapp"]);
+    expect(by.payments?.configured).toBe(false);
     expect(by.telegram?.configured).toBe(true);
     expect(by.ai?.configured).toBe(false);
     expect(by.pbx?.configured).toBe(false);

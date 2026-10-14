@@ -3,7 +3,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { OWNER, requirePerm, requireRole } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
@@ -19,6 +19,8 @@ import { emitEvent } from "./lib/webhookEvents";
 import { insertClient } from "./clients";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
+import { dialHandler } from "./pbx";
+import type { DialResult } from "../src/data/pbx";
 import { aiDraft, aiSummary } from "./schema";
 import { normalizeCity } from "../src/data/cities";
 import { phone as fmtPhone, shortName } from "../src/lib/format";
@@ -287,7 +289,11 @@ export const _ingest = internalMutation({
     const patch: Partial<Doc<"calls">> = {};
     if (a.operator) {
       const login = normalizeLogin(a.operator);
-      const u = await ctx.db.query("users").withIndex("email", (q) => q.eq("email", login)).first();
+      const ext = a.operator.trim();
+      // Провайдеры АТС присылают внутренний номер сотрудника (pbx.ts) — ищем и по нему.
+      const u =
+        (await ctx.db.query("users").withIndex("email", (q) => q.eq("email", login)).first()) ??
+        (/^\d{1,8}$/.test(ext) ? await ctx.db.query("users").withIndex("by_pbx_extension", (q) => q.eq("pbxExtension", ext)).first() : null);
       if (u && u.role !== "executor") patch.operatorId = u._id;
     }
     if (event === "answered") patch.status = "answered";
@@ -316,6 +322,19 @@ export const _ingest = internalMutation({
     }
     await markOk(ctx, "pbx", "Событие АТС принято");
     return c._id;
+  },
+});
+
+/**
+ * «Позвонить через АТС» из карточки клиента, заявки или заказа (ТЗ п.19.1): АТС звонит сотруднику на его внутренний номер
+ * и соединяет с клиентом. АТС не подключена, нет внутреннего номера или АТС отказала — ссылка tel: (звонок с телефона).
+ */
+export const dial = action({
+  args: { phone: v.string(), orderId: v.optional(v.id("orders")), leadId: v.optional(v.id("leads")), clientId: v.optional(v.id("clients")) },
+  handler: async (ctx, { phone, orderId, leadId, clientId }): Promise<DialResult> => {
+    if (phone.length > 40) throw new ConvexError("Неверный номер телефона");
+    const context = orderId ? "из заказа" : leadId ? "из заявки" : clientId ? "из карточки клиента" : undefined;
+    return dialHandler(ctx, phone, context);
   },
 });
 

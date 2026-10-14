@@ -11,6 +11,7 @@ import { nowIso } from "./lib/domain";
 import { exportPage, EXPORT_HEADERS, executorStatsPage, type AuditExportFilters, type Cell, type ExecutorStat, type ExportPage, type ExportRange, type ExportRow } from "./lib/exportRows";
 import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { hitLimit } from "./lib/rateLimit";
+import { buildAccountingFile } from "./accounting";
 import { auditEntity } from "./schema";
 import { AUDIT_QUERY_MAX } from "../src/data/audit";
 import { EXPORT_KIND, EXPORT_KINDS, EXPORT_MAX_ROWS, EXPORT_TTL_MS, exportFileName, type ExportKind } from "../src/data/exports";
@@ -137,6 +138,10 @@ export const create = action({
   args: { kind: exportKind, from: v.string(), to: v.string(), ...auditArgs },
   handler: async (ctx, { kind, from, to, ...auditFilters }): Promise<ExportResult> => {
     const { range, columns } = await ctx.runMutation(internal.exports._start, { kind, from, to });
+    if (kind === "accounting" || kind === "commerceml") {
+      const file = await buildAccountingFile(ctx, kind, range);
+      return saveFile(ctx, kind, range, file.blob, file.rows, file.truncated, false);
+    }
     const filters: AuditExportFilters = kind === "audit" ? { ...auditFilters, q: auditFilters.q?.trim().slice(0, AUDIT_QUERY_MAX) || undefined } : {};
     const { rows, truncated } = await collect(ctx, kind, range, filters);
     let cells: Cell[][] = rows.map((r) => r.cells);
@@ -149,18 +154,23 @@ export const create = action({
     }
     const pick = <T>(row: readonly T[]): T[] => columns.map((i) => row[i]!);
     const blob = new Blob([toCsv([pick(EXPORT_HEADERS[kind]), ...cells.map(pick)])], { type: "text/csv;charset=utf-8" });
-    const fileId = await ctx.storage.store(blob);
-    try {
-      const filtered = kind === "audit" && Object.values(filters).some((x) => x !== undefined);
-      const saved = await ctx.runMutation(internal.exports._saved, { kind, ...range, rows: cells.length, size: blob.size, fileId, truncated, filtered });
-      return { ...saved, rows: cells.length, truncated };
-    } catch (e) {
-      // Строки о файле нет — без неё его никто не увидит и не удалит.
-      await ctx.storage.delete(fileId).catch(() => undefined);
-      throw e;
-    }
+    const filtered = kind === "audit" && Object.values(filters).some((x) => x !== undefined);
+    return saveFile(ctx, kind, range, blob, cells.length, truncated, filtered);
   },
 });
+
+/** Файл → хранилище → строка выгрузки, журнал, подписанная ссылка. */
+async function saveFile(ctx: ActionCtx, kind: ExportKind, range: ExportRange, blob: Blob, rows: number, truncated: boolean, filtered: boolean): Promise<ExportResult> {
+  const fileId = await ctx.storage.store(blob);
+  try {
+    const saved = await ctx.runMutation(internal.exports._saved, { kind, ...range, rows, size: blob.size, fileId, truncated, filtered });
+    return { ...saved, rows, truncated };
+  } catch (e) {
+    // Строки о файле нет — без неё его никто не увидит и не удалит.
+    await ctx.storage.delete(fileId).catch(() => undefined);
+    throw e;
+  }
+}
 
 /** Крон: выгрузки старше суток удаляются вместе с файлом — ссылку на них уже не получить. */
 export const cleanup = internalMutation({

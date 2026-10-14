@@ -53,7 +53,7 @@ function ExportModal({ kinds, onClose }: { kinds: readonly [ExportKind, ...Expor
     <Modal
       open
       onClose={onClose}
-      title="Выгрузка в CSV"
+      title={EXPORT_KIND[kind].ext ? "Выгрузка" : "Выгрузка в CSV"}
       width={480}
       footer={
         <>
@@ -61,7 +61,7 @@ function ExportModal({ kinds, onClose }: { kinds: readonly [ExportKind, ...Expor
             Отмена
           </Button>
           <Button icon={Download} disabled={busy} onClick={() => void submit()}>
-            {busy ? "Готовим файл…" : "Скачать CSV"}
+            {busy ? "Готовим файл…" : `Скачать ${(EXPORT_KIND[kind].ext ?? "csv").toUpperCase()}`}
           </Button>
         </>
       }
@@ -98,7 +98,7 @@ function ExportModal({ kinds, onClose }: { kinds: readonly [ExportKind, ...Expor
           </div>
         )}
         <p className="text-[13px] leading-snug text-muted">
-          Файл открывается в Excel: кодировка UTF-8, разделитель «;». Скачивание начнётся сразу; ссылка действует 15 минут, файл хранится на сервере сутки. Выгрузка записывается в журнал действий.
+          {EXPORT_KIND[kind].ext ? "Файл XML (UTF-8) для загрузки в 1С." : kind === "accounting" ? "Для 1С и Excel: кодировка UTF-8 с BOM, разделитель «;», даты — ДД.ММ.ГГГГ." : "Файл открывается в Excel: кодировка UTF-8, разделитель «;»."} Скачивание начнётся сразу; ссылка действует 15 минут, файл хранится на сервере сутки. Выгрузка записывается в журнал действий.
         </p>
       </div>
     </Modal>

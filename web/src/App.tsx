@@ -32,6 +32,10 @@ const Analytics = lazy(() => import("./screens/Analytics"));
 const AuditLog = lazy(() => import("./screens/AuditLog"));
 const Payouts = lazy(() => import("./screens/Payouts"));
 const PublicReview = lazy(() => import("./screens/PublicReview"));
+// Печатные документы заказа (ТЗ п.19.9): страница сотрудника и ссылка клиента — отдельный чанк, без меню.
+const documentPages = () => import("./screens/DocumentPage");
+const StaffDocumentPage = lazy(() => documentPages().then((m) => ({ default: m.StaffDocumentPage })));
+const PublicDocumentPage = lazy(() => documentPages().then((m) => ({ default: m.PublicDocumentPage })));
 
 // Кабинет мастера — один отдельный чанк: сотрудникам он не нужен. Suspense — в WorkerShell.
 const workerScreens = () => import("./screens/worker");
@@ -176,6 +180,8 @@ const router = createBrowserRouter([
   },
   // Оценка заказа клиентом по ссылке из сообщения — без входа.
   { path: "/otzyv/:token", element: lazyReview },
+  { path: "/docs/:kind/:orderId", element: <Suspense fallback={<Splash />}><StaffDocumentPage /></Suspense> },
+  { path: "/d/:token", element: <Suspense fallback={<Splash />}><PublicDocumentPage /></Suspense> },
   { path: "*", element: <Navigate to="/" replace /> },
 ]);
 

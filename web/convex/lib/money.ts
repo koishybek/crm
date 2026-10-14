@@ -1,10 +1,12 @@
 // Деньги заказа на сервере: проверки сумм и дат, статус по оплате, сдача работы, сообщение исполнителю о смене выплаты.
 // Сами правила (когда «Оплачен», что мешает закрыть) — общие с интерфейсом: src/data/money.ts.
 import { ConvexError } from "convex/values";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
 import { orderNotice } from "../clientNotify";
-import { executorUser, notify, nowIso, setStatus, type StatusMove } from "./domain";
+import { almatyStamp } from "./audit";
+import { executorUser, log, notify, nowIso, setStatus, uid, type StatusMove } from "./domain";
+import { PAYMENT_METHODS } from "../../src/data/catalog";
 import { cleanMoney, cleanText } from "./limits";
 import { refreshStats } from "./stats90";
 import { almatyDayStart } from "./tg";
@@ -69,6 +71,42 @@ export async function settle(ctx: MutationCtx, o: Doc<"orders">): Promise<Status
   await setStatus(ctx, o, to, SYSTEM, text, to === "paid" ? {} : { paidAt: undefined });
   if (to === "paid") await emitEvent(ctx, "order.paid", { orderId: o._id });
   return { from: o.status, to };
+}
+
+export interface PaymentInput {
+  amount: number;
+  method: Doc<"orders">["payments"][number]["method"];
+  at: string;
+  by?: Id<"users">;
+  note?: string;
+}
+
+export interface RecordedPayment {
+  payment: Doc<"orders">["payments"][number];
+  /** Оплачено всего после этой оплаты. */
+  paid: number;
+  /** Переплата сверх цены (0 — нет). */
+  over: number;
+  settled: StatusMove | null;
+  /** «Kaspi, дата оплаты …, переплата …» — для истории и журнала. */
+  details: string[];
+}
+
+/**
+ * Оплата в заказе — один путь для сотрудника («Внести оплату») и для онлайн-оплаты по уведомлению провайдера
+ * (payments.ts, автор — «Система»): запись платежа, история заказа, статус по деньгам (settle). Проверки, кто и когда
+ * может вносить оплату, — у вызывающего.
+ */
+export async function recordPayment(ctx: MutationCtx, o: Doc<"orders">, input: PaymentInput, actor: Actor): Promise<RecordedPayment> {
+  const paid = paidAmount(o) + input.amount;
+  const over = Math.max(0, paid - o.clientPrice);
+  const payment = { id: uid("p"), amount: input.amount, method: input.method, at: input.at, ...(input.by ? { by: input.by } : {}), ...(input.note ? { note: input.note } : {}) };
+  await ctx.db.patch(o._id, { payments: [...o.payments, payment], moneyAt: laterMoment(o.moneyAt, input.at) });
+  const backdated = Math.abs(Date.now() - Date.parse(input.at)) > 10 * 60_000;
+  const details = [PAYMENT_METHODS[input.method], ...(backdated ? [`дата оплаты ${almatyStamp(input.at)}`] : []), ...(over > 0 ? [`переплата ${money(over)}`] : [])];
+  await log(ctx, o._id, "payment", `Внесена оплата ${money(input.amount)} (${details.join(", ")})`, actor);
+  const settled = await settle(ctx, (await ctx.db.get(o._id))!);
+  return { payment, paid, over, settled, details };
 }
 
 /**

@@ -41,6 +41,8 @@ const WIPE_TABLES = [
   "pushSubscriptions",
   "clientErrors",
   "offsiteFiles",
+  "paymentIntents",
+  "documents",
   "categories",
   "services",
   "authAccounts",

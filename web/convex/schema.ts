@@ -171,6 +171,37 @@ export const statCell = {
   op: v.array(v.object({ id: v.string(), c: statCounts, waits: v.array(v.number()) })),
 };
 
+/** Провайдеры онлайн-оплаты (ТЗ п.19.7): Freedom Pay и CloudPayments — по API, Kaspi — ссылка магазина без уведомлений. */
+export const payProvider = v.union(v.literal("freedompay"), v.literal("cloudpayments"), v.literal("kaspi"));
+/** Статусы счёта на оплату — переходы в src/data/payIntents.ts. */
+export const payIntentStatus = v.union(v.literal("created"), v.literal("paid"), v.literal("failed"), v.literal("cancelled"), v.literal("review"));
+/** Виды документов по заказу (ТЗ п.19.9). */
+export const documentKind = v.union(v.literal("invoice"), v.literal("act"));
+const docParty = v.object({
+  name: v.string(),
+  bin: v.optional(v.string()),
+  address: v.optional(v.string()),
+  bank: v.optional(v.string()),
+  iik: v.optional(v.string()),
+  bik: v.optional(v.string()),
+  kbe: v.optional(v.string()),
+  director: v.optional(v.string()),
+  phone: v.optional(v.string()),
+});
+/** Снимок документа: печатается ровно так, как выпущен. */
+export const documentData = v.object({
+  seller: docParty,
+  buyer: docParty,
+  orderNumber: v.number(),
+  lines: v.array(v.object({ name: v.string(), qty: v.number(), unit: v.string(), price: v.number(), sum: v.number() })),
+  total: v.number(),
+  totalWords: v.string(),
+  /** Оплачено на момент выпуска: в счёте «к оплате» = total − paid. */
+  paid: v.number(),
+  vatNote: v.string(),
+  basis: v.optional(v.string()),
+});
+
 export default defineSchema({
   ...authTables,
 
@@ -199,13 +230,16 @@ export default defineSchema({
     mustChangePassword: v.optional(v.boolean()),
     /** Права сотрудника, заданные владельцем (ТЗ п.5.12); нет — умолчания роли (src/data/permissions.ts). */
     permissions: v.optional(v.array(permission)),
+    /** Внутренний номер в облачной АТС (ТЗ п.19.1): звонок из карточки и оператор входящего по событию АТС. */
+    pbxExtension: v.optional(v.string()),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])
     .index("by_role", ["role"])
     .index("by_executor", ["executorId"])
     .index("by_telegram_code", ["telegramLinkCode"])
-    .index("by_telegram_chat", ["telegramChatId"]),
+    .index("by_telegram_chat", ["telegramChatId"])
+    .index("by_pbx_extension", ["pbxExtension"]),
 
   executors: defineTable({
     tenantId: v.string(),
@@ -821,4 +855,56 @@ export default defineSchema({
       }),
     ),
   }),
+
+  /**
+   * Счета на онлайн-оплату заказа (ТЗ п.19.7, п.23.5): ссылка провайдера → уведомление провайдера → оплата в заказе.
+   * invoiceId — наш номер счёта у провайдера (pg_order_id / InvoiceId), externalId — номер у провайдера.
+   */
+  paymentIntents: defineTable({
+    orderId: v.id("orders"),
+    provider: payProvider,
+    invoiceId: v.string(),
+    amount: v.number(),
+    status: payIntentStatus,
+    url: v.optional(v.string()),
+    externalId: v.optional(v.string()),
+    createdAt: v.string(),
+    createdBy: v.id("users"),
+    expiresAt: v.string(),
+    /** Отправлен клиенту в его канал. */
+    sentAt: v.optional(v.string()),
+    paidAt: v.optional(v.string()),
+    /** Оплата в заказе, которую внесла система по уведомлению провайдера. */
+    paymentId: v.optional(v.string()),
+    /** Сумма из уведомления, если она не совпала со счётом. */
+    reportedAmount: v.optional(v.number()),
+    error: v.optional(v.string()),
+    updatedAt: v.string(),
+  })
+    .index("by_order", ["orderId", "createdAt"])
+    .index("by_invoice", ["invoiceId"]),
+
+  /**
+   * Документы по заказу (ТЗ п.19.9): «Счёт на оплату» и «Акт выполненных работ». data — снимок на момент выпуска:
+   * повторная печать совпадает с первой, даже если заказ или реквизиты потом изменились. Ссылка клиенту — только хэш токена и срок.
+   */
+  documents: defineTable({
+    orderId: v.id("orders"),
+    kind: documentKind,
+    number: v.number(),
+    /** Номер для печати: префикс владельца + число. */
+    label: v.string(),
+    date: v.string(),
+    total: v.number(),
+    data: documentData,
+    createdAt: v.string(),
+    createdBy: v.id("users"),
+    /** Выпущен новый документ того же вида — этот больше не актуален. */
+    replacedAt: v.optional(v.string()),
+    publicTokenHash: v.optional(v.string()),
+    publicExpiresAt: v.optional(v.string()),
+    sentAt: v.optional(v.string()),
+  })
+    .index("by_order", ["orderId", "kind", "createdAt"])
+    .index("by_public_token", ["publicTokenHash"]),
 });

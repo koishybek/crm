@@ -44,13 +44,16 @@ export const EXPORT_HEADERS: Record<ExportKind, string[]> = {
   payments: ["Дата", "Операция", "Заказ", "Клиент", "Сумма", "Способ", "Комментарий", "Кто внёс", "Сторно", "Причина сторно"],
   payouts: ["Дата выплаты", "Исполнитель", "Сумма", "Способ", "Заказы", "Комментарий", "Провёл", "Проведена в системе"],
   audit: ["Дата и время", "Кто", "Роль", "Объект", "Описание", "Действие", "ID объекта"],
+  // Бухгалтерские выгрузки собирает convex/accounting.ts (свои заголовки и XML).
+  accounting: [],
+  commerceml: [],
 };
 
 /**
  * Документов на страницу: страница — отдельный запрос, ответ — с запасом до лимитов. У звонков в документе
  * расшифровка (до 20 000 символов), у заказов — список файлов: их страницы меньше.
  */
-const PAGE: Record<ExportKind, number> = { leads: 200, orders: 100, calls: 50, executors: 200, payments: 100, payouts: 300, audit: 500 };
+const PAGE: Record<ExportKind, number> = { leads: 200, orders: 100, calls: 50, executors: 200, payments: 100, payouts: 300, audit: 500, accounting: 100, commerceml: 100 };
 
 const CALL_STATUS: Record<Doc<"calls">["status"], string> = { ringing: "Звонит", answered: "Идёт разговор", missed: "Пропущенный", completed: "Завершён" };
 const stamp = (iso: string | undefined): string => (iso ? almatyStamp(iso) : "");
@@ -298,6 +301,9 @@ export async function exportPage(ctx: QueryCtx, kind: ExportKind, r: ExportRange
       return payoutsPage(ctx, look, r, cursor);
     case "audit":
       return auditPage(ctx, r, cursor, audit);
+    case "accounting":
+    case "commerceml":
+      throw new Error("Бухгалтерские выгрузки собирает convex/accounting.ts");
   }
 }
 

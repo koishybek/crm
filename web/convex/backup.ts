@@ -59,6 +59,8 @@ export const BACKUP_TABLES = [
   "payouts",
   "campaignSpend",
   "webhooks",
+  "paymentIntents",
+  "documents",
 ] as const satisfies readonly TableNames[];
 export type BackupTable = (typeof BACKUP_TABLES)[number];
 
@@ -82,6 +84,7 @@ const SECRET_FIELDS: Partial<Record<BackupTable, readonly string[]>> = {
   apiKeys: ["hash"],
   reviewRequests: ["token"],
   webhooks: ["secret"],
+  documents: ["publicTokenHash", "publicExpiresAt"],
 };
 /** Настройки-секреты (ключ АТС и т.п.) не копируются целиком. */
 const SECRET_SETTING = /secret|token|key/i;

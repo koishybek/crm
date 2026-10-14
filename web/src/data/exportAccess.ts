@@ -12,6 +12,9 @@ const EXPORT_NEEDS: Record<ExportKind, Permission | "owner"> = {
   payments: "money.view",
   payouts: "money.payouts",
   audit: "owner",
+  // Бухгалтерия (реестр для 1С, CommerceML) — только владелец, как и сама кнопка в «Настройках».
+  accounting: "owner",
+  commerceml: "owner",
 };
 
 /** Колонки с деньгами: заголовок → право, без которого колонку не выгружаем (src: convex/lib/exportRows.ts EXPORT_HEADERS). */

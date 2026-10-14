@@ -5,7 +5,7 @@ import type { MutationCtx } from "../_generated/server";
 import { alertDown, alertRecovered } from "./alerts";
 import { nowIso } from "./domain";
 
-export type HealthKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite";
+export type HealthKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite" | "payments";
 
 /**
  * Одна и та же отметка подряд чаще раза в минуту строку не переписывает: поток событий АТС или флуд вебхука

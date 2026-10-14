@@ -3,7 +3,7 @@
 // которое экран обновляет сам.
 import type { Tone } from "./catalog";
 
-export type SubsystemKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite";
+export type SubsystemKey = "ai" | "telegram" | "whatsapp" | "olx" | "pbx" | "email" | "site" | "api" | "backup" | "reminders" | "escalations" | "offsite" | "payments";
 
 /** Отметки подсистемы: когда последний раз отработала и последняя ошибка. */
 export interface HealthMark {
@@ -64,6 +64,7 @@ const MIN = 60_000;
 export const SUBSYSTEMS: Record<SubsystemKey, { label: string; staleMs?: number; idle: string }> = {
   reminders: { label: "Напоминания о сроках", staleMs: 30 * MIN, idle: "Ещё не запускались" },
   escalations: { label: "Эскалации и автораспределение", staleMs: 20 * MIN, idle: "Ещё не запускались" },
+  payments: { label: "Онлайн-оплата", idle: "Счетов на оплату ещё не было" },
   backup: { label: "Резервные копии", staleMs: 26 * 60 * MIN, idle: "Копий ещё нет — первая будет ночью" },
   offsite: { label: "Внешнее хранилище копий", idle: "Копий во внешнем хранилище ещё нет — первая уйдёт ночью" },
   ai: { label: "AI: расшифровка и разбор", idle: "Ещё не использовался" },

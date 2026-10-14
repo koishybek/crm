@@ -15,6 +15,7 @@ import { ApiAndSiteCard, NotifyCards, OlxCard, WhatsAppCard } from "./ChannelCar
 import { AiStatusCard, TelegramCard, TelephonyCard } from "./Integrations";
 import { SystemCards } from "./SystemCards";
 import { MatchingCards } from "./MatchingCards";
+import { AdapterCards } from "./AdapterCards";
 
 type Creds = { title: string; rows: { name: string; login: string; password: string }[] };
 
@@ -243,6 +244,7 @@ export default function Settings() {
         <TelephonyCard />
         <AiStatusCard />
       </div>
+      <AdapterCards />
 
       <div className="mt-4">
         <WhatsAppCard />
