@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { CITIES, KANBAN, ORDER_STATUS, serviceById, type Tone } from "../data/catalog";
 import { useMe, useNow } from "../data/hooks";
-import { isOverdue, orderBadge, orderBadgeShort, payout } from "../data/logic";
+import { isOverdue, orderBadgeShort, payout } from "../data/logic";
 import { can } from "../data/permissions";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -14,7 +14,7 @@ import { ExportButton } from "../components/ExportButton";
 import { ServiceLabel } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
 import { Avatar, Badge, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
-import { cn, dayDiff, dateTime, deadline, money } from "../lib/format";
+import { cn, dayDiff, dateTime, deadline, money, shortName } from "../lib/format";
 import { OrdersArchive } from "./OrdersArchive";
 
 const COL_ICON: Record<string, ReactNode> = {
@@ -199,9 +199,8 @@ export default function Orders() {
               <thead>
                 <tr>
                   <th>№</th>
-                  <th>Клиент</th>
+                  <th>Клиент и город</th>
                   <th>Услуга</th>
-                  <th>Город</th>
                   <th>Срок</th>
                   <th>Исполнитель</th>
                   {seesMoney && <th className="text-right">Цена</th>}
@@ -212,22 +211,24 @@ export default function Orders() {
               <tbody>
                 {filtered.slice(0, 200).map((o) => {
                   const ex = db.executors.find((e) => e.id === o.executorId);
-                  const b = orderBadge(o, now);
+                  const b = orderBadgeShort(o, now);
                   return (
                     <tr key={o.id} className="row-link" onClick={() => nav(`/orders/${o.id}`)}>
                       <td className="font-semibold text-ink">№{o.number}</td>
-                      <td className="max-w-[170px] truncate text-ink">{o.clientName}</td>
+                      <td className="max-w-[180px] leading-tight">
+                        <span className="block truncate text-ink">{o.clientName}</span>
+                        <span className="block truncate text-[13px] text-muted">{o.city}</span>
+                      </td>
                       <td>
                         <ServiceLabel serviceId={o.serviceId} className="max-w-[220px] text-ink-2" />
                         <SkillLine skills={o.requiredSkills} label="Нужные навыки" icon className="mt-1 max-w-[240px]" />
                       </td>
-                      <td className="text-ink-2">{o.city}</td>
                       <td className={cn("whitespace-nowrap", isOverdue(o, now) ? "font-medium text-bad" : "text-ink-2")}>{deadline(o.deadline, new Date(now))}</td>
-                      <td className="text-ink-2">{ex ? ex.name : <span className="text-muted">—</span>}</td>
+                      <td className="whitespace-nowrap text-ink-2" title={ex?.name}>{ex ? shortName(ex.name) : <span className="text-muted">—</span>}</td>
                       {seesMoney && <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>}
                       {seesMargin && <td className="text-right text-ok-ink tabular-nums">{o.clientPrice ? money(o.clientPrice - payout(o)) : "—"}</td>}
                       <td>
-                        <Badge tone={b.tone}>{b.label}</Badge>
+                        <Badge tone={b.tone} title={b.full}>{b.label}</Badge>
                       </td>
                     </tr>
                   );

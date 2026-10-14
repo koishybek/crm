@@ -84,7 +84,7 @@ const navFor = (u: User) =>
 /** badges — счётчики у пунктов меню (непрочитанные «Сообщения»). */
 function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?: () => void; badges?: Record<string, number> }) {
   return (
-    <nav className="flex flex-col gap-1.5 [@media(max-height:820px)]:gap-1" aria-label="Разделы">
+    <nav className="flex flex-col gap-1.5 short:gap-1 shorter:gap-0.5" aria-label="Разделы">
       {items.map((n) => (
         <NavLink
           key={n.to}
@@ -93,7 +93,7 @@ function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?:
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              "relative flex h-[50px] shrink-0 items-center gap-3.5 rounded-[12px] px-4 text-[16px] font-medium transition-colors [@media(max-height:820px)]:h-[42px] [@media(max-height:820px)]:text-[15px]",
+              "relative flex h-[50px] shrink-0 items-center gap-3.5 rounded-[12px] px-4 text-[16px] font-medium transition-colors short:h-[42px] short:text-[15px] shorter:h-[38px]",
               isActive
                 ? "bg-[#3a3120] text-brand before:absolute before:top-2.5 before:bottom-2.5 before:-left-3 before:w-[3px] before:rounded-r-full before:bg-brand"
                 : "text-[#dedbd3] hover:bg-white/[0.06] hover:text-white",
@@ -192,7 +192,7 @@ function GlobalSearch({ executor, autoFocus, onDone }: { executor: boolean; auto
         }}
         placeholder={executor ? "Поиск по услугам или городу..." : "Поиск по клиентам, заявкам, заказам..."}
         aria-label="Поиск"
-        className="h-[46px] w-full rounded-[11px] border border-transparent bg-field pr-16 pl-12 text-[15px] text-ink placeholder:text-muted focus:border-brand-line focus:bg-white focus:outline-none"
+        className="h-[46px] w-full rounded-[11px] border border-transparent bg-field pr-16 pl-12 text-[15px] text-ellipsis text-ink placeholder:text-muted focus:border-brand-line focus:bg-white focus:outline-none"
       />
       {!focus && (
         <kbd className="pointer-events-none absolute top-1/2 right-3 hidden -translate-y-1/2 rounded-[6px] border border-line-strong bg-white px-1.5 py-0.5 font-sans text-[11.5px] font-medium text-muted lg:block">
@@ -411,12 +411,12 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
   return (
     <div className="min-h-dvh bg-page">
       {/* Сайдбар */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col bg-side px-3 pt-6 pb-4 lg:flex">
-        <div className="mb-8 shrink-0 px-3 [@media(max-height:820px)]:mb-5">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col bg-side px-3 pt-6 pb-4 lg:flex shorter:pt-4 shorter:pb-3">
+        <div className="mb-8 shrink-0 px-3 short:mb-5 shorter:mb-3">
           <Logo onDark />
         </div>
         {/* Пунктов больше, чем влезает на ноутбуке, — список прокручивается, логотип и компания на месте. */}
-        <div className="scroll-thin scroll-dark -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
+        <div className="scroll-thin scroll-dark scroll-shade -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
           <SideNav items={items} badges={badges} />
         </div>
         <div className="mt-3 shrink-0">
@@ -433,7 +433,7 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
               <Logo onDark />
               <IconButton icon={X} label="Закрыть меню" onClick={() => ui.setNav(false)} className="text-[#a9a59c] hover:bg-white/10 hover:text-white" />
             </div>
-            <div className="scroll-thin scroll-dark -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
+            <div className="scroll-thin scroll-dark scroll-shade -mx-3 min-h-0 flex-1 overflow-y-auto px-3">
               <SideNav items={items} badges={badges} onNavigate={() => ui.setNav(false)} />
             </div>
             <div className="mt-3 shrink-0">

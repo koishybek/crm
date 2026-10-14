@@ -9,11 +9,11 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { ACTIVE_STATUSES, CATEGORIES, FINISHED_STATUSES, ORDER_STATUS, SOURCE_IDS, SOURCES } from "../data/catalog";
 import { useMe, useNow, useTeam } from "../data/hooks";
 import { can } from "../data/permissions";
-import { orderBadge } from "../data/logic";
+import { orderBadgeShort } from "../data/logic";
 import type { OrderStatus, SourceId } from "../data/types";
 import { ServiceLabel } from "../components/icons";
 import { Badge, Button, EmptyState, Input, Loading, Select } from "../components/ui";
-import { cn, date, money, num } from "../lib/format";
+import { cn, date, money, num, shortName } from "../lib/format";
 
 const PAGE = 30;
 const FIELD = "[&_input]:h-[46px] [&_input]:border-line [&_select]:h-[46px] [&_select]:border-line";
@@ -122,11 +122,12 @@ export function OrdersArchive() {
             </option>
           ))}
         </Select>
-        <Select icon={CalendarDays} aria-label="Какая дата" value={by} onChange={(e) => setBy(e.target.value as "created" | "done")}>
-          <option value="created">По дате создания</option>
-          <option value="done">По дате выполнения</option>
-        </Select>
-        <div className="grid grid-cols-2 gap-3">
+        {/* Какая дата и период — одной группой на две колонки: полям дат нужна ширина под «дд.мм.гггг» и календарь. */}
+        <div className="grid grid-cols-2 gap-3 sm:col-span-2 xl:grid-cols-[1.4fr_1fr_1fr]">
+          <Select icon={CalendarDays} aria-label="Какая дата" value={by} onChange={(e) => setBy(e.target.value as "created" | "done")} className="col-span-2 xl:col-span-1">
+            <option value="created">Дата создания</option>
+            <option value="done">Дата выполнения</option>
+          </Select>
           <Input type="date" aria-label="С даты" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
           <Input type="date" aria-label="По дату" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
         </div>
@@ -165,9 +166,8 @@ export function OrdersArchive() {
                 <tr>
                   <th>№</th>
                   <th>Создан</th>
-                  <th>Клиент</th>
+                  <th>Клиент и город</th>
                   <th>Услуга</th>
-                  <th>Город</th>
                   <th>Исполнитель</th>
                   <th>Статус</th>
                   <th>Выполнен</th>
@@ -176,19 +176,21 @@ export function OrdersArchive() {
               </thead>
               <tbody>
                 {results.map((o) => {
-                  const b = orderBadge(o, now);
+                  const b = orderBadgeShort(o, now);
                   return (
                     <tr key={o.id} className="row-link" onClick={() => nav(`/orders/${o.id}`)}>
                       <td className="font-semibold text-ink">№{o.number}</td>
                       <td className="whitespace-nowrap text-ink-2">{date(o.createdAt)}</td>
-                      <td className="max-w-[170px] truncate text-ink">{o.clientName}</td>
+                      <td className="max-w-[180px] leading-tight">
+                        <span className="block truncate text-ink">{o.clientName}</span>
+                        <span className="block truncate text-[13px] text-muted">{o.city}</span>
+                      </td>
                       <td>
                         <ServiceLabel serviceId={o.serviceId} className="max-w-[220px] text-ink-2" />
                       </td>
-                      <td className="text-ink-2">{o.city}</td>
-                      <td className="text-ink-2">{team.executor(o.executorId)?.name ?? <span className="text-muted">—</span>}</td>
+                      <td className="whitespace-nowrap text-ink-2" title={team.executor(o.executorId)?.name}>{shortName(team.executor(o.executorId)?.name ?? "") || <span className="text-muted">—</span>}</td>
                       <td>
-                        <Badge tone={b.tone}>{b.label}</Badge>
+                        <Badge tone={b.tone} title={b.full}>{b.label}</Badge>
                       </td>
                       <td className="whitespace-nowrap text-ink-2">{o.doneAt ? date(o.doneAt) : <span className="text-muted">—</span>}</td>
                       {owner && <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>}

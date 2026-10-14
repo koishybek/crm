@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { serviceById } from "../data/catalog";
 import { useMe, useNow, useTeam, useUi } from "../data/hooks";
 import { can, canSeeCompanyMoney } from "../data/permissions";
-import { EXEC_STATE, executorState, isActive, isDueSoon, isOverdue, leadBadge, orderBadge } from "../data/logic";
+import { EXEC_STATE, executorState, isActive, isDueSoon, isOverdue, leadBadge, orderBadgeShort } from "../data/logic";
 import { PERIODS, trend, type PeriodId } from "../data/metrics";
 import { dayStart, daysBetween, funnelOfTotals, moneyOf, n, shiftDay } from "../data/dailyStats";
 import { PRESETS, presetRange, type DayRange } from "../data/statsPeriod";
@@ -125,14 +125,14 @@ export default function Dashboard() {
       </div>
       {seesPayouts && <OwnerMoneyKpis from={dayStart(cur.from)} revenue={k.revenue} margin={k.margin} />}
 
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
+      <div className="mt-4 grid grid-cols-1 gap-4 2xl:grid-cols-[1fr_1fr]">
         <Card icon={FileText} title="Последние заявки" action={<TextLink to="/leads">Все заявки</TextLink>} bodyClass="px-3 pb-3 sm:px-4">
-          <div className="scroll-x">
-            <table className="tbl min-w-[560px]">
+          <div className="scroll-x @container">
+            <table className="tbl min-w-[480px]">
               <thead>
                 <tr>
                   <th>Клиент</th>
-                  <th>Источник</th>
+                  <th className="hidden @min-[600px]:table-cell">Источник</th>
                   <th>Услуга</th>
                   <th>Статус</th>
                   <th className="text-right">Время</th>
@@ -149,7 +149,7 @@ export default function Dashboard() {
                           <span className="max-w-[150px] truncate font-medium text-ink">{l.clientName}</span>
                         </span>
                       </td>
-                      <td>
+                      <td className="hidden @min-[600px]:table-cell">
                         <Source source={l.source} />
                       </td>
                       <td className="max-w-[170px] truncate text-ink-2">{serviceById(l.serviceId).label}</td>
@@ -175,8 +175,8 @@ export default function Dashboard() {
           {attention.length === 0 ? (
             <div className="px-2 py-10 text-center text-[14px] text-muted">Всё под контролем — срочных заказов нет</div>
           ) : (
-            <div className="scroll-x">
-              <table className="tbl min-w-[560px]">
+            <div className="scroll-x @container">
+              <table className="tbl min-w-[480px]">
                 <thead>
                   <tr>
                     <th>Заказ</th>
@@ -191,7 +191,7 @@ export default function Dashboard() {
                     const ex = db.executors.find((e) => e.id === o.executorId);
                     const late = isOverdue(o, now);
                     const today = dayDiff(new Date(o.deadline), new Date(now)) === 0;
-                    const b = orderBadge(o, now);
+                    const b = orderBadgeShort(o, now);
                     return (
                       <tr key={o.id} className="row-link" onClick={() => nav(`/orders/${o.id}`)}>
                         <td className="font-semibold text-ink">№{o.number}</td>
@@ -208,7 +208,7 @@ export default function Dashboard() {
                           )}
                         </td>
                         <td>
-                          <Badge tone={b.tone}>{b.label}</Badge>
+                          <Badge tone={b.tone} title={b.full}>{b.label}</Badge>
                         </td>
                       </tr>
                     );
@@ -258,8 +258,8 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {seesPayouts && <PayoutsCard from={dayStart(cur.from)} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
-        {seesMoney && <DebtorsCard className="xl:col-span-2" />}
+        {seesPayouts && <PayoutsCard from={dayStart(cur.from)} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="2xl:col-span-2" />}
+        {seesMoney && <DebtorsCard className="2xl:col-span-2" />}
       </div>
     </>
   );

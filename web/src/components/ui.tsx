@@ -93,9 +93,10 @@ export function TextLink({ to, children, className }: { to: string; children: Re
 }
 
 // ── Бейджи ───────────────────────────────────────────────────────────────────
-export function Badge({ tone = "blue", children, className, size = "md" }: { tone?: Tone; children: ReactNode; className?: string; size?: "sm" | "md" }) {
+export function Badge({ tone = "blue", children, className, size = "md", title }: { tone?: Tone; children: ReactNode; className?: string; size?: "sm" | "md"; title?: string }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center justify-center rounded-[8px] font-semibold whitespace-nowrap",
         size === "sm" ? "px-2 py-[3px] text-[11.5px]" : "px-2.5 py-[5px] text-[12.5px]",
@@ -247,7 +248,7 @@ export function KpiCard({ icon: Icon, tone, label, value, trend, caption, onClic
   const Tag = onClick ? "button" : "div";
   const tint = KPI_TINT[tone];
   return (
-    <Tag onClick={onClick} className={cn("card @container relative flex min-w-0 items-start gap-4 overflow-hidden p-5 text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
+    <Tag onClick={onClick} className={cn("card @container relative block min-w-0 overflow-hidden p-5 text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
       {deco && tint && (
         <span className="pointer-events-none absolute top-6 right-5 hidden items-end gap-[5px] @min-[330px]:flex" aria-hidden>
           {[34, 52, 70, 92].map((h, i) => (
@@ -255,14 +256,17 @@ export function KpiCard({ icon: Icon, tone, label, value, trend, caption, onClic
           ))}
         </span>
       )}
-      <span className={cn("inline-flex h-[58px] w-[58px] shrink-0 items-center justify-center rounded-[16px]", TONE_SOFT[tone])}>
-        <Icon size={27} strokeWidth={1.7} aria-hidden />
-      </span>
-      <div className="@container min-w-0 flex-1">
-        <div className="text-[14.5px] text-ink-2">{label}</div>
-        {/* Размер — от ширины колонки: в узкой карточке сумма «3 351 000 ₸» остаётся в одну строку. */}
-        <div className="mt-0.5 text-[clamp(20px,14cqw,30px)] leading-tight font-bold tracking-[-0.02em] whitespace-nowrap text-ink tabular-nums">{value}</div>
-        {trend ? <TrendLine trend={trend} /> : caption ? <div className="mt-1.5 text-[13.5px] text-muted">{caption}</div> : null}
+      {/* Узкая карточка (три в ряд на 1024px) — иконка над текстом, иначе подписи ломаются на 3–4 строки. */}
+      <div className="flex flex-col items-start gap-3 @min-[240px]:flex-row @min-[240px]:gap-4">
+        <span className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] @min-[240px]:h-[58px] @min-[240px]:w-[58px] @min-[240px]:rounded-[16px]", TONE_SOFT[tone])}>
+          <Icon className="size-[22px] @min-[240px]:size-[27px]" strokeWidth={1.7} aria-hidden />
+        </span>
+        <div className="@container w-full min-w-0 flex-1">
+          <div className="text-[14.5px] text-ink-2">{label}</div>
+          {/* Размер — от ширины колонки: в узкой карточке сумма «3 351 000 ₸» остаётся в одну строку. */}
+          <div className="mt-0.5 text-[clamp(20px,14cqw,30px)] leading-tight font-bold tracking-[-0.02em] whitespace-nowrap text-ink tabular-nums">{value}</div>
+          {trend ? <TrendLine trend={trend} /> : caption ? <div className="mt-1.5 text-[13.5px] text-muted">{caption}</div> : null}
+        </div>
       </div>
     </Tag>
   );

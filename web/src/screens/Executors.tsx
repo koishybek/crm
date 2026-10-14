@@ -131,7 +131,7 @@ export default function Executors() {
                   <th>Город</th>
                   <th>Статус</th>
                   <th>Рейтинг</th>
-                  <th className="text-center">Активные заказы</th>
+                  <th className="text-center" title="Активные заказы">В работе</th>
                   <th className="text-right">Действия</th>
                 </tr>
               </thead>

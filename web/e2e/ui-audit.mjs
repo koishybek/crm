@@ -9,6 +9,9 @@ const SETS = [
   { name: "owner-laptop", who: "alikhan@homemax.kz", vp: { width: 1366, height: 768 }, paths: [...STAFF, "@order", "@client", "@executor", "@lead"] },
   { name: "owner-small", who: "alikhan@homemax.kz", vp: { width: 1280, height: 650 }, paths: ["/", "/settings"] },
   { name: "owner-phone", who: "alikhan@homemax.kz", vp: { width: 390, height: 844 }, paths: [...STAFF, "@order", "@client", "@executor", "@lead", "@menu"] },
+  // 1024 — самый тесный: сайдбар уже показан, контенту ~776px; высота 640 — ноутбук с панелью задач и закладками.
+  { name: "owner-1024", who: "alikhan@homemax.kz", vp: { width: 1024, height: 640 }, paths: [...STAFF, "@order", "@client", "@executor", "@lead"] },
+  { name: "owner-phone-landscape", who: "alikhan@homemax.kz", vp: { width: 844, height: 390 }, paths: ["/", "/orders", "@order", "@menu"] },
   { name: "owner-tablet", who: "alikhan@homemax.kz", vp: { width: 820, height: 1180 }, paths: ["/", "/orders", "/analytics", "/settings", "@order"] },
   { name: "operator-laptop", who: "madina@homemax.kz", vp: { width: 1366, height: 768 }, paths: ["/", "/leads", "/orders", "/inbox", "@order"] },
   { name: "manager-laptop", who: "erlan@homemax.kz", vp: { width: 1366, height: 768 }, paths: ["/", "/orders", "/analytics", "@order"] },
@@ -17,9 +20,9 @@ const SETS = [
   { name: "public", who: null, vp: { width: 390, height: 844 }, paths: ["/login", "/zayavka", "/register", "/help", "/privacy", "/offer"] },
 ];
 const report = [];
-async function probe(p, label, phone) {
+async function probe(p, label, phone, laptop) {
   await p.waitForTimeout(2200);
-  const r = await p.evaluate((phone) => {
+  const r = await p.evaluate(({ phone, laptop }) => {
     const out = { hScroll: document.documentElement.scrollWidth - innerWidth, stuck: [], clipped: [], tiny: [] };
     const vis = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
     const name = (e) => (e.getAttribute("aria-label") || e.innerText || e.className || e.tagName).toString().trim().replace(/\s+/g, " ").slice(0, 50);
@@ -40,16 +43,19 @@ async function probe(p, label, phone) {
         if (b.height < 32 && b.width < 32 && !e.closest("table") && !e.classList.contains("hit")) out.tiny.push(`«${name(e)}» ${Math.round(b.width)}×${Math.round(b.height)}`);
       }
     }
+    // На ноутбуке таблица должна помещаться: горизонтальная прокрутка внутри карточки — запасной вариант для телефона.
+    out.wideTables = laptop ? [...document.querySelectorAll(".scroll-x:has(table)")].filter((e) => vis(e) && e.scrollWidth > e.clientWidth + 2 && !e.closest("[data-wide-ok]")).slice(0, 4).map((e) => `«${name(e.querySelector("th") ?? e)}…» ${e.scrollWidth}>${e.clientWidth}`) : [];
     // Элементы за правым краем экрана (вылезают на телефоне).
     out.offscreen = [...document.querySelectorAll("button, a, input, h1, h2, h3")].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.right > innerWidth + 2 && !e.closest(".scroll-x, [class*=overflow-x], [class*=overflow-auto]"); }).slice(0, 5).map((e) => `«${name(e)}»`);
     out.stuck = out.stuck.slice(0, 5); out.clipped = [...new Set(out.clipped)].slice(0, 6); out.tiny = [...new Set(out.tiny)].slice(0, 6);
     return out;
-  }, phone);
+  }, { phone, laptop });
   const issues = [];
   if (r.hScroll > 1) issues.push(`горизонтальная прокрутка ${r.hScroll}px`);
   if (r.stuck.length) issues.push(`не прокручивается: ${r.stuck.join("; ")}`);
   if (r.offscreen.length) issues.push(`за краем экрана: ${r.offscreen.join(", ")}`);
   if (r.clipped.length) issues.push(`обрезан текст: ${r.clipped.join(", ")}`);
+  if (r.wideTables.length) issues.push(`таблица шире карточки: ${r.wideTables.join("; ")}`);
   if (r.tiny.length) issues.push(`мелкие кнопки: ${r.tiny.join(", ")}`);
   report.push({ label, issues });
 }
@@ -70,7 +76,7 @@ for (const set of SETS) {
       else if (path === "@lead") { await p.goto(BASE + "/leads"); await p.waitForTimeout(2000); await p.locator("tr.row-link").first().click(); }
       else if (path === "@worder") { await p.goto(BASE + "/w/my"); await p.waitForTimeout(2000); await p.locator("a[href^='/w/orders/']").first().click(); }
       else await p.goto(BASE + path, { waitUntil: "domcontentloaded" });
-      await probe(p, label, phone);
+      await probe(p, label, phone, set.vp.width >= 1280);
       if (errs.length) report.at(-1).issues.push(`ошибки: ${[...new Set(errs)].join(" | ")}`);
       await p.screenshot({ path: `${OUT}/${label.replace(/[^a-z0-9-]+/gi, "_")}.png`, fullPage: false });
     } catch (e) { report.push({ label, issues: [`СБОЙ: ${e.message.split("\n")[0].slice(0, 160)}`] }); }

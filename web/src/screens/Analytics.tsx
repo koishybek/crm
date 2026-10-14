@@ -274,7 +274,7 @@ export default function Analytics() {
               <SourceCostsCard rows={d.sources} onSpend={() => setSpendOpen(true)} />
             </div>
           )}
-          <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
+          <div className="mt-4 grid grid-cols-1 gap-4 2xl:grid-cols-[1.35fr_1fr]">
             <OperatorsCard rows={d.ops.rows} auto={d.ops.auto} users={team.users} />
             {range.to === todayDay(now) && <PayoutsCard from={dayStart(range.from)} period={`за ${PRESETS.find((p) => p.id === preset)!.label.toLowerCase().replace("…", "")}`} />}
           </div>

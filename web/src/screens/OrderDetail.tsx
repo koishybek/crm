@@ -360,7 +360,7 @@ export default function OrderDetail() {
         </div>
       </div>
 
-      {modal === "assign" && <AssignModal o={o} onClose={() => setModal(null)} />}
+      {modal === "assign" && <AssignModal o={o} onClose={() => setModal(null)} onPrice={canPrice ? () => setModal("finance") : undefined} />}
       {modal === "info" && <InfoModal o={o} onClose={() => setModal(null)} />}
       {modal === "finance" && <FinanceModal o={o} payouts={money_.payouts} onClose={() => setModal(null)} />}
       {modal === "payment" && <PaymentModal o={o} onClose={() => setModal(null)} />}
@@ -588,7 +588,7 @@ function HistoryList({ limit = 8 }: { limit?: number }) {
 
 // ── Модалки ──────────────────────────────────────────────────────────────────
 
-function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
+function AssignModal({ o, onClose, onPrice }: { o: Order; onClose: () => void; onPrice?: () => void }) {
   const db = useDetail();
   const me = useMe();
   const [busy, setBusy] = useState(false);
@@ -622,7 +622,13 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
           <SkillChips skills={o.requiredSkills} variant="outline" />
         </div>
       )}
-      {noPrice && <div className="mb-3 rounded-[10px] bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-ink">Сначала укажите цену клиента и выплату — исполнитель должен видеть, сколько получит.</div>}
+      {noPrice && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[10px] bg-warn-bg px-3.5 py-2.5 text-[13.5px] text-warn-ink">
+          <span className="min-w-0 flex-1 basis-[260px]">Сначала укажите цену клиента и выплату — исполнитель должен видеть, сколько получит.</span>
+          {/* Без этой кнопки из окна не выйти к цене: «Назначить» неактивны, а «Указать цену» — под окном. */}
+          {onPrice && <Button size="sm" onClick={onPrice}>Указать цену</Button>}
+        </div>
+      )}
       <AiMatchPanel
         orderId={o.id}
         disabled={busy || noPrice}
@@ -634,7 +640,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
       <Input icon={Search} placeholder="Поиск по имени" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="mt-3 flex flex-col gap-2">
         {list.map(({ e, state, load, fits, reasons }) => (
-          <div key={e.id} className={cn("flex items-center gap-3 rounded-[12px] border p-3", o.executorId === e.id ? "border-brand bg-brand-soft/40" : "border-line")}>
+          <div key={e.id} className={cn("flex flex-wrap items-center gap-3 rounded-[12px] border p-3 sm:flex-nowrap", o.executorId === e.id ? "border-brand bg-brand-soft/40" : "border-line")}>
             <Avatar name={e.name} size={44} variant="person" />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
@@ -643,7 +649,8 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
                   {EXEC_STATE[state].label}
                 </Badge>
               </div>
-              <div className="mt-0.5 truncate text-[13px] text-muted">
+              {/* На телефоне строки переносятся: рейтинг и загрузка важнее одной строки. */}
+              <div className="mt-0.5 text-[13px] text-muted sm:truncate">
                 {e.city} · {e.categories.map((c) => categoryById(c).label).join(", ")} · в работе: {load} ·{" "}
                 {ratingValue(e) ? (
                   <>
@@ -653,7 +660,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
                   "нет оценок"
                 )}
               </div>
-              <div className="mt-0.5 truncate text-[12.5px] text-muted">
+              <div className="mt-0.5 text-[12.5px] text-muted sm:truncate">
                 {historyLine(e.stats90) ?? "истории за 90 дней нет"}
                 {seesPayouts && o.clientPrice > 0 && ` · получит ${money(payoutFor(e.rates, o))}`}
                 {e.districts?.length ? ` · районы: ${e.districts.join(", ")}` : ""}
@@ -671,6 +678,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
             <Button
               size="sm"
               variant={o.executorId === e.id ? "soft" : "primary"}
+              className="w-full sm:w-auto"
               title={state === "off" && !canOverrideOff ? "Исполнитель на выходном — назначить его может только владелец" : undefined}
               disabled={busy || (state === "off" && !canOverrideOff) || noPrice || o.executorId === e.id}
               onClick={() => void assign(e)}

@@ -510,7 +510,7 @@ function NewLeadForm({
           {(id) => <PhoneInput id={id} value={ph} onChange={setPh} />}
         </FormRow>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <FormRow label="Источник" required>
             {(id) => <SourceSelect id={id} value={source} onChange={setSource} />}
           </FormRow>
@@ -574,13 +574,14 @@ function NewLeadForm({
       </div>
 
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-6 flex flex-wrap justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
-        <Button variant="secondary" className="border-line-strong bg-white text-ink-2" onClick={close}>
+        {/* На телефоне главное действие — первой кнопкой во всю ширину, остальные — парой под ним. */}
+        <Button variant="secondary" className="flex-1 border-line-strong bg-white text-ink-2 sm:flex-none" onClick={close}>
           Отмена
         </Button>
-        <Button variant="soft" className="bg-brand-soft text-brand-ink" disabled={busy} onClick={() => void submit(false)}>
+        <Button variant="soft" className="flex-1 bg-brand-soft text-brand-ink sm:flex-none" disabled={busy} onClick={() => void submit(false)}>
           Сохранить заявку
         </Button>
-        <Button type="submit" disabled={busy} onClick={(e) => (e.preventDefault(), void submit(true))}>
+        <Button type="submit" className="order-first w-full sm:order-none sm:w-auto" disabled={busy} onClick={(e) => (e.preventDefault(), void submit(true))}>
           Создать заказ
         </Button>
       </div>
@@ -698,7 +699,7 @@ function LeadView({ id }: { id: string }) {
         />
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormRow label="Услуга">
           {(fid) => <ServiceSelect id={fid} value={v.serviceId} onChange={(serviceId) => setDraft((d) => ({ ...d, serviceId }))} />}
         </FormRow>
@@ -859,7 +860,7 @@ function LeadDetailsFields(p: {
       <FormRow label="Адрес" hint="Перейдёт в заказ; мастер увидит его после подтверждения">
         {(fid) => <Input id={fid} icon={MapPin} placeholder="Улица, дом, квартира" value={p.address} disabled={p.disabled} onChange={(e) => p.onAddress(e.target.value)} />}
       </FormRow>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormRow label="Когда удобно">
           {(fid) => <Input id={fid} placeholder="Например, завтра после 18:00" value={p.preferredTime} disabled={p.disabled} onChange={(e) => p.onPreferredTime(e.target.value)} />}
         </FormRow>
@@ -935,7 +936,7 @@ function ClientForm({ existing }: { existing?: Client }) {
         {(id) => <PhoneInput id={id} value={ph} onChange={setPh} />}
       </FormRow>
       <FormRow label="Email">{(id) => <Input id={id} icon={Mail} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@mail.kz" />}</FormRow>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormRow label="Город" required>
           {(id) => <CitySelect id={id} value={city} onChange={setCity} />}
         </FormRow>
@@ -1076,7 +1077,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
       <FormRow label="ФИО" required>
         {(id) => <Input id={id} icon={UserIcon} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ерлан Ахметов" />}
       </FormRow>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormRow label="Телефон" required>
           {(id) => (ex ? <Input id={id} icon={Phone} value={phone(ex.phone)} disabled title="Телефон — это логин, его меняет владелец" /> : <PhoneInput id={id} value={ph} onChange={setPh} international={false} />)}
         </FormRow>

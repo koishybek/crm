@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Низкий экран ноутбука (сайдбар). Объявлены по порядку: «shorter» идёт позже и перекрывает «short». */
+@custom-variant short (@media (max-height: 820px));
+@custom-variant shorter (@media (max-height: 700px));
+
 /* Токены сняты с макетов ServicePro Design System Lite (design-system/tokens.css). */
 @theme {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
@@ -135,6 +139,14 @@
     border-bottom: 1px solid var(--color-line);
     vertical-align: middle;
   }
+  /* Ноутбук (до 1536px): ячейки плотнее — широкие таблицы помещаются без прокрутки. */
+  @media (max-width: 1535px) {
+    .tbl th,
+    .tbl td {
+      padding-left: 10px;
+      padding-right: 10px;
+    }
+  }
   .tbl tbody tr:last-child td {
     border-bottom: 0;
   }
@@ -144,6 +156,17 @@
   }
   .tbl tbody tr.row-link:hover td {
     background: #fbfaf6;
+  }
+  /* Широкая таблица-ведомость (много числовых колонок): прокручивается, первая колонка — на месте. */
+  .tbl-sticky-first th:first-child,
+  .tbl-sticky-first td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    box-shadow: 1px 0 0 var(--color-line);
+  }
+  .tbl-sticky-first td:first-child {
+    background: #fff;
   }
   .scroll-x {
     overflow-x: auto;
@@ -174,6 +197,15 @@
   }
   .scroll-dark::-webkit-scrollbar-thumb {
     background: #3d3a33;
+  }
+  /* Список прокручивается — у края, за которым есть ещё пункты, светлая тень (приём «local + scroll» фонов:
+     заглушки цвета фона едут с содержимым и закрывают тень, когда край достигнут). */
+  .scroll-shade {
+    background:
+      linear-gradient(var(--color-side) 40%, transparent) top / 100% 28px no-repeat local,
+      linear-gradient(transparent, var(--color-side) 60%) bottom / 100% 28px no-repeat local,
+      radial-gradient(farthest-side at 50% 0, rgb(255 255 255 / 0.13), transparent) top / 100% 14px no-repeat scroll,
+      radial-gradient(farthest-side at 50% 100%, rgb(255 255 255 / 0.13), transparent) bottom / 100% 14px no-repeat scroll;
   }
 }
 

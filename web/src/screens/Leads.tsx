@@ -176,16 +176,15 @@ export default function Leads() {
         ) : (
           <>
             <div className="scroll-x mt-3">
-              <table className="tbl min-w-[1040px]">
+              <table className="tbl min-w-[900px]">
                 <thead>
                   <tr>
                     <th>№</th>
                     <th>Клиент</th>
                     <th>Источник</th>
-                    <th>Услуга</th>
-                    <th>Город</th>
+                    <th>Услуга и город</th>
                     <th>Статус</th>
-                    <th>Ответственный</th>
+                    <th title="Ответственный оператор">Ведёт</th>
                     <th>Время</th>
                     <th className="text-right">Действия</th>
                   </tr>
@@ -201,9 +200,9 @@ export default function Leads() {
                         <td className="font-medium text-ink-2 tabular-nums">{l.number}</td>
                         <td>
                           <span className="flex items-center gap-3">
-                            <Avatar name={c.name} size={38} />
+                            <Avatar name={c.name} size={34} />
                             <span className="min-w-0 leading-tight">
-                              <span className="block max-w-[170px] truncate font-medium text-ink">{c.name}</span>
+                              <span className="block max-w-[150px] truncate font-medium text-ink">{c.name}</span>
                               <span className="text-[13px] text-muted">{phone(c.phone)}</span>
                             </span>
                           </span>
@@ -211,19 +210,21 @@ export default function Leads() {
                         <td>
                           <Source source={l.source} />
                         </td>
-                        <td className="max-w-[210px] truncate text-ink-2">
-                          {serviceById(l.serviceId).label}
-                          {l.urgency === "urgent" && <Badge tone="red" size="sm" className="ml-2">срочно</Badge>}
+                        <td className="max-w-[220px] leading-tight text-ink-2">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">{serviceById(l.serviceId).label}</span>
+                            {l.urgency === "urgent" && <Badge tone="red" size="sm">срочно</Badge>}
+                          </span>
+                          <span className="block truncate text-[13px] text-muted">{l.city}</span>
                         </td>
-                        <td className="text-ink-2">{l.city}</td>
                         <td>
                           <Badge tone={b.tone}>{b.label}</Badge>
                         </td>
                         <td>
                           {op ? (
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-center gap-2" title={op.name}>
                               <Avatar name={op.name} size={28} variant="person" />
-                              <span className="text-ink-2">{op.name.split(" ")[0]}</span>
+                              <span className="hidden text-ink-2 2xl:inline">{op.name.split(" ")[0]}</span>
                             </span>
                           ) : (
                             awaitsOperator(l) && (

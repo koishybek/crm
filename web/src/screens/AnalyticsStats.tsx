@@ -195,8 +195,8 @@ export function ExecutorsTable({ rows, money: withMoney, file }: { rows: Executo
       {rows.length === 0 ? (
         <p className="px-1 py-8 text-center text-[14px] text-muted">Исполнителей в выбранной области нет</p>
       ) : (
-        <div className="scroll-x">
-          <table className={cn("tbl", withMoney ? "min-w-[1180px]" : "min-w-[900px]")}>
+        <div className="scroll-x" data-wide-ok>
+          <table className={cn("tbl tbl-sticky-first", withMoney ? "min-w-[1180px]" : "min-w-[900px]")}>
             <thead>
               <tr>
                 {cols.map((c) => (
@@ -215,7 +215,7 @@ export function ExecutorsTable({ rows, money: withMoney, file }: { rows: Executo
                   <td>
                     <span className="flex items-center gap-2.5">
                       <Avatar name={r.name} size={30} variant="person" />
-                      <span className="font-medium text-ink">{r.name}</span>
+                      <span className="font-medium whitespace-nowrap text-ink">{r.name}</span>
                     </span>
                   </td>
                   <td className="text-right tabular-nums">{num(r.done)}</td>
