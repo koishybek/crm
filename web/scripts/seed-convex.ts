@@ -102,7 +102,8 @@ async function main() {
   await call(internal.seed.tenant, { name: APP_NAME });
   // Цены справочника по умолчанию живут только на сервере (convex/lib/defaultPrices.ts) — генератору демо-данных они нужны.
   setCatalog(DEFAULT_CATEGORIES, withDefaultPrices(DEFAULT_SERVICES));
-  const db = buildSeed(new Date());
+  // SEED_DAYS / SEED_SCALE — только для нагрузочной проверки на отдельном деплойменте.
+  const db = buildSeed(new Date(), { days: Number(process.env.SEED_DAYS) || undefined, scale: Number(process.env.SEED_SCALE) || undefined });
   console.log("Заливаю демо-данные…");
 
   // Лимит заказов в работе (ТЗ п.14): у кого в демо заказов больше лимита по умолчанию, тому владелец «поднял» лимит.
