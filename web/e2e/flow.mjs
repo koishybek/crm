@@ -17,6 +17,11 @@ try {
   await step(o, "новая заявка → заказ", async () => {
     await o.getByRole("button", { name: /Новая заявка/ }).first().click();
     const d = o.getByRole("dialog").last();
+    // Пустая форма: ошибка должна появиться и быть на экране, а не упасть или спрятаться под прокруткой.
+    await d.getByRole("button", { name: "Создать заказ" }).click();
+    const alert = o.getByRole("alert").filter({ hasText: /Укажите клиента/ }).first();
+    await alert.waitFor({ timeout: 10000 });
+    if (!(await alert.evaluate((e) => { const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }))) throw new Error("ошибка формы не видна");
     await d.getByLabel(/^Клиент/).fill(`Тест Сквозной ${tag}`);
     await d.getByLabel(/^Телефон/).fill(`70199${tag.padStart(5, "0")}`.slice(0, 10));
     const src = d.getByLabel(/^Источник/);

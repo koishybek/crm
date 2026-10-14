@@ -181,6 +181,20 @@ export function Card({ title, action, children, className, bodyClass, titleExtra
   );
 }
 
+/** Ошибка формы: при появлении сама прокручивается в зону видимости — в длинной форме внизу её иначе не видно. */
+export function FormError({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Тело в скобках: свежий Chrome возвращает из scrollIntoView обещание, а эффект должен вернуть функцию или ничего.
+    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [children]);
+  return (
+    <div ref={ref} role="alert" className="rounded-[10px] bg-bad-bg px-3.5 py-2.5 text-[13.5px] font-medium text-bad-ink">
+      {children}
+    </div>
+  );
+}
+
 export function PageHeader({ title, subtitle, actions, back }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: ReactNode }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">

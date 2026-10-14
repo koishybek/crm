@@ -66,7 +66,7 @@ import { Source } from "../components/icons";
 import { ExecutorSkillsField, withoutCategory } from "../components/SkillChips";
 import { DistrictField, DistrictPicker } from "../components/DistrictSelect";
 import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
-import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
+import { Avatar, Badge, Button, Drawer, FormError, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
 import { cn, dateTime, digits, money, phone, phoneMask } from "../lib/format";
 import { normalizePhone, PHONE_HINT } from "../data/phone";
 import { can } from "../data/permissions";
@@ -570,7 +570,7 @@ function NewLeadForm({
           {(id) => <Textarea id={id} rows={2} placeholder="Дополнительная информация (не обязательно)..." value={comment} onChange={(e) => setComment(e.target.value)} />}
         </FormRow>
 
-        {error && <div className="rounded-[10px] bg-bad-bg px-3.5 py-2.5 text-[13.5px] font-medium text-bad-ink">{error}</div>}
+        {error && <FormError>{error}</FormError>}
       </div>
 
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-6 flex flex-wrap justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
@@ -957,7 +957,7 @@ function ClientForm({ existing }: { existing?: Client }) {
         )}
       </FormRow>
       <FormRow label="Заметки">{(id) => <Textarea id={id} rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Например: удобно звонить после 18:00" />}</FormRow>
-      {error && <div className="rounded-[10px] bg-bad-bg px-3.5 py-2.5 text-[13.5px] font-medium text-bad-ink">{error}</div>}
+      {error && <FormError>{error}</FormError>}
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-auto flex justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
         <Button variant="secondary" className="border-line-strong bg-white text-ink-2" onClick={close}>
           Отмена
@@ -1132,7 +1132,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
           onChange={setCoop}
         />
       </div>
-      {error && <div className="rounded-[10px] bg-bad-bg px-3.5 py-2.5 text-[13.5px] font-medium text-bad-ink">{error}</div>}
+      {error && <FormError>{error}</FormError>}
       <div className="sticky -bottom-6 -mx-6 -mb-6 mt-auto flex justify-end gap-2.5 border-t border-line bg-white px-6 pt-4 pb-6">
         <Button variant="secondary" className="border-line-strong bg-white text-ink-2" onClick={close}>
           Отмена
