@@ -59,7 +59,7 @@ const STAFF_NAV: NavItem[] = [
   { to: "/audit", label: "Журнал действий", icon: ScrollText },
   { to: "/settings", label: "Настройки", icon: SettingsIcon },
 ];
-/** Разделы только для владельца. */
+/** Разделы только для владельца («Аналитику» видит и руководитель направления — по своим направлениям, без денег). */
 const OWNER_ONLY = ["/payouts", "/analytics", "/audit", "/settings"];
 const EXEC_NAV: NavItem[] = [
   { to: "/w", label: "Доступные заказы", icon: Box, end: true },
@@ -72,7 +72,7 @@ const navFor = (u: User) =>
     ? EXEC_NAV
     : u.role === "owner"
       ? STAFF_NAV
-      : STAFF_NAV.filter((n) => !OWNER_ONLY.includes(n.to) && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls" && n.to !== "/inbox")));
+      : STAFF_NAV.filter((n) => (u.role === "manager" && n.to === "/analytics") || (!OWNER_ONLY.includes(n.to) && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls" && n.to !== "/inbox"))));
 
 /** badges — счётчики у пунктов меню (непрочитанные «Сообщения»). */
 function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?: () => void; badges?: Record<string, number> }) {

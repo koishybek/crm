@@ -5,7 +5,7 @@
 import { ConvexError, v } from "convex/values";
 import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, type MutationCtx } from "./_generated/server";
 import { normalizeLogin } from "./lib/login";
 import { env } from "./env";
 import { createLogin } from "./users";
@@ -34,6 +34,10 @@ const WIPE_TABLES = [
   "exports",
   "webhooks",
   "webhookDeliveries",
+  "statsFacts",
+  "dailyStats",
+  "statsDirty",
+  "statsState",
   "categories",
   "services",
   "authAccounts",
@@ -45,6 +49,16 @@ const WIPE_TABLES = [
 ] as const;
 const tableArg = v.union(...SEED_TABLES.map((t) => v.literal(t)));
 
+/**
+ * Демо-данные идут мимо мутаций (и мимо очереди показателей): аналитику соберёт заново крон convex/stats.ts —
+ * как при первом запуске. Идущий пересчёт без строки состояния останавливается и начинается снова.
+ */
+async function resetStats(ctx: MutationCtx, table: string): Promise<void> {
+  if (table !== "leads" && table !== "orders") return;
+  const stats = await ctx.db.query("statsState").first();
+  if (stats) await ctx.db.delete(stats._id);
+}
+
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
 export const ingest = internalMutation({
   args: { table: tableArg, rows: v.array(v.any()) },
@@ -52,6 +66,7 @@ export const ingest = internalMutation({
     assertSeedAllowed();
     const ids: string[] = [];
     for (const r of rows) ids.push(await ctx.db.insert(table, r));
+    await resetStats(ctx, table);
     return ids;
   },
 });
@@ -64,6 +79,7 @@ export const patchMany = internalMutation({
       const id = ctx.db.normalizeId(table, p.id);
       if (id) await ctx.db.patch(id, p.fields);
     }
+    await resetStats(ctx, table);
   },
 });
 

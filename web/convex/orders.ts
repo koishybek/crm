@@ -14,7 +14,7 @@ import { hitLimit } from "./lib/rateLimit";
 import { finishWork, laterMoment, moneyDate, noteText, notifyPayoutChange, positiveMoney, settle } from "./lib/money";
 import { districtFor } from "./lib/districts";
 import { baseTerms, rateTerms } from "./lib/rates";
-import { refreshStats } from "./lib/stats";
+import { refreshStats } from "./lib/stats90";
 import { ACTIVE_STATUSES, ORDER_STATUS, PAYMENT_METHODS, STAFF_TRANSITIONS, URGENCY, type Category } from "../src/data/catalog";
 import { loadCatalog } from "./catalog";
 import { announceOrder, notifyAssigned } from "./worker";

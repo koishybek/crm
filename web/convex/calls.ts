@@ -7,6 +7,7 @@ import { internalMutation, internalQuery, mutation, query, type MutationCtx, typ
 import { OWNER, requireRole, STAFF } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
+import { queueStats } from "./lib/stats";
 import { toCall } from "./lib/dto";
 import { markError, markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
@@ -197,6 +198,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "call", channel: "phone", title: "Звонок · разобран AI", text: c.ai?.summary ?? "", at: c.startedAt });
   await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: "phone", title: "Новая заявка", text: svc.label, at, leadId });
+  await queueStats(ctx, "lead", leadId);
   await ctx.db.patch(client._id, { lastActivityAt: at });
   await ctx.db.patch(c._id, { leadId, clientId: client._id, clientName: client.name });
   // Заявку завёл не человек — автор записи «AI» (ТЗ п.27): оператор видит, что её надо проверить.

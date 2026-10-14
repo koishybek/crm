@@ -28,11 +28,15 @@ type Money = RevenueLike & Pick<Order, "payoutMode" | "payoutValue">;
  * Выручка, выплаты исполнителям, маржа, число заказов и средний чек. Выручка — за вычетом возвратов по этим заказам
  * (частичный возврат уменьшает выручку и маржу; заказ с полным возвратом сюда не попадает вовсе — doneWithin).
  */
-export const sums = (orders: readonly Money[]) => {
-  const revenue = orders.reduce((s, o) => s + revenueOf(o), 0);
-  const payouts = orders.reduce((s, o) => s + payout(o), 0);
-  return { revenue, payouts, margin: revenue - payouts, count: orders.length, avg: orders.length ? revenue / orders.length : 0 };
-};
+export const sums = (orders: readonly Money[]) =>
+  sumsOf(
+    orders.reduce((s, o) => s + revenueOf(o), 0),
+    orders.reduce((s, o) => s + payout(o), 0),
+    orders.length,
+  );
+
+/** Маржа и средний чек из готовых сумм — одни для сырых заказов и для предрасчёта по дням (./dailyStats). */
+export const sumsOf = (revenue: number, payouts: number, count: number) => ({ revenue, payouts, margin: revenue - payouts, count, avg: count ? revenue / count : 0 });
 
 // ── Деньги по датам: получено от клиентов и выплачено мастерам ───────────────
 
@@ -170,29 +174,47 @@ export interface SourceRow extends Costs {
   spend: number;
 }
 
+/** Что известно об источнике за период: заявки, сколько из них стали заказом, выполненные заказы и их деньги. */
+export interface SourceCounts {
+  leads: number;
+  converted: number;
+  done: number;
+  revenue: number;
+  payouts: number;
+}
+
+/** Строка источника из готовых счётчиков — одна формула для сырых данных и для предрасчёта. */
+export function sourceRow(source: SourceId, c: SourceCounts, spent: number): SourceRow {
+  const money = sumsOf(c.revenue, c.payouts, c.done);
+  return {
+    source,
+    leads: c.leads,
+    orders: c.converted,
+    conversion: c.leads ? c.converted / c.leads : 0,
+    done: money.count,
+    revenue: money.revenue,
+    margin: money.margin,
+    avg: money.avg,
+    spend: spent,
+    ...costs(spent, c.leads, c.converted, money.margin),
+  };
+}
+
+/** Источники без заявок, заказов и расходов не показываем; выше — больше выручки, затем больше заявок. */
+export const visibleSources = (rows: readonly SourceRow[]): SourceRow[] =>
+  rows.filter((x) => x.leads > 0 || x.done > 0 || x.spend > 0).sort((a, b) => b.revenue - a.revenue || b.leads - a.leads);
+
 export function sourceRows(leads: readonly LeadLike[], orders: readonly OrderLike[], spend: Partial<Record<SourceId, number>>, s: Span): SourceRow[] {
   const periodLeads = leads.filter((l) => inSpan(l.createdAt, s));
   const done = doneWithin(orders, s);
-  return SOURCE_IDS.map((source): SourceRow => {
-    const mine = periodLeads.filter((l) => l.source === source);
-    const converted = mine.filter((l) => l.status === "converted").length;
-    const money = sums(done.filter((o) => o.source === source));
-    const spent = spend[source] ?? 0;
-    return {
-      source,
-      leads: mine.length,
-      orders: converted,
-      conversion: mine.length ? converted / mine.length : 0,
-      done: money.count,
-      revenue: money.revenue,
-      margin: money.margin,
-      avg: money.avg,
-      spend: spent,
-      ...costs(spent, mine.length, converted, money.margin),
-    };
-  })
-    .filter((x) => x.leads > 0 || x.done > 0 || x.spend > 0)
-    .sort((a, b) => b.revenue - a.revenue || b.leads - a.leads);
+  return visibleSources(
+    SOURCE_IDS.map((source): SourceRow => {
+      const mine = periodLeads.filter((l) => l.source === source);
+      const money = sums(done.filter((o) => o.source === source));
+      const counts = { leads: mine.length, converted: mine.filter((l) => l.status === "converted").length, done: money.count, revenue: money.revenue, payouts: money.payouts };
+      return sourceRow(source, counts, spend[source] ?? 0);
+    }),
+  );
 }
 
 /** Итог по всем источникам — те же формулы на суммах. */
@@ -227,22 +249,48 @@ export function median(values: readonly number[]): number | null {
   return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
 }
 
+/** Что известно о заявках оператора: сколько, сколько стали заказом, деньги выполненных заказов, ожидания «заявка → заказ» (мс). */
+export interface OperatorCounts {
+  leads: number;
+  converted: number;
+  revenue: number;
+  payouts: number;
+  waits: readonly number[];
+}
+
+/** Строка оператора из готовых счётчиков — одна формула для сырых данных и для предрасчёта. */
+export function operatorRowOf(userId: string | undefined, c: OperatorCounts): OperatorRow {
+  const money = sumsOf(c.revenue, c.payouts, 0);
+  return {
+    userId,
+    leads: c.leads,
+    converted: c.converted,
+    conversion: c.leads ? c.converted / c.leads : 0,
+    revenue: money.revenue,
+    margin: money.margin,
+    medianMs: median(c.waits),
+  };
+}
+
+/** Порядок строк операторов: больше заявок, затем больше заказов. */
+export const byOperatorLoad = (a: OperatorRow, b: OperatorRow): number => b.leads - a.leads || b.converted - a.converted;
+
+/** Сколько заявка ждала заказа, мс; заказ раньше заявки (правка задним числом) — ноль. */
+export const leadWaitMs = (leadCreatedAt: string, orderCreatedAt: string): number => Math.max(0, Date.parse(orderCreatedAt) - Date.parse(leadCreatedAt));
+
 function operatorRow(userId: string | undefined, leads: readonly LeadLike[], orderById: ReadonlyMap<string, OrderLike>): OperatorRow {
   const pairs = leads.flatMap((l) => {
     const o = l.status === "converted" && l.orderId ? orderById.get(l.orderId) : undefined;
     return o ? [{ l, o }] : [];
   });
-  const converted = leads.filter((l) => l.status === "converted").length;
   const money = sums(pairs.map((p) => p.o).filter((o) => isFinished(o)));
-  return {
-    userId,
+  return operatorRowOf(userId, {
     leads: leads.length,
-    converted,
-    conversion: leads.length ? converted / leads.length : 0,
+    converted: leads.filter((l) => l.status === "converted").length,
     revenue: money.revenue,
-    margin: money.margin,
-    medianMs: median(pairs.map((p) => Math.max(0, Date.parse(p.o.createdAt) - Date.parse(p.l.createdAt)))),
-  };
+    payouts: money.payouts,
+    waits: pairs.map((p) => leadWaitMs(p.l.createdAt, p.o.createdAt)),
+  });
 }
 
 /**
@@ -259,7 +307,7 @@ export function operatorRows(leads: readonly LeadLike[], orders: readonly OrderL
     if (auto.has(l.id) || !l.operatorId) system.push(l);
     else byUser.set(l.operatorId, [...(byUser.get(l.operatorId) ?? []), l]);
   }
-  const rows = [...byUser].map(([id, list]) => operatorRow(id, list, orderById)).sort((a, b) => b.leads - a.leads || b.converted - a.converted);
+  const rows = [...byUser].map(([id, list]) => operatorRow(id, list, orderById)).sort(byOperatorLoad);
   return { rows, auto: system.length ? operatorRow(undefined, system, orderById) : null };
 }
 

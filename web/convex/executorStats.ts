@@ -3,7 +3,7 @@
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation } from "./_generated/server";
-import { refreshStats } from "./lib/stats";
+import { refreshStats } from "./lib/stats90";
 
 /** Мастеров за один запуск: каждому — несколько чтений по индексу его заказов. */
 const BATCH = 25;

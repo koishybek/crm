@@ -32,4 +32,9 @@ crons.interval("cleanup service tables", { hours: 1 }, internal.maintenance.clea
 // Файлы: ключ подписи ссылок на месте и неприкреплённые загрузки старше суток удалены (convex/files.ts).
 crons.interval("files maintenance", { minutes: 10 }, internal.files.maintain, {});
 
+// ТЗ §26.6: показатели «Аналитики» и «Главной» — очередь изменившихся заказов и заявок раз в минуту (convex/stats.ts);
+// ночью — сверка счётчиков заказов в работе у мастеров: 22:00 UTC = 03:00 по Алматы.
+crons.interval("stats", { minutes: 1 }, internal.stats.tick, {});
+crons.cron("executor loads", "0 22 * * *", internal.stats.reconcileLoads, {});
+
 export default crons;

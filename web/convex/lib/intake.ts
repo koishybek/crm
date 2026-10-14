@@ -14,6 +14,7 @@ import { districtOrNone } from "./districts";
 import { emitEvent } from "./webhookEvents";
 import { campaignOf, type Utm } from "../../src/data/utm";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./domain";
+import { queueStats } from "./stats";
 
 /** Каналы, в которых клиенту удобно отвечать сообщением, — они становятся «предпочитаемым каналом» нового клиента. */
 const MESSENGERS: SourceId[] = ["telegram", "whatsapp", "olx", "instagram"];
@@ -129,6 +130,7 @@ export async function intakeLead(ctx: MutationCtx, a: IntakeInput): Promise<Inta
     await ctx.db.insert("interactions", { clientId: client._id, kind: "message", channel: a.source, title: a.message.title, text: a.message.text.slice(0, 1000), at });
   }
   await ctx.db.insert("interactions", { clientId: client._id, kind: "lead", channel: a.source, title: "Новая заявка", text: svc.label, at, leadId });
+  await queueStats(ctx, "lead", leadId);
   await ctx.db.patch(client._id, { lastActivityAt: at });
 
   const what = svc.id === "other" ? "услугу уточнить" : svc.label;

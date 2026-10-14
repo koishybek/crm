@@ -19,9 +19,9 @@ function isoFrom(from: string): string {
 }
 
 /**
- * Срез для «Главной» и «Аналитики»: заявки с даты from, заказы — активные, созданные или выполненные
- * с этой даты, и заказы этих заявок. Формулы считаются на фронте (src/data/metrics.ts, src/data/analytics.ts) —
- * одни на оба экрана.
+ * Сырой срез: заявки с даты from, заказы — активные, созданные или выполненные с этой даты, и заказы этих заявок.
+ * Экраны его больше не читают — показатели за период берутся из предрасчёта (convex/stats.ts, O(дней)); срез остаётся
+ * эталоном для сверки предрасчёта с формулами (src/data/metrics.ts, src/data/analytics.ts) и для разбора расхождений.
  */
 async function slice(ctx: Parameters<typeof requireRole>[0], from: string, scope: string[] | null = null, withMoney = false): Promise<{ leads: Doc<"leads">[]; orders: Doc<"orders">[] }> {
   const leads = await ctx.db.query("leads").withIndex("by_created", (q) => q.gte("createdAt", from)).collect();

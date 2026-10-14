@@ -9,7 +9,7 @@ import { fileSigner } from "./lib/files";
 import { loadOf, openOrdersFor, suitableUsers } from "./lib/matching";
 import { finishWork } from "./lib/money";
 import { baseTerms, rateTerms } from "./lib/rates";
-import { recordRefusal } from "./lib/stats";
+import { recordRefusal } from "./lib/stats90";
 import { cardHtml, esc, workerButtons, type CardData } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";

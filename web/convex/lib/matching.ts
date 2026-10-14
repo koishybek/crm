@@ -2,37 +2,17 @@
 // Само правило — fitsOrder из src/data/logic.ts, одно на ленту, уведомления, «Взять заказ» и экран назначения.
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
-import { WORK_STATUSES } from "../../src/data/catalog";
+import { loadOf } from "./load";
 import { feedFor, fitsOrder, type FitOrder } from "../../src/data/logic";
 import { executorUser } from "./domain";
 
-/** Сколько заказов в работе у каждого мастера (назначен, принят, в работе, ждёт клиента) — для лимита (ТЗ п.14, E9). */
-export async function executorLoads(ctx: QueryCtx): Promise<Map<Id<"executors">, number>> {
-  const out = new Map<Id<"executors">, number>();
-  for (const status of WORK_STATUSES) {
-    for (const o of await ctx.db
-      .query("orders")
-      .withIndex("by_status", (q) => q.eq("status", status))
-      .collect()) {
-      if (o.executorId) out.set(o.executorId, (out.get(o.executorId) ?? 0) + 1);
-    }
-  }
-  return out;
-}
+export { loadOf };
 
-/** Заказов в работе у одного мастера — по его индексу, без перебора чужих заказов. */
-export async function loadOf(ctx: QueryCtx, executorId: Id<"executors">): Promise<number> {
-  let n = 0;
-  for (const status of WORK_STATUSES) {
-    n += (
-      await ctx.db
-        .query("orders")
-        .withIndex("by_executor", (q) => q.eq("executorId", executorId).eq("status", status))
-        .collect()
-    ).length;
-  }
-  return n;
-}
+/**
+ * Заказов в работе у мастера для лимита (ТЗ п.14, E9) — счётчик activeCount на мастере (lib/stats.syncLoad), без перебора
+ * всех заказов в работе при каждой публикации. Счётчика ещё нет (мастер заведён до него) — считаем по индексу мастера.
+ */
+export const executorLoad = async (ctx: QueryCtx, e: Doc<"executors">): Promise<number> => e.activeCount ?? (await loadOf(ctx, e._id));
 
 /**
  * Учётки мастеров, которым заказ подходит, — получатели «Нового заказа».
@@ -41,9 +21,10 @@ export async function loadOf(ctx: QueryCtx, executorId: Id<"executors">): Promis
  */
 export async function suitableUsers(ctx: QueryCtx, o: FitOrder): Promise<Id<"users">[]> {
   const out: Id<"users">[] = [];
-  const loads = await executorLoads(ctx);
   for (const e of await ctx.db.query("executors").collect()) {
-    if (!fitsOrder(e, o, loads.get(e._id) ?? 0).fits) continue;
+    // Город, направление, навыки и приём заказов — сначала: загрузку считаем только у тех, кому заказ подходит по сути.
+    if (!fitsOrder(e, o).fits) continue;
+    if (!fitsOrder(e, o, await executorLoad(ctx, e)).fits) continue;
     const u = await executorUser(ctx, e._id);
     if (u && u.role === "executor" && u.active !== false) out.push(u._id);
   }

@@ -1,17 +1,17 @@
 // Движение денег за период (ТЗ п.17): «Получено от клиентов» — оплаты минус возвраты по их датам, «Выплачено мастерам» —
 // по датам выплат из реестра. Выручка выше считается по выполненным заказам; здесь — когда деньги реально пришли и ушли.
+// Цифры — из предрасчёта за период (convex/stats.ts), формулы те же, что receivedWithin и paidOutWithin.
 import { ArrowDownToLine, ArrowUpFromLine, RotateCcw } from "lucide-react";
-import { paidOutWithin, receivedWithin, type PaidOutRow } from "../data/analytics";
-import { trend, type Range } from "../data/metrics";
-import type { Order } from "../data/types";
+import { cashOf, n, type Counts, type TotalKey } from "../data/dailyStats";
+import { trend } from "../data/metrics";
 import { money } from "../lib/format";
 import { KpiCard } from "./ui";
 
-export function CashFlowRow({ orders, payouts, cur, prev, caption }: { orders: readonly Order[]; payouts: readonly PaidOutRow[]; cur: Range; prev: Range; caption: string }) {
-  const now = receivedWithin(orders, cur);
-  const before = receivedWithin(orders, prev);
-  const out = paidOutWithin(payouts, cur);
-  const outBefore = paidOutWithin(payouts, prev);
+export function CashFlowRow({ cur, prev, caption }: { cur: Counts<TotalKey>; prev: Counts<TotalKey>; caption: string }) {
+  const now = cashOf(cur);
+  const before = cashOf(prev);
+  const out = n(cur, "paidOut");
+  const outBefore = n(prev, "paidOut");
   return (
     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
       <KpiCard icon={ArrowDownToLine} tone="green" label="Получено от клиентов" value={money(now.net)} trend={trend(now.net, before.net, caption)} />

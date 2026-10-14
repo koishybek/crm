@@ -7,7 +7,7 @@ import { announceOrder } from "../worker";
 import { executorUser, notify, setStatus } from "./domain";
 import { suitableUsers } from "./matching";
 import { baseTerms } from "./rates";
-import { recordRefusal } from "./stats";
+import { recordRefusal } from "./stats90";
 
 const SYSTEM: Actor = { type: "system" };
 

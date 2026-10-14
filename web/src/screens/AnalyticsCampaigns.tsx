@@ -9,8 +9,6 @@ import { Button, Card, FormRow, Input, Loading, Modal, Select } from "../compone
 import { monthLabel, recentMonths } from "../data/analytics";
 import { saveCampaignSpend } from "../data/campaignActions";
 import { campaignTotals, type CampaignRow } from "../data/campaigns";
-import { useNow } from "../data/hooks";
-import { rangeOf, type PeriodId } from "../data/metrics";
 import { report } from "../data/store";
 import { cleanUtmValue } from "../data/utm";
 import { cn, digits, money, num } from "../lib/format";
@@ -44,10 +42,9 @@ function Cells({ r }: { r: Omit<CampaignRow, "campaign"> }) {
 }
 
 /** Кампании за период выбранного на экране «Аналитика». */
-export function AnalyticsCampaigns({ period }: { period: PeriodId }) {
-  const now = useNow(60_000);
-  const { cur } = rangeOf(period, now);
-  const rows = useQuery(api.campaigns.stats, { from: new Date(cur.from).toISOString(), to: new Date(cur.to).toISOString() });
+/** from/to — границы периода «Аналитики» в мс (начало первого и конец последнего дня по Алматы). */
+export function AnalyticsCampaigns({ from, to }: { from: number; to: number }) {
+  const rows = useQuery(api.campaigns.stats, { from: new Date(from).toISOString(), to: new Date(to).toISOString() });
   const [spendOpen, setSpendOpen] = useState(false);
   const total = rows ? campaignTotals(rows) : null;
   return (

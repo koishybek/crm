@@ -61,10 +61,11 @@ export type BackupTable = (typeof BACKUP_TABLES)[number];
 /**
  * Что не копируем: вход и сессии (auth*), счётчики лимитов, одноразовые OAuth-state, сами копии,
  * колокольчик, отметки мониторинга, принятые обновления Telegram, служебный учёт загрузок (самих файлов в копии нет)
- * отметки эскалаций (живут неделю-две и после восстановления не нужны) и выгрузки CSV (временные файлы на сутки) —
+ * отметки эскалаций (живут неделю-две и после восстановления не нужны), выгрузки CSV (временные файлы на сутки) и предрасчёт
+ * аналитики (stats*, dailyStats — после восстановления его заново соберёт крон: statsState в копию не попадает) —
  * их не восстанавливают.
  */
-const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries"] as const satisfies readonly TableNames[];
+const SKIPPED_TABLES = ["rateLimits", "oauthStates", "backups", "notifications", "systemStatus", "telegramUpdates", "uploads", "escalations", "exports", "webhookDeliveries", "statsFacts", "dailyStats", "statsDirty", "statsState"] as const satisfies readonly TableNames[];
 // Новая таблица в схеме не должна молча выпасть из копий: её нужно явно отнести к BACKUP_TABLES или SKIPPED_TABLES.
 type Unsorted = Exclude<TableNames, BackupTable | (typeof SKIPPED_TABLES)[number] | `auth${string}`>;
 const allTablesSorted: [Unsorted] extends [never] ? true : Unsorted = true;

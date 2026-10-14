@@ -10,6 +10,8 @@ import { nowIso } from "./lib/domain";
 import { cleanMoney } from "./lib/limits";
 import { source } from "./schema";
 import { FIRST_MONTH, MONTH_RE, monthLabel, monthOf, payoutSummary, type AdSpendRow, type PayoutSummary } from "../src/data/analytics";
+import { totalsOf } from "./lib/statsRead";
+import { dayOf, dayStart, n, todayDay } from "../src/data/dailyStats";
 import { SOURCE_IDS, SOURCES } from "../src/data/catalog";
 import type { SourceId } from "../src/data/types";
 import { money } from "../src/lib/format";
@@ -116,7 +118,8 @@ export interface PayoutView {
 
 /**
  * Выплаты исполнителям для «Главной» и «Аналитики» владельца: начислено и выплачено за заказы, выполненные
- * с даты from, выплачено мастерам с этой даты по реестру и долг исполнителям сейчас — по мастерам.
+ * с дня from (по Алматы) по сегодня — из предрасчёта (convex/stats.ts), выплачено мастерам с этого дня по реестру
+ * и долг исполнителям сейчас — по мастерам.
  */
 export const payouts = query({
   args: { from: v.string() },
@@ -124,23 +127,24 @@ export const payouts = query({
     await requireRole(ctx, OWNER);
     const start = Date.parse(from);
     if (Number.isNaN(start)) throw new ConvexError("Неверная дата");
+    const fromDay = dayOf(new Date(start).toISOString());
     const registry = await ctx.db
       .query("payouts")
-      .withIndex("by_at", (q) => q.gte("at", new Date(start).toISOString()))
+      .withIndex("by_at", (q) => q.gte("at", new Date(dayStart(fromDay)).toISOString()))
       .collect();
     const paidOut = { amount: registry.reduce((s, p) => s + p.amount, 0), count: registry.length };
-    const byId = new Map<string, Doc<"orders">>();
-    const done = await ctx.db
-      .query("orders")
-      .withIndex("by_done", (q) => q.gte("doneAt", new Date(start).toISOString()))
-      .collect();
-    // Невыплаченные выполненные — по индексу: перебирать всю историю заказов не нужно.
+    // Начислено за период — итоги дней (O(дней)); долг сейчас — невыплаченные выполненные по индексу, без всей истории.
+    const t = await totalsOf(ctx, fromDay, todayDay());
     const unpaid = await ctx.db
       .query("orders")
       .withIndex("by_payout", (q) => q.eq("payoutPaid", false).gt("doneAt", ""))
       .collect();
-    for (const o of [...done, ...unpaid]) byId.set(o._id, o);
-    const summary = payoutSummary([...byId.values()], { from: start, to: Date.now() });
+    const accrued = n(t, "payouts");
+    const paid = n(t, "accruedPaid");
+    const summary = {
+      period: { accrued, paid, unpaid: accrued - paid, orders: n(t, "done") },
+      owed: payoutSummary(unpaid, { from: start, to: Date.now() }).owed,
+    };
     const executors = await Promise.all(
       summary.owed.executors.map(async (x) => {
         const id = ctx.db.normalizeId("executors", x.id);

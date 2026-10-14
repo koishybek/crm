@@ -143,9 +143,13 @@ const router = createBrowserRouter([
     ],
   },
   {
+    // «Аналитика»: владельцу — всё, руководителю направления — его направления и без денег (convex/stats.ts).
+    element: <Guard roles={["owner", "manager"]} />,
+    children: [{ path: "/analytics", element: lazyAnalytics }],
+  },
+  {
     element: <Guard roles={["owner"]} />,
     children: [
-      { path: "/analytics", element: lazyAnalytics },
       { path: "/audit", element: lazyAudit },
       { path: "/payouts", element: lazyPayouts },
       { path: "/settings", element: <Settings /> },

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
@@ -264,7 +264,7 @@ describe("работа операторов", () => {
 
 describe("выплаты исполнителям", () => {
   test("начислено и выплачено за период, долг сейчас по мастерам; возвраты, отмены и переоткрытые не в счёт", async () => {
-    const { ids, as, mkOrder } = await setup();
+    const { t, ids, as, mkOrder } = await setup();
     const now = Date.now();
     await mkOrder({ payoutValue: 21000, payoutPaid: true, status: "closed" });
     await mkOrder({ payoutValue: 14000, status: "awaiting_payment" });
@@ -273,6 +273,11 @@ describe("выплаты исполнителям", () => {
     await mkOrder({ payoutValue: 5000, status: "refund" });
     await mkOrder({ payoutValue: 7000, status: "in_progress" }); // переоткрыт: doneAt остался, но работа не сдана
     await mkOrder({ payoutValue: 3000, status: "cancelled", doneAt: undefined });
+    // Начислено за период — из предрасчёта (convex/stats.ts): заказы вставлены мимо мутаций, собираем показатели целиком.
+    vi.useFakeTimers();
+    await t.mutation(internal.stats.tick, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.useRealTimers();
 
     const p = await as(ids.owner).query(api.analytics.payouts, { from: iso(now - 7 * DAY) });
     expect(p.period).toEqual({ accrued: 35000, paid: 21000, unpaid: 14000, orders: 2 });
