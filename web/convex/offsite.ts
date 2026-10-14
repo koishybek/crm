@@ -1,8 +1,10 @@
 // Внешнее хранилище резервных копий (ТЗ п.20.10, п.26.5): после ночной копии (backup.ts) тот же JSON уходит
-// в S3-совместимое хранилище (Cloudflare R2, PS Cloud, AWS S3) — от потери самого деплоймента. Там храним 30
-// последних копий (старые удаляем по префиксу). По настройке владельца (по умолчанию выключено) туда же
-// копируются сами файлы — записи звонков, фото, вложения: каждый один раз, а удалённые у нас (срок хранения,
-// удаление данных клиента) удаляются и там. Без переменных BACKUP_S3_* — «Внешнее хранилище не подключено».
+// во внешнее хранилище — от потери самого деплоймента: S3-совместимое (Cloudflare R2, PS Cloud, AWS S3) или
+// Cloudflare Worker с Workers KV (web/backup-worker), выбор — lib/offsiteStore.ts. Там храним 30 последних копий
+// (старые удаляем по префиксу). По настройке владельца (по умолчанию выключено) туда же копируются сами файлы —
+// записи звонков, фото, вложения: каждый один раз, а удалённые у нас (срок хранения, удаление данных клиента)
+// удаляются и там; в Workers KV файлы больше 25 МБ не помещаются — их пропускаем с пометкой. Без переменных
+// BACKUP_S3_* и BACKUP_WORKER_* — «Внешнее хранилище не подключено».
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -11,7 +13,7 @@ import { OWNER, requireRole } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
 import { markError, markOk } from "./lib/health";
-import { s3Config, s3Delete, s3List, s3Missing, s3Put, S3Error, type S3Config } from "./lib/s3";
+import { offsiteMissing, offsiteStore, storeErrorText, type OffsiteStore } from "./lib/offsiteStore";
 import { backupName } from "./backup";
 import type { OffsiteStatus } from "../src/data/offsite";
 import { DEFAULT_TENANT, tenantOfDoc } from "./lib/tenantDb";
@@ -35,8 +37,6 @@ const FILES_BYTES_PER_RUN = 1024 * 1024 * 1024;
 const FILES_TIME_MS = 5 * 60_000;
 const PAGE = 100;
 
-const errorText = (e: unknown): string => (e instanceof S3Error ? e.message : e instanceof Error ? e.message.slice(0, 200) : "неизвестная ошибка");
-
 async function copyFilesOn(ctx: QueryCtx): Promise<boolean> {
   const row = await ctx.db
     .query("settings")
@@ -54,13 +54,13 @@ export const _backup = internalQuery({
 });
 
 /** Копии сверх 30 последних — удалить (только наши имена). Возвращает, сколько удалено. */
-export async function pruneBackups(cfg: S3Config, prefix = ""): Promise<number> {
-  const ours = (await s3List(cfg, `${prefix}${BACKUP_PREFIX}`))
+export async function pruneBackups(store: OffsiteStore, prefix = ""): Promise<number> {
+  const ours = (await store.list(`${prefix}${BACKUP_PREFIX}`))
     .filter((o) => o.key.startsWith(prefix) && OUR_BACKUP.test(o.key.slice(prefix.length)))
     .map((o) => o.key);
   // Имя содержит дату и время — сортировка по имени = по времени.
   const old = ours.sort().reverse().slice(KEEP_OFFSITE);
-  for (const key of old) await s3Delete(cfg, key);
+  for (const key of old) await store.remove(key);
   return old.length;
 }
 
@@ -116,22 +116,25 @@ export const _forget = internalMutation({
 export interface FilesSync {
   copied: number;
   removed: number;
+  /** Больше потолка хранилища (Workers KV — 25 МБ): не копируются. */
+  skipped: number;
   /** Не всё успели — продолжим следующей ночью. */
   more: boolean;
 }
 
 /** Инкрементальная синхронизация файлов: удалённые у нас — удалить там, новые — скопировать (с потолком на ночь). */
-export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.now(), prefix = ""): Promise<FilesSync> {
+export async function syncFiles(ctx: ActionCtx, store: OffsiteStore, startedAt = Date.now(), prefix = ""): Promise<FilesSync> {
   let removed = 0;
   for (let cursor: string | null = null; ; ) {
     const page: { items: { id: Id<"offsiteFiles">; key: string }[]; cursor: string; isDone: boolean } = await ctx.runQuery(internal.offsite._gone, { cursor });
-    for (const g of page.items) await s3Delete(cfg, g.key);
+    for (const g of page.items) await store.remove(g.key);
     if (page.items.length) await ctx.runMutation(internal.offsite._forget, { ids: page.items.map((g) => g.id) });
     removed += page.items.length;
     if (page.isDone) break;
     cursor = page.cursor;
   }
   let copied = 0;
+  let skipped = 0;
   let bytes = 0;
   for (let cursor: string | null = null; ; ) {
     const page: { items: StoredFile[]; cursor: string; isDone: boolean } = await ctx.runQuery(internal.offsite._toCopy, { cursor });
@@ -139,18 +142,22 @@ export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.
     for (const f of page.items) {
       if (copied >= FILES_PER_RUN || bytes >= FILES_BYTES_PER_RUN || Date.now() - startedAt > FILES_TIME_MS) {
         if (done.length) await ctx.runMutation(internal.offsite._copied, { items: done });
-        return { copied, removed, more: true };
+        return { copied, removed, skipped, more: true };
+      }
+      if (store.maxBytes !== null && f.size > store.maxBytes) {
+        skipped++;
+        continue;
       }
       const blob = await ctx.storage.get(f.storageId);
       if (!blob) continue;
       const key = `${prefix}${FILES_PREFIX}${f.storageId}`;
-      await s3Put(cfg, key, blob, f.contentType ?? "application/octet-stream");
+      await store.put(key, blob, f.contentType ?? "application/octet-stream");
       done.push({ storageId: f.storageId, key, size: f.size });
       copied++;
       bytes += f.size;
     }
     if (done.length) await ctx.runMutation(internal.offsite._copied, { items: done });
-    if (page.isDone) return { copied, removed, more: false };
+    if (page.isDone) return { copied, removed, skipped, more: false };
     cursor = page.cursor;
   }
 }
@@ -161,21 +168,22 @@ export async function syncFiles(ctx: ActionCtx, cfg: S3Config, startedAt = Date.
 export const push = internalAction({
   args: { backupId: v.id("backups") },
   handler: async (ctx, { backupId }): Promise<void> => {
-    const cfg = s3Config();
-    if (!cfg) return;
+    const store = offsiteStore();
+    if (!store) return;
     const b = await ctx.runQuery(internal.offsite._backup, { backupId });
     if (!b) return;
     const started = Date.now();
     try {
       const blob = await ctx.storage.get(b.fileId);
       if (!blob) throw new Error("файл копии не найден в хранилище");
+      if (store.maxBytes !== null && blob.size > store.maxBytes) throw new Error("копия больше 25 МБ — Workers KV её не примет, нужно S3-хранилище (BACKUP_S3_*)");
       const prefix = tenantPrefix(b.tenantId);
-      await s3Put(cfg, `${prefix}${BACKUP_PREFIX}${backupName(b.at)}`, blob, "application/json");
-      const pruned = await pruneBackups(cfg, prefix);
-      const files = b.copyFiles ? await syncFiles(ctx, cfg, started, prefix) : null;
+      await store.put(`${prefix}${BACKUP_PREFIX}${backupName(b.at)}`, blob, "application/json");
+      const pruned = await pruneBackups(store, prefix);
+      const files = b.copyFiles ? await syncFiles(ctx, store, started, prefix) : null;
       await ctx.runMutation(internal.offsite._pushed, { backupId, pruned, files: files ?? undefined });
     } catch (e) {
-      const reason = errorText(e);
+      const reason = storeErrorText(e);
       console.error(`Внешнее хранилище: ${reason}`);
       await ctx.runMutation(internal.offsite._failed, { reason });
     }
@@ -183,10 +191,12 @@ export const push = internalAction({
 });
 
 export const _pushed = internalMutation({
-  args: { backupId: v.id("backups"), pruned: v.number(), files: v.optional(v.object({ copied: v.number(), removed: v.number(), more: v.boolean() })) },
+  args: { backupId: v.id("backups"), pruned: v.number(), files: v.optional(v.object({ copied: v.number(), removed: v.number(), skipped: v.number(), more: v.boolean() })) },
   handler: async (ctx, { backupId, pruned, files }): Promise<void> => {
     if (await ctx.db.get(backupId)) await ctx.db.patch(backupId, { offsiteAt: nowIso() });
-    const filesNote = files ? `; файлов скопировано: ${files.copied}${files.removed ? `, удалено: ${files.removed}` : ""}${files.more ? " (остальные — следующей ночью)" : ""}` : "";
+    const filesNote = files
+      ? `; файлов скопировано: ${files.copied}${files.removed ? `, удалено: ${files.removed}` : ""}${files.skipped ? `, пропущено больше 25 МБ: ${files.skipped}` : ""}${files.more ? " (остальные — следующей ночью)" : ""}`
+      : "";
     await markOk(ctx, "offsite", `Копия выгружена${pruned ? `, старых удалено: ${pruned}` : ""}${filesNote}`);
     await audit(ctx, "Система", "system.offsiteBackup", `Резервная копия выгружена во внешнее хранилище${filesNote}`, { entityId: backupId, meta: { pruned, ...(files ?? {}) } });
   },
@@ -206,17 +216,19 @@ export const status = query({
   args: {},
   handler: async (ctx): Promise<OffsiteStatus> => {
     await requireRole(ctx, OWNER);
-    const cfg = s3Config();
+    const store = offsiteStore();
     const mark = await ctx.db
       .query("systemStatus")
       .withIndex("by_key", (q) => q.eq("key", "offsite"))
       .unique();
     return {
-      configured: !!cfg,
-      missing: s3Missing(),
-      host: cfg?.endpoint.host,
-      bucket: cfg?.bucket,
-      region: cfg?.cred.region,
+      configured: !!store,
+      provider: store?.provider ?? null,
+      missing: offsiteMissing(),
+      host: store?.where.host,
+      bucket: store?.where.bucket,
+      region: store?.where.region,
+      maxFileMb: store?.maxBytes ? Math.floor(store.maxBytes / (1024 * 1024)) : undefined,
       keep: KEEP_OFFSITE,
       copyFiles: await copyFilesOn(ctx),
       health: mark ? { okAt: mark.okAt, okNote: mark.okNote, errorAt: mark.errorAt, error: mark.error } : undefined,

@@ -177,7 +177,7 @@ describe("внешнее хранилище", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     const s = await as(ids.owner).query(api.offsite.status, {});
     expect(s.configured).toBe(false);
-    expect(s.missing).toEqual(["BACKUP_S3_ENDPOINT", "BACKUP_S3_BUCKET", "BACKUP_S3_ACCESS_KEY_ID", "BACKUP_S3_SECRET_ACCESS_KEY"]);
+    expect(s).toMatchObject({ provider: null, missing: ["BACKUP_WORKER_URL", "BACKUP_WORKER_SECRET"] });
     const o = await as(ids.owner).query(api.health.overview, {});
     expect(o.subsystems.find((x) => x.key === "offsite")).toMatchObject({ configured: false });
     await expect(as(ids.operator).query(api.offsite.status, {})).rejects.toThrow("Нет доступа");
@@ -205,7 +205,7 @@ describe("внешнее хранилище", () => {
     const list = await as(ids.owner).query(api.backup.list, {});
     expect(list.items[0]?.offsite).toBe(true);
     const status = await as(ids.owner).query(api.offsite.status, {});
-    expect(status).toMatchObject({ configured: true, host: "s3.test", bucket: "hms-backups", region: "auto", keep: KEEP_OFFSITE, copyFiles: false });
+    expect(status).toMatchObject({ configured: true, provider: "s3", host: "s3.test", bucket: "hms-backups", region: "auto", keep: KEEP_OFFSITE, copyFiles: false });
     expect(status.health?.okAt).toBeDefined();
   });
 

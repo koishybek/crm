@@ -1,11 +1,13 @@
-// Email (ТЗ п.18, п.19): отправка писем через Resend REST API, карточка владельца и переключатель сотрудника.
-// Письма ставит notify (lib/domain.ts → lib/mail.ts). Без EMAIL_API_KEY и EMAIL_FROM письма не ставятся, а send
-// честно отвечает «не настроено» — успеха без отправки не бывает.
+// Email (ТЗ п.18, п.19): отправка писем через Resend REST API или через обычный ящик компании по SMTP
+// (emailSmtp.ts, рантайм Node), карточка владельца и переключатель сотрудника. Транспорт выбирает lib/mail.ts:
+// ключ Resend → Resend, иначе EMAIL_SMTP_* → SMTP. Письма ставит notify (lib/domain.ts → lib/mail.ts). Без настроек
+// письма не ставятся, а send честно отвечает «не настроено» — успеха без отправки не бывает.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalAction, internalQuery, query, type ActionCtx } from "./lib/functions";
 import { currentUser, OWNER, requireRole } from "./lib/access";
-import { emailConfig, emailMissing, emailRecipient, loginEmail, normalizeEmail, renderEmail, type EmailConfig } from "./lib/mail";
+import { backoff, emailConfig, emailMissing, emailRecipient, emailTransport, loginEmail, normalizeEmail, renderEmail, RETRY_MS, type EmailConfig, type Outcome } from "./lib/mail";
+import { smtpServer } from "./lib/smtp";
 import { env } from "./env";
 import { APP_NAME } from "../src/data/catalog";
 import type { EmailSettings, MyEmail } from "../src/data/notifyRules";
@@ -15,8 +17,6 @@ const ENDPOINT = "https://api.resend.com/emails";
 /** Без User-Agent Resend отвечает 403. */
 const USER_AGENT = "home-max-service/1.0";
 const TIMEOUT_MS = 15_000;
-/** Паузы перед повторами (сеть, таймаут, 5xx, 429): повтор — с тем же Idempotency-Key, Resend помнит его 24 часа. */
-const RETRY_MS = [30_000, 120_000, 600_000];
 
 interface Mail {
   to: string;
@@ -30,11 +30,7 @@ interface Mail {
   attempt?: number;
 }
 
-type Outcome = { kind: "sent" } | { kind: "retry"; delayMs: number; note: string } | { kind: "fail"; note: string };
-
 export type SendResult = { status: "sent" } | { status: "skipped"; reason: string } | { status: "retry"; attempt: number } | { status: "failed"; reason: string };
-
-const backoff = (attempt: number): number => RETRY_MS[Math.min(Math.max(attempt, 1), RETRY_MS.length) - 1]!;
 
 /** name из тела ошибки Resend ({ statusCode, name, message }); тело бывает и не JSON. message не берём: в нём бывает адрес. */
 async function errorName(res: Response): Promise<string> {
@@ -71,7 +67,7 @@ async function outcomeOf(res: Response, attempt: number): Promise<Outcome> {
   return { kind: "fail", note: `Resend отклонил письмо (${code})` };
 }
 
-async function post(cfg: EmailConfig, a: Mail, key: string, attempt: number): Promise<Outcome> {
+async function post(cfg: Extract<EmailConfig, { transport: "resend" }>, a: Mail, key: string, attempt: number): Promise<Outcome> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -108,7 +104,12 @@ async function deliver(ctx: ActionCtx, a: Mail, opts: { retry: boolean }): Promi
   if (!normalizeEmail(a.to)) return { status: "failed", reason: "Неверный адрес получателя" };
   const key = a.key ?? `email/${crypto.randomUUID()}`;
   const attempt = Math.max(1, Math.floor(a.attempt ?? 1));
-  const r = await post(cfg, a, key, attempt);
+  // Повтор Resend — с тем же Idempotency-Key (Resend помнит его 24 часа). Пароль SMTP в аргументы не идёт: его читает
+  // само действие из окружения (аргументы видны в журнале функций Convex).
+  const r =
+    cfg.transport === "resend"
+      ? await post(cfg, a, key, attempt)
+      : await ctx.runAction(internal.emailSmtp.post, { to: cfg.redirectTo ?? a.to, subject: a.subject, text: a.text, html: a.html, key, attempt });
   if (r.kind === "sent") {
     await ctx.runMutation(internal.health._mark, { key: "email", ok: true, note: "Письмо отправлено" });
     return { status: "sent" };
@@ -151,7 +152,7 @@ export const sendTest = action({
   },
 });
 
-/** Карточка «Email» владельца: настроено ли, от кого письма, кто их получает, последняя ошибка. Ключ не отдаём. */
+/** Карточка «Email» владельца: чем отправляем, настроено ли, от кого письма, кто получает, последняя ошибка. Ключ и пароль не отдаём. */
 export const settings = query({
   args: {},
   handler: async (ctx): Promise<EmailSettings> => {
@@ -163,10 +164,15 @@ export const settings = query({
         .withIndex("by_key", (q) => q.eq("key", "email"))
         .unique(),
     ]);
+    const transport = emailTransport();
+    const server = transport === "smtp" ? smtpServer() : null;
+    const cfg = emailConfig();
     return {
-      configured: !!emailConfig(),
+      configured: !!cfg,
+      transport,
       missing: emailMissing(),
-      from: env("EMAIL_FROM"),
+      from: cfg?.from ?? env("EMAIL_FROM"),
+      ...(server ? { smtp: { host: server.host, port: server.port, security: server.secure ? "SSL" : "STARTTLS", user: server.user } } : {}),
       replyTo: env("EMAIL_REPLY_TO"),
       redirectTo: env("EMAIL_REDIRECT_TO"),
       subscribers: users.filter((u) => emailRecipient(u)).map((u) => shortName(u.name || u.email || "без имени")),

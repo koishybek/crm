@@ -1,5 +1,5 @@
 // Резервные копии (ТЗ п.20, п.26): каждую ночь — JSON-снимок бизнес-таблиц в файловом хранилище Convex,
-// храним 14 последних; с описью файлов (lib/backupFiles.ts) и, если подключено, — копией во внешнем S3 (offsite.ts).
+// храним 14 последних; с описью файлов (lib/backupFiles.ts) и, если подключено, — копией во внешнем хранилище (offsite.ts).
 // Секреты (токены интеграций, хэши ключей API, коды привязки Telegram, секреты настроек)
 // и служебные таблицы (вход, лимиты, OAuth) в копию не попадают. Копия внутри деплоймента от потери самого
 // деплоймента не спасает — для этого внешнее хранилище; восстановление — scripts/restore.ts.
@@ -13,7 +13,7 @@ import { fileRefs, type FileEntry, type FileRef } from "./lib/backupFiles";
 import { dropFile, ensureSigningKey, fileSigner } from "./lib/files";
 import { markError, markOk } from "./lib/health";
 import { hitLimit } from "./lib/rateLimit";
-import { s3Config } from "./lib/s3";
+import { offsiteStore } from "./lib/offsiteStore";
 import { actionFor } from "./lib/tenantDb";
 import { fileSize, type BackupList } from "../src/data/systemHealth";
 
@@ -202,7 +202,7 @@ export const _saved = internalMutation({
     }
     await markOk(ctx, "backup", `${a.docs} записей, ${fileSize(a.size)}`);
     // Внешнее хранилище подключено — та же копия уходит и туда (offsite.ts).
-    if (s3Config()) await ctx.scheduler.runAfter(0, internal.offsite.push, { backupId: id });
+    if (offsiteStore()) await ctx.scheduler.runAfter(0, internal.offsite.push, { backupId: id });
     await audit(ctx, "Система", "system.backupCreated", `Резервная копия создана: ${a.docs} записей, ${fileSize(a.size)}${old.length ? `; старых копий удалено: ${old.length}` : ""}`, {
       entityId: id,
       meta: { docs: a.docs, size: a.size, removed: old.length, manual: !!a.by },

@@ -1,0 +1,16 @@
+// Внешнее хранилище резервных копий (Workers KV вместо R2). Выкладка — README, раздел «Внешние копии без R2».
+// id пространства KV вписывает тот, кто выкладывает: `npx wrangler kv namespace create BACKUPS` печатает его.
+// Секрет — не здесь: `npx wrangler secret put BACKUP_SECRET`.
+{
+  "name": "homemax-backup",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-26",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "kv_namespaces": [
+    {
+      "binding": "BACKUPS",
+      "id": "REPLACE_WITH_KV_ID"
+    }
+  ]
+}
