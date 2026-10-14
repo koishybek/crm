@@ -2,7 +2,8 @@ import { formatPhone, phoneMask as maskPhone } from "../data/phone";
 
 const nf = new Intl.NumberFormat("ru-RU");
 
-export const money = (n: number) => `${nf.format(Math.round(n))} ₸`;
+// Неразрывный пробел: «₸» не отрывается от суммы при переносе строки.
+export const money = (n: number) => `${nf.format(Math.round(n))} ₸`;
 export const num = (n: number) => nf.format(Math.round(n));
 
 /** 528 000 → «528K», 1 250 000 → «1,3M» — для осей и подписей графиков. */

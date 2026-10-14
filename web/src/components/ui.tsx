@@ -212,7 +212,7 @@ export interface Trend {
 export function TrendLine({ trend }: { trend: Trend }) {
   const Arrow = trend.up ? ArrowUpRight : ArrowDownRight;
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 text-[13.5px]">
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[13.5px]">
       <Arrow size={17} strokeWidth={2.2} className={trend.good ? "text-ok" : "text-bad"} aria-hidden />
       <span className={cn("font-semibold", trend.good ? "text-ok" : "text-bad")}>{trend.value}</span>
       <span className="text-muted">{trend.caption}</span>
@@ -233,9 +233,9 @@ export function KpiCard({ icon: Icon, tone, label, value, trend, caption, onClic
   const Tag = onClick ? "button" : "div";
   const tint = KPI_TINT[tone];
   return (
-    <Tag onClick={onClick} className={cn("card relative flex min-w-0 items-start gap-4 overflow-hidden p-5 text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
+    <Tag onClick={onClick} className={cn("card @container relative flex min-w-0 items-start gap-4 overflow-hidden p-5 text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
       {deco && tint && (
-        <span className="pointer-events-none absolute top-6 right-5 hidden items-end gap-[5px] sm:flex" aria-hidden>
+        <span className="pointer-events-none absolute top-6 right-5 hidden items-end gap-[5px] @min-[330px]:flex" aria-hidden>
           {[34, 52, 70, 92].map((h, i) => (
             <span key={i} className={cn("w-[8px] rounded-t-[3px]", tint.bar)} style={{ height: h * 0.5, opacity: 0.3 + i * 0.18 }} />
           ))}
