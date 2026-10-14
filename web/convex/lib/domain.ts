@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { ACTIVE_STATUSES, ORDER_STATUS } from "../../src/data/catalog";
 import type { Actor, HistoryKind, OrderStatus } from "../../src/data/types";
 import { queueEmail, type EmailEvent } from "./mail";
+import { orderTouched } from "./stats";
 import type { TgButton } from "./tg";
 
 export const TENANT = "t-komfort";
@@ -29,8 +30,10 @@ export async function nextNumber(ctx: MutationCtx): Promise<number> {
 /** Смена статуса для истории — откуда и куда. */
 export type StatusMove = { from: OrderStatus; to: OrderStatus };
 
+/** Запись в историю заказа. Она идёт за каждой правкой заказа — здесь же загрузка мастеров и очередь показателей (lib/stats). */
 export async function log(ctx: MutationCtx, orderId: Id<"orders">, kind: HistoryKind, text: string, actor: Actor, move?: StatusMove) {
   await ctx.db.insert("history", { orderId, kind, text, actor, at: nowIso(), ...move });
+  await orderTouched(ctx, orderId);
 }
 
 /** Сотрудники для рассылок по заказам, прочитанные один раз (E22): в цикле по заказам состав не перечитывается. */

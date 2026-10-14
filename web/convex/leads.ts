@@ -6,6 +6,7 @@ import { almatyStamp, audit, ChangeLog, quote } from "./lib/audit";
 import { assertNotErased, cleanPhone, insertClient } from "./clients";
 import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
 import { toLead, toOrder } from "./lib/dto";
+import { queueStats } from "./lib/stats";
 import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { loadCatalog } from "./catalog";
 import { aiSummary, source, urgency } from "./schema";
@@ -148,6 +149,7 @@ export const create = mutation({
     // Звонок без номера (запись загрузили вручную) получает номер клиента.
     if (call) await ctx.db.patch(call._id, { leadId: id, clientId, clientName: c.name, ...(call.from || call.direction === "out" ? {} : { from: c.phone }) });
     await ctx.db.insert("interactions", { clientId, kind: "lead", channel: a.source, title: "Новая заявка", text: svc.label, at, leadId: id });
+    await queueStats(ctx, "lead", id);
     await ctx.db.patch(clientId, { lastActivityAt: at });
     // Одно действие — одна запись: новый клиент, заведённый вместе с заявкой, отмечен в ней же (ТЗ п.27).
     await audit(ctx, me, "lead.created", `Заявка №${number}: ${svc.label} — ${shortName(c.name)}${isNewClient ? " (новый клиент)" : ""}, ${SOURCES[a.source].label}`, {
@@ -184,6 +186,7 @@ export const take = mutation({
     }
     const status = l.status === "new" ? "qualifying" : l.status;
     await ctx.db.patch(id, { operatorId: me._id, status, ...touch(l, me, false) });
+    await queueStats(ctx, "lead", id);
     const waited = Date.now() - Date.parse(l.createdAt);
     await audit(ctx, me, "lead.taken", `Заявка №${l.number}: взята в работу${status !== l.status ? `, «${LEAD_STATUS[l.status].label}» → «${LEAD_STATUS[status].label}»` : ""}`, {
       entityId: id,
@@ -275,6 +278,7 @@ export const update = mutation({
     }
     if (log.empty) return;
     await ctx.db.patch(id, { ...patch, ...touch(l, me, false) });
+    await queueStats(ctx, "lead", id);
     await audit(ctx, me, "lead.updated", `Заявка №${l.number}: ${log.text()}`, { entityId: id, meta: { changes: log.changes } });
   },
 });
@@ -291,6 +295,7 @@ export const setStatus = mutation({
     // Повторное нажатие того же этапа ничего не меняет — и в журнал не пишется.
     if (l.status === status && l.rejectReason === why) return;
     await ctx.db.patch(id, { status, rejectReason: why, ...touch(l, me, true) });
+    await queueStats(ctx, "lead", id);
     await audit(
       ctx,
       me,
@@ -349,6 +354,7 @@ export const convert = mutation({
       files: [],
     });
     await ctx.db.patch(l._id, { status: "converted", orderId, ...touch(l, me, true) });
+    await queueStats(ctx, "lead", l._id);
     const hint = l.preferredTime ? `. Клиенту удобно: ${l.preferredTime}` : "";
     await log(ctx, orderId, "created", `Заказ создан из заявки, срок ${almatyStamp(due)}${hint}`, userActor(me._id));
     await audit(ctx, me, "lead.converted", `Заявка №${l.number} → заказ №${l.number}: ${svc.label}`, { entityId: id, meta: { orderId, deadline: due, deadlineBy: deadline === undefined ? l.urgency : "manual" } });

@@ -1,6 +1,7 @@
 // Метрики для «Главной» и «Аналитики» — одни и те же формулы, чтобы цифры совпадали между экранами.
 // Деньги, стоимость привлечения и работа операторов — в ./analytics (их считает и сервер).
 import { doneWithin, sums } from "./analytics";
+import { funnelOf, isPaidOrder } from "./dailyStats";
 import { isFinished } from "./logic";
 import type { DB } from "./types";
 import { addDays, startOfDay } from "../lib/format";
@@ -61,13 +62,13 @@ export function funnel(db: Slice, r: Range) {
   const leads = leadsIn(db, r);
   const byId = new Map(db.orders.map((o) => [o.id, o]));
   const orders = leads.filter((l) => l.orderId).map((l) => byId.get(l.orderId!)!);
-  return [
-    { label: "Заявки", value: leads.length },
-    { label: "Квалифицированы", value: leads.filter((l) => l.status !== "new").length },
-    { label: "Заказы", value: orders.length },
-    { label: "Выполнены", value: orders.filter((o) => isFinished(o)).length },
-    { label: "Оплачены", value: orders.filter((o) => o.status === "paid" || o.status === "closed").length },
-  ];
+  return funnelOf({
+    leads: leads.length,
+    qualified: leads.filter((l) => l.status !== "new").length,
+    withOrder: orders.length,
+    orderDone: orders.filter((o) => isFinished(o)).length,
+    orderPaid: orders.filter(isPaidOrder).length,
+  });
 }
 
 export function dailySeries(db: Slice, r: Range, days: number) {

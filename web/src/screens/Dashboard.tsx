@@ -4,7 +4,9 @@ import { useNavigate } from "react-router";
 import { serviceById } from "../data/catalog";
 import { useMe, useNow, useTeam, useUi } from "../data/hooks";
 import { EXEC_STATE, executorState, isActive, isDueSoon, isOverdue, leadBadge, orderBadge } from "../data/logic";
-import { PERIODS, funnel, leadsIn, ordersCreatedIn, rangeOf, sums, doneIn, trend, type PeriodId } from "../data/metrics";
+import { PERIODS, trend, type PeriodId } from "../data/metrics";
+import { dayStart, daysBetween, funnelOfTotals, moneyOf, n, shiftDay } from "../data/dailyStats";
+import { PRESETS, presetRange, type DayRange } from "../data/statsPeriod";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Order } from "../data/types";
@@ -26,6 +28,9 @@ export function PeriodSelect({ value, onChange, options = PERIODS.map((p) => p.i
   );
 }
 
+/** Пресеты «Главной» — последние дни; своего периода здесь нет. */
+const NO_CUSTOM: DayRange = { from: "", to: "" };
+
 /** Почему заказ требует внимания — для подписи. */
 function attentionReason(o: Order, now: number): { rank: number } | null {
   if (isOverdue(o, now)) return { rank: 0 };
@@ -43,32 +48,35 @@ export default function Dashboard() {
   const team = useTeam();
   const [period, setPeriod] = useState<PeriodId>("7d");
   const [funnelPeriod, setFunnelPeriod] = useState<PeriodId>("30d");
-  // Берём с сервера только нужный срез: от начала прошлого периода или воронки — что раньше.
-  const fromMs = Math.min(rangeOf(period, now).prev.from, rangeOf(funnelPeriod, now).cur.from);
-  const data = useQuery(api.metrics.dashboard, { from: new Date(fromMs).toISOString() });
+  // Что живёт минутами (заказы в работе, последние заявки) — с сервера как есть; показатели за период — из предрасчёта
+  // (convex/stats.ts): «Главная» не тянет срез заказов за 90 дней.
+  const data = useQuery(api.board.live, {});
+  const cur = presetRange(period, NO_CUSTOM, now);
+  const days = daysBetween(cur.from, cur.to);
+  const t = useQuery(api.stats.totals, cur);
+  const prevT = useQuery(api.stats.totals, { from: shiftDay(cur.from, -days), to: shiftDay(cur.from, -1) });
+  const funnelT = useQuery(api.stats.totals, presetRange(funnelPeriod, NO_CUSTOM, now));
   const db = useMemo(() => ({ leads: data?.leads ?? [], orders: data?.orders ?? [], executors: team.executors, users: team.users }), [data, team]);
   const isOwner = me.role === "owner";
 
   const k = useMemo(() => {
-    const { cur, prev } = rangeOf(period, now);
-    const caption = PERIODS.find((p) => p.id === period)!.prev;
-    const leadsCur = leadsIn(db, cur).length;
-    const leadsPrev = leadsIn(db, prev).length;
+    const caption = PRESETS.find((p) => p.id === period)!.prev;
+    const c = t ?? {};
+    const p = prevT ?? {};
     const active = db.orders.filter(isActive);
-    const created = ordersCreatedIn(db, cur).length;
     const overdue = db.orders.filter((o) => isOverdue(o, now));
-    // Деньги — только у владельца: остальным сервер отдаёт заказы без сумм.
-    const done = sums(doneIn(db, cur));
-    const donePrev = sums(doneIn(db, prev));
+    // Деньги — только у владельца: остальным сервер не отдаёт ни сумм в заказах, ни денежных итогов.
+    const done = moneyOf(c);
+    const donePrev = moneyOf(p);
     return {
-      leads: { value: leadsCur, trend: trend(leadsCur, leadsPrev, caption) },
-      active: { value: active.length, created },
+      leads: { value: n(c, "leads"), trend: trend(n(c, "leads"), n(p, "leads"), caption) },
+      active: { value: active.length, created: n(c, "created") },
       overdue: overdue.length,
       waiting: db.orders.filter((o) => o.status === "awaiting_executor").length,
       revenue: { value: done.revenue, trend: trend(done.revenue, donePrev.revenue, caption) },
       margin: { value: done.margin, trend: trend(done.margin, donePrev.margin, caption) },
     };
-  }, [db, period, now]);
+  }, [db, t, prevT, period, now]);
 
   const lastLeads = [...db.leads].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
   const attention = db.orders
@@ -79,10 +87,10 @@ export default function Dashboard() {
     .map((e) => ({ e, st: executorState(e, db.orders) }))
     .sort((a, b) => ["onsite", "busy", "free", "off"].indexOf(a.st) - ["onsite", "busy", "free", "off"].indexOf(b.st));
   const onShift = execs.filter((x) => x.st !== "off").length;
-  const f = funnel(db, rangeOf(funnelPeriod, now).cur);
+  const f = funnelOfTotals(funnelT ?? {});
   const fMax = Math.max(1, ...f.map((x) => x.value));
 
-  if (!data || !team.loaded) return <Loading />;
+  if (!data || !t || !prevT || !team.loaded) return <Loading />;
 
   return (
     <>
@@ -108,7 +116,7 @@ export default function Dashboard() {
         />
         <KpiCard deco icon={Hourglass} tone="amber" label="Ждут исполнителя" value={num(k.waiting)} caption="в ленте исполнителей" onClick={() => nav("/orders")} />
       </div>
-      {isOwner && <OwnerMoneyKpis from={rangeOf(period, now).cur.from} revenue={k.revenue} margin={k.margin} />}
+      {isOwner && <OwnerMoneyKpis from={dayStart(cur.from)} revenue={k.revenue} margin={k.margin} />}
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
         <Card icon={FileText} title="Последние заявки" action={<TextLink to="/leads">Все заявки</TextLink>} bodyClass="px-3 pb-3 sm:px-4">
@@ -243,7 +251,7 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {isOwner && <PayoutsCard from={rangeOf(period, now).cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
+        {isOwner && <PayoutsCard from={dayStart(cur.from)} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
         {isOwner && <DebtorsCard className="xl:col-span-2" />}
       </div>
     </>

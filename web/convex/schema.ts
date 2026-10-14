@@ -120,6 +120,17 @@ export const aiDraft = v.object({
   budget: v.optional(v.number()),
 });
 
+/** Ячейка предрасчёта аналитики (src/data/dailyStats.ts → Cell): разрез и счётчики — итоги, по мастерам, по операторам. */
+const statCounts = v.record(v.string(), v.number());
+export const statCell = {
+  category: v.string(),
+  source,
+  city: v.string(),
+  t: statCounts,
+  ex: v.array(v.object({ id: v.string(), c: statCounts })),
+  op: v.array(v.object({ id: v.string(), c: statCounts, waits: v.array(v.number()) })),
+};
+
 export default defineSchema({
   ...authTables,
 
@@ -171,6 +182,8 @@ export default defineSchema({
     unavailableReason: v.optional(v.string()),
     /** Заказов в работе одновременно; не задано — DEFAULT_MAX_ACTIVE (src/data/logic.ts). Меняет владелец. */
     maxActiveOrders: v.optional(v.number()),
+    /** Заказов в работе сейчас (назначен … ждёт клиента) — счётчик для подбора без перебора заказов (lib/stats.syncLoad). */
+    activeCount: v.optional(v.number()),
   }).index("by_phone", ["phone"]),
 
   clients: defineTable({
@@ -281,6 +294,8 @@ export default defineSchema({
     autoOffered: v.optional(v.array(v.id("executors"))),
     autoAssignedAt: v.optional(v.string()),
     autoExhaustedAt: v.optional(v.string()),
+    /** Чей счётчик activeCount сейчас включает этот заказ — чтобы при смене мастера пересчитать и прежнего. */
+    loadExecutorId: v.optional(v.id("executors")),
   })
     .index("by_status", ["status", "deadline"])
     .index("by_executor", ["executorId", "status"])
@@ -633,4 +648,28 @@ export default defineSchema({
   })
     .index("by_kind_entity", ["kind", "entityId"])
     .index("by_at", ["at"]),
+
+  // ── Предрасчёт аналитики (ТЗ §26.6, convex/stats.ts, правила — src/data/dailyStats.ts) ──
+  /** Факты заказа или заявки за один день (по Алматы): из них складываются итоги дня. */
+  statsFacts: defineTable({ entity: v.union(v.literal("order"), v.literal("lead")), ref: v.string(), day: v.string(), ...statCell })
+    .index("by_entity", ["entity", "ref"])
+    .index("by_day", ["day"]),
+  /** Итоги дня (YYYY-MM-DD) или месяца (YYYY-MM) по направлению, источнику и городу — их читают «Аналитика» и «Главная». */
+  dailyStats: defineTable({ grain: v.union(v.literal("day"), v.literal("month")), period: v.string(), ...statCell }).index("by_period", ["grain", "period"]),
+  /** Очередь пересчёта: изменившиеся заказы и заявки, затем их дни и месяцы. */
+  statsDirty: defineTable({ kind: v.union(v.literal("order"), v.literal("lead"), v.literal("day"), v.literal("month")), ref: v.string() }).index("by_ref", ["kind", "ref"]),
+  /** Состояние предрасчёта: когда собран целиком и как идёт полный пересчёт (одна строка). */
+  statsState: defineTable({
+    builtAt: v.optional(v.string()),
+    rebuild: v.optional(
+      v.object({
+        run: v.string(),
+        phase: v.union(v.literal("wipe"), v.literal("leads"), v.literal("orders"), v.literal("stale"), v.literal("days")),
+        cursor: v.union(v.string(), v.null()),
+        /** Последний шаг: давно не было — пересчёт оборвался, крон запускает его заново. */
+        at: v.string(),
+        by: v.optional(v.id("users")),
+      }),
+    ),
+  }),
 });
