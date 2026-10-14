@@ -39,6 +39,7 @@ import { EXEC_STATE, debt, executorState, historyLine, isOverdue, netMargin, pai
 import { closeProblems, isPayoutDue, netReceived, OWNER_MONEY_STATUSES, PAYMENT_BLOCKED, REFUNDABLE_STATUSES, settledStatus, TERMS_WATCH_STATUSES } from "../data/money";
 import { useFileQuery } from "../data/files";
 import { assignExecutor, changeStatus, toast, updateFinance, updateOrderInfo } from "../data/store";
+import { can, canAddPayment, canEditPrice } from "../data/permissions";
 import type { Actor, Executor, HistoryEvent, HistoryKind, Order, OrderStatus, Payment, Urgency, User } from "../data/types";
 import { CloseModal, MoneyLedger, OrderPayoutModal, PaymentModal, RefundModal, VoidModal } from "../components/OrderMoney";
 import { OrderChat } from "../components/OrderChat";
@@ -101,12 +102,16 @@ export default function OrderDetail() {
   const overdue = isOverdue(o, now);
   const st = ORDER_STATUS[o.status];
   const isOwner = me.role === "owner";
-  // «Возврат» — не переход статуса, а запись с суммой: пункт «Оформить возврат» владельца.
+  // Права (ТЗ п.5.12): чего у сотрудника нет, того сервер и не отдал — здесь только прячем пустые места и кнопки.
+  const money_ = { view: can(me, "money.view"), payouts: can(me, "money.payouts"), edit: can(me, "money.edit") };
+  // «Возврат» — не переход статуса, а запись с суммой: пункт «Оформить возврат» (право «Менять деньги заказа»).
   const transitions = STAFF_TRANSITIONS[o.status].filter((t) => t !== "refund");
-  const canRefund = isOwner && REFUNDABLE_STATUSES.includes(o.status) && netReceived(o) > 0;
+  const canRefund = money_.edit && REFUNDABLE_STATUSES.includes(o.status) && netReceived(o) > 0;
   // Деньги оплаченного, закрытого и возвращённого заказа правит только владелец (аудит L-4) — так же проверяет сервер.
   const moneyEditable = isOwner || !OWNER_MONEY_STATUSES.includes(o.status);
-  const canPay = !PAYMENT_BLOCKED[o.status] && moneyEditable && paidAmount(o) < o.clientPrice;
+  const canPrice = moneyEditable && canEditPrice(me, o.status);
+  const canPay = canAddPayment(me) && !PAYMENT_BLOCKED[o.status] && moneyEditable && paidAmount(o) < o.clientPrice;
+  const canPayout = money_.payouts && money_.edit;
   const canAssign = ["new", "awaiting_executor", "assigned", "accepted"].includes(o.status);
 
   const go = async (to: OrderStatus) => {
@@ -144,7 +149,7 @@ export default function OrderDetail() {
           </div>
           <div className="mt-1 text-[15px] text-muted">
             Клиент:{" "}
-            {me.role === "manager" ? (
+            {!can(me, "clients.view") ? (
               <span className="font-medium text-ink-2">{shortName(client.name)}</span>
             ) : (
               <Link to={`/clients/${client.id}`} className="font-medium text-ink-2 hover:text-brand-ink">
@@ -190,7 +195,7 @@ export default function OrderDetail() {
         </div>
       </div>
 
-      <NextStep o={o} isOwner={isOwner} onFinance={() => setModal("finance")} onAssign={() => setModal("assign")} onPay={() => setModal("payment")} onPayout={() => setModal("payout")} go={go} />
+      <NextStep o={o} access={{ ...money_, price: canPrice, pay: canPay, payout: canPayout }} onFinance={() => setModal("finance")} onAssign={() => setModal("assign")} onPay={() => setModal("payment")} onPayout={() => setModal("payout")} go={go} />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.18fr_1fr]">
         <div className="flex min-w-0 flex-col gap-4">
@@ -238,17 +243,18 @@ export default function OrderDetail() {
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
+          {money_.view && (
           <Card
             title="Финансы"
             action={
-              moneyEditable ? (
+              canPrice ? (
                 <button onClick={() => setModal("finance")} className="inline-flex items-center gap-1.5 text-[14px] font-medium text-brand-ink hover:text-brand-deep">
                   <Pencil size={16} /> Редактировать
                 </button>
               ) : undefined
             }
           >
-            <FinanceTiles o={o} />
+            <FinanceTiles o={o} payouts={money_.payouts} />
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[12px] bg-[#f8f6f1] px-4 py-3 text-[13.5px]">
               <div className="text-ink-2">
                 Оплачено <b className="text-ink tabular-nums">{money(paidAmount(o))}</b> из {money(o.clientPrice)}
@@ -264,8 +270,12 @@ export default function OrderDetail() {
                     · долг <b className="text-bad-ink tabular-nums">{money(debt(o))}</b>
                   </>
                 )}
-                <span className="mx-2 text-line-strong">|</span>
-                Исполнителю: <b className={o.payoutPaid ? "text-ok-ink" : "text-ink"}>{o.payoutPaid ? `выплачено${o.payoutPaidAt ? ` ${date(o.payoutPaidAt)}` : ""}` : "не выплачено"}</b>
+                {money_.payouts && (
+                  <>
+                    <span className="mx-2 text-line-strong">|</span>
+                    Исполнителю: <b className={o.payoutPaid ? "text-ok-ink" : "text-ink"}>{o.payoutPaid ? `выплачено${o.payoutPaidAt ? ` ${date(o.payoutPaidAt)}` : ""}` : "не выплачено"}</b>
+                  </>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 {canPay && (
@@ -273,15 +283,16 @@ export default function OrderDetail() {
                     Внести оплату
                   </Button>
                 )}
-                {isOwner && isPayoutDue(o) && (
+                {canPayout && isPayoutDue(o) && (
                   <Button size="sm" variant="secondary" icon={Wallet} onClick={() => setModal("payout")}>
                     Выплатить исполнителю
                   </Button>
                 )}
               </div>
             </div>
-            <MoneyLedger o={o} onVoid={isOwner ? setVoiding : undefined} />
+            <MoneyLedger o={o} onVoid={money_.edit ? setVoiding : undefined} />
           </Card>
+          )}
 
           <Card
             title="Исполнитель"
@@ -343,7 +354,7 @@ export default function OrderDetail() {
 
       {modal === "assign" && <AssignModal o={o} onClose={() => setModal(null)} />}
       {modal === "info" && <InfoModal o={o} onClose={() => setModal(null)} />}
-      {modal === "finance" && <FinanceModal o={o} onClose={() => setModal(null)} />}
+      {modal === "finance" && <FinanceModal o={o} payouts={money_.payouts} onClose={() => setModal(null)} />}
       {modal === "payment" && <PaymentModal o={o} onClose={() => setModal(null)} />}
       {modal === "cancel" && <CancelModal o={o} onClose={() => setModal(null)} />}
       {modal === "refund" && <RefundModal o={o} onClose={() => setModal(null)} />}
@@ -375,25 +386,29 @@ export function PriorityBadge({ p }: { p: Urgency }) {
   );
 }
 
-function FinanceTiles({ o }: { o: Order }) {
+/** payouts — видит ли сотрудник выплату мастеру и маржу (ТЗ п.5.12); без этого — только цена и оплата. */
+function FinanceTiles({ o, payouts }: { o: Order; payouts: boolean }) {
   const ps = paymentState(o);
   // Маржа — с учётом возвратов: частичный возврат уменьшает выручку заказа (E1).
   const m = netMargin(o);
   const revenue = revenueOf(o);
   const mPct = revenue > 0 ? Math.round((m / revenue) * 1000) / 10 : 0;
   const refunded = refundedAmount(o) > 0;
-  const tiles: { icon: LucideIcon; tone: "green" | "blue" | "violet" | "amber"; label: string; value: ReactNode; sub?: ReactNode }[] = [
+  type Tile = { icon: LucideIcon; tone: "green" | "blue" | "violet" | "amber"; label: string; value: ReactNode; sub?: ReactNode; payout?: true };
+  const all: Tile[] = [
     { icon: Wallet, tone: "green", label: "Цена клиента", value: o.clientPrice ? money(o.clientPrice) : "—" },
-    { icon: UserRound, tone: "blue", label: "Выплата исполнителю", value: o.clientPrice ? money(payout(o)) : "—", sub: o.payoutMode === "percent" ? <span className="text-muted">{o.payoutValue}% от цены</span> : undefined },
+    { icon: UserRound, tone: "blue", label: "Выплата исполнителю", value: o.clientPrice ? money(payout(o)) : "—", sub: o.payoutMode === "percent" ? <span className="text-muted">{o.payoutValue}% от цены</span> : undefined, payout: true },
     {
       icon: ChartNoAxesColumn,
       tone: "violet",
+      payout: true,
       label: refunded ? "Маржа после возврата" : "Маржа",
       value: o.clientPrice ? money(m) : "—",
       sub: o.clientPrice ? <span className={cn("font-semibold", mPct >= 20 ? "text-ok" : "text-warn-ink")}>↗ {mPct}%</span> : undefined,
     },
     { icon: CreditCard, tone: "amber", label: "Статус оплаты", value: <Badge tone={ps.tone} className="mt-1">{ps.label}</Badge> },
   ];
+  const tiles = all.filter((t) => payouts || !t.payout);
   return (
     <div className="grid grid-cols-2 gap-3 2xl:grid-cols-4">
       {tiles.map((t) => (
@@ -409,9 +424,12 @@ function FinanceTiles({ o }: { o: Order }) {
 }
 
 /** Подсказка «что делать дальше» — главный способ сделать CRM простой. */
+/** Что сотрудник видит и может с деньгами заказа (ТЗ п.5.12). */
+type MoneyAccess = { view: boolean; payouts: boolean; edit: boolean; price: boolean; pay: boolean; payout: boolean };
+
 function NextStep({
   o,
-  isOwner,
+  access,
   onFinance,
   onAssign,
   onPay,
@@ -419,7 +437,7 @@ function NextStep({
   go,
 }: {
   o: Order;
-  isOwner: boolean;
+  access: MoneyAccess;
   onFinance: () => void;
   onAssign: () => void;
   onPay: () => void;
@@ -433,10 +451,15 @@ function NextStep({
   let tone: "yellow" | "amber" | "green" | "violet" = "yellow";
   let text: ReactNode = null;
   let action: ReactNode = null;
-  if (o.status === "new" && (o.clientPrice <= 0 || payout(o) <= 0)) {
+  // Цену не видно (нет права на деньги) — шаг с ценой пропускаем: её ставит оператор или владелец.
+  if (o.status === "new" && access.view && (o.clientPrice <= 0 || (access.payouts && payout(o) <= 0))) {
     icon = CircleDollarSign;
-    text = <><b>Шаг 1 из 2.</b> Укажите цену для клиента и выплату исполнителю.</>;
-    action = <Button size="sm" onClick={onFinance}>Указать цену</Button>;
+    text = access.payouts ? (
+      <><b>Шаг 1 из 2.</b> Укажите цену для клиента и выплату исполнителю.</>
+    ) : (
+      <><b>Шаг 1 из 2.</b> Укажите цену для клиента — сумма исполнителю посчитается по его ставке.</>
+    );
+    action = access.price ? <Button size="sm" onClick={onFinance}>Указать цену</Button> : null;
   } else if (o.status === "new") {
     text = fits ? (
       <><b>Шаг 2 из 2.</b> Опубликуйте заказ в ленту — его увидят подходящие исполнители: {fits}. Или назначьте вручную.</>
@@ -465,23 +488,29 @@ function NextStep({
   } else if (o.status === "done" || o.status === "awaiting_payment") {
     tone = "amber";
     icon = CreditCard;
-    text = <>Работа выполнена. Осталось получить оплату: {money(Math.max(0, o.clientPrice - paidAmount(o)))}. Когда клиент оплатит всё, заказ сам станет «Оплачен».</>;
-    action = <Button size="sm" icon={Plus} onClick={onPay}>Внести оплату</Button>;
+    text = access.view ? (
+      <>Работа выполнена. Осталось получить оплату: {money(Math.max(0, o.clientPrice - paidAmount(o)))}. Когда клиент оплатит всё, заказ сам станет «Оплачен».</>
+    ) : (
+      <>Работа выполнена. Ждём оплату клиента — когда он оплатит всё, заказ сам станет «Оплачен».</>
+    );
+    action = access.pay ? <Button size="sm" icon={Plus} onClick={onPay}>Внести оплату</Button> : null;
   } else if (o.status === "paid") {
     tone = "green";
     icon = BadgeCheck;
     const due = isPayoutDue(o);
-    text = due ? (
-      isOwner ? (
+    text = !access.payouts ? (
+      <>Оплата получена — закройте заказ. Если выплата исполнителю ещё не проведена, заказ закрывает владелец.</>
+    ) : due ? (
+      access.payout ? (
         <>Оплата получена. Проведите выплату исполнителю ({money(payout(o))}) и закройте заказ.</>
       ) : (
-        <>Оплата получена. Выплату исполнителю ({money(payout(o))}) проводит владелец — после неё заказ можно закрыть.</>
+        <>Оплата получена. Выплату исполнителю ({money(payout(o))}) проводит владелец или сотрудник с правом «Менять деньги заказа» — после неё заказ можно закрыть.</>
       )
     ) : (
       <>Оплата получена, исполнителю выплачено — закройте заказ.</>
     );
     action =
-      due && !isOwner ? null : (
+      due && !access.payout ? null : (
         <div className="flex gap-2">
           {due && <Button size="sm" variant="secondary" icon={Wallet} onClick={onPayout}>Выплатить исполнителю</Button>}
           <Button size="sm" variant="success" icon={CircleCheck} onClick={() => go("closed")}>Закрыть заказ</Button>
@@ -490,7 +519,7 @@ function NextStep({
   } else if (o.status === "refund") {
     tone = "amber";
     icon = CircleDollarSign;
-    text = <>По заказу оформлен возврат клиенту: {money(refundedAmount(o))}. Заказ не входит в выручку.</>;
+    text = access.view ? <>По заказу оформлен возврат клиенту: {money(refundedAmount(o))}. Заказ не входит в выручку.</> : <>По заказу оформлен возврат клиенту. Заказ не входит в выручку.</>;
   } else return null;
   const bg = { yellow: "bg-brand-soft/70 border-[#ffe3a0]", amber: "bg-warn-bg/70 border-[#ffe2b0]", green: "bg-ok-bg/70 border-[#bfeed5]", violet: "bg-violet-bg/70 border-[#dcd1ff]" }[tone];
   return (
@@ -559,7 +588,9 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
   const [showAll, setShowAll] = useState(false);
   const ranked = rankExecutors(o, db.executors, db.orders);
   const list = ranked.filter((x) => (showAll || x.fits) && (!q || x.e.name.toLowerCase().includes(q.toLowerCase())));
-  const noPrice = o.clientPrice <= 0 || payout(o) <= 0;
+  // Без права на деньги цену не видно — проверит сервер; без права на выплаты — только цену (выплата по ставке мастера).
+  const seesPayouts = can(me, "money.payouts");
+  const noPrice = can(me, "money.view") && (o.clientPrice <= 0 || (seesPayouts && payout(o) <= 0));
   // Мастера на выходном назначает только владелец — так же проверяет сервер.
   const canOverrideOff = me?.role === "owner";
   const assign = async (e: Executor) => {
@@ -616,7 +647,7 @@ function AssignModal({ o, onClose }: { o: Order; onClose: () => void }) {
               </div>
               <div className="mt-0.5 truncate text-[12.5px] text-muted">
                 {historyLine(e.stats90) ?? "истории за 90 дней нет"}
-                {o.clientPrice > 0 && ` · получит ${money(payoutFor(e.rates, o))}`}
+                {seesPayouts && o.clientPrice > 0 && ` · получит ${money(payoutFor(e.rates, o))}`}
                 {e.districts?.length ? ` · районы: ${e.districts.join(", ")}` : ""}
               </div>
               {!fits && (
@@ -736,7 +767,8 @@ function InfoModal({ o, onClose }: { o: Order; onClose: () => void }) {
   );
 }
 
-function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
+/** payouts — право на выплаты мастеру: без него в окне только цена клиента (выплата — по ставке исполнителя). */
+function FinanceModal({ o, payouts, onClose }: { o: Order; payouts: boolean; onClose: () => void }) {
   const svc = serviceById(o.serviceId);
   const [price, setPrice] = useState(o.clientPrice ? String(o.clientPrice) : "");
   const [mode, setMode] = useState<Order["payoutMode"]>(o.payoutMode);
@@ -753,7 +785,7 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
     <Modal
       open
       onClose={onClose}
-      title="Финансы заказа"
+      title={payouts ? "Финансы заказа" : "Цена заказа"}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -761,7 +793,7 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
           </Button>
           <Button
             onClick={async () => {
-              const r = await updateFinance(o.id, { clientPrice: p, payoutMode: mode, payoutValue: mode === "fixed" ? Number(digits(value)) || 0 : v });
+              const r = await updateFinance(o.id, payouts ? { clientPrice: p, payoutMode: mode, payoutValue: mode === "fixed" ? Number(digits(value)) || 0 : v } : { clientPrice: p });
               if (!r.ok) return toast(r.error, "bad");
               toast("Финансы сохранены");
               onClose();
@@ -776,6 +808,8 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
         <FormRow label="Цена для клиента, ₸" hint={svc.price[1] > 0 ? `Обычно за «${svc.label}»: ${num(svc.price[0])}–${num(svc.price[1])} ₸` : undefined}>
           {(id) => <Input id={id} inputMode="numeric" value={price ? num(Number(digits(price))) : ""} onChange={(e) => setPrice(digits(e.target.value))} placeholder="28 000" />}
         </FormRow>
+        {payouts && (
+        <>
         <div>
           <div className="mb-2 text-[14px] font-semibold text-ink">Выплата исполнителю</div>
           <Segmented
@@ -820,13 +854,19 @@ function FinanceModal({ o, onClose }: { o: Order; onClose: () => void }) {
             {pay !== payout(o) ? `Он получит уведомление: выплата ${money(payout(o))} → ${money(pay)}.` : "Если выплата изменится, он сразу получит уведомление."}
           </p>
         )}
+        </>
+        )}
         {nextStatus && nextStatus !== o.status && (
           <p className="rounded-[10px] bg-[#f8f6f1] px-3.5 py-2.5 text-[13px] text-ink-2">
             После сохранения заказ станет «{ORDER_STATUS[nextStatus].label}»{nextStatus === "awaiting_payment" ? ` — клиенту нужно доплатить ${money(p - paidAmount(o))}` : " — оплачено всё"}.
           </p>
         )}
         <MoneyLedger o={o} />
-        <p className="text-[12.5px] text-muted">Изменения финансов попадают в историю заказа. AI эти поля менять не может. Выплату исполнителю проводит владелец — кнопкой «Выплатить исполнителю» или в «Выплатах мастерам».</p>
+        <p className="text-[12.5px] text-muted">
+          {payouts
+            ? "Изменения финансов попадают в историю заказа. AI эти поля менять не может. Выплату исполнителю проводят кнопкой «Выплатить исполнителю» или в «Выплатах мастерам»."
+            : "Изменение цены попадает в историю заказа. Сумма исполнителю считается по его ставке; после принятия заказа исполнителем цену меняет владелец."}
+        </p>
       </div>
     </Modal>
   );

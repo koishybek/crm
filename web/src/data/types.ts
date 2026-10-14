@@ -1,5 +1,6 @@
 // Модель данных прототипа. Повторяет сущности ТЗ и в будущем станет формой ответов REST API.
 // tenantId есть на всех сущностях с первого дня — задел под SaaS-мультиаккаунт (ТЗ п.28).
+import type { Permission } from "./permissions";
 
 export type Role = "owner" | "operator" | "manager" | "executor";
 
@@ -51,6 +52,10 @@ export interface User {
   notifyEmail?: boolean;
   /** Вошёл с временным паролем — до смены пароля доступен только экран «Смените пароль». */
   mustChangePassword?: boolean;
+  /** Права на деле (src/data/permissions.ts): умолчания роли или заданные владельцем. */
+  permissions?: Permission[];
+  /** Права заданы владельцем, а не умолчания роли. */
+  customPermissions?: boolean;
 }
 
 export interface Client {

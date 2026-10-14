@@ -8,6 +8,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { ACTIVE_STATUSES, CATEGORIES, FINISHED_STATUSES, ORDER_STATUS, SOURCE_IDS, SOURCES } from "../data/catalog";
 import { useMe, useNow, useTeam } from "../data/hooks";
+import { can } from "../data/permissions";
 import { orderBadge } from "../data/logic";
 import type { OrderStatus, SourceId } from "../data/types";
 import { ServiceLabel } from "../components/icons";
@@ -51,7 +52,8 @@ export function OrdersArchive() {
     return () => clearTimeout(t);
   }, [q]);
 
-  const owner = me?.role === "owner";
+  // Цена — по праву «Цена клиента и оплаты» (ТЗ п.5.12): без него сервер отдаёт заказы без сумм.
+  const owner = can(me, "money.view");
   const scope = me?.role === "manager" ? (me.categories ?? []) : null;
   const categories = CATEGORIES.filter((c) => !scope || scope.includes(c.id));
   const args = useMemo(

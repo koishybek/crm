@@ -2,7 +2,9 @@
 // Ссылки на файлы — подписанные и короткоживущие (lib/files.ts → fileSigner).
 import type { Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
+import { ORDER_STATUS } from "../../src/data/catalog";
 import { payout } from "../../src/data/logic";
+import { can, permissionsOf, type PermissionHolder } from "../../src/data/permissions";
 import type { FileSigner } from "./files";
 import { checkPublicUrl } from "./safeFetch";
 import type {
@@ -17,6 +19,7 @@ import type {
   Message,
   Notification,
   Order,
+  OrderStatus,
   User,
   WorkerOrder,
 } from "../../src/data/types";
@@ -33,6 +36,8 @@ export const toUser = (u: Doc<"users">): User => ({
   telegram: !!u.telegramChatId,
   categories: u.categories,
   mustChangePassword: u.mustChangePassword === true ? true : undefined,
+  permissions: permissionsOf(u),
+  customPermissions: u.permissions !== undefined && u.role !== "owner" && u.role !== "executor" ? true : undefined,
 });
 
 export const toExecutor = (e: Doc<"executors">): Executor => ({
@@ -198,17 +203,11 @@ export const toOrder = (o: Doc<"orders">): Order => ({
   campaign: o.campaign,
 });
 
-/**
- * Заказ без денег — для «Главной» и архива оператора и руководителя: им нужны статусы и сроки, а выручка, маржа
- * и выплаты компании — финансовая аналитика владельца (ТЗ п.4–5; аудит M-2).
- */
-export const orderWithoutMoney = (o: Order): Order => ({
+/** Заказ без выплаты мастеру (значит, и без маржи): сумма, ставка, отметки о выплате. */
+const withoutPayouts = (o: Order): Order => ({
   ...o,
-  clientPrice: 0,
   payoutMode: "fixed",
   payoutValue: 0,
-  payments: [],
-  refunds: undefined,
   payoutPaid: false,
   payoutPaidAt: undefined,
   payoutId: undefined,
@@ -217,7 +216,52 @@ export const orderWithoutMoney = (o: Order): Order => ({
   payoutManual: undefined,
 });
 
-export const toOrderWithFiles = (o: Doc<"orders">, signer: FileSigner): Order => ({ ...toOrder(o), files: o.files.map((f) => toAttachment(f, signer)) });
+/** Заказ без денег: ни цены клиента, ни оплат и возвратов, ни выплаты — только статусы и сроки. */
+export const orderWithoutMoney = (o: Order): Order => ({ ...withoutPayouts(o), clientPrice: 0, payments: [], refunds: undefined });
+
+/**
+ * Заказ глазами пользователя (ТЗ п.26.2, п.27.10): без права «Цена клиента и оплаты» — без денег совсем, без права
+ * «Выплаты мастерам и маржа» — без выплаты (по цене и выплате маржа считается вычитанием). Через эту функцию проходит
+ * каждый заказ, который сервер отдаёт сотруднику: доска, карточка, архив, поиск, клиент, исполнитель, «Главная».
+ */
+export function moneyFor(me: PermissionHolder, o: Order): Order {
+  if (!can(me, "money.view")) return orderWithoutMoney(o);
+  return can(me, "money.payouts") ? o : withoutPayouts(o);
+}
+
+/** toOrder + права пользователя — для .map(orderFor(me)). */
+export const orderFor =
+  (me: PermissionHolder) =>
+  (o: Doc<"orders">): Order =>
+    moneyFor(me, toOrder(o));
+
+export const toOrderWithFiles = (o: Doc<"orders">, signer: FileSigner, me: PermissionHolder): Order =>
+  moneyFor(me, { ...toOrder(o), files: o.files.map((f) => toAttachment(f, signer)) });
+
+/** Исполнитель для сотрудника: личные ставки мастера — данные о выплатах, без права на них не отдаём. */
+export const executorFor =
+  (me: PermissionHolder) =>
+  (e: Doc<"executors">): Executor => {
+    const x = toExecutor(e);
+    return can(me, "money.payouts") ? x : { ...x, rates: undefined };
+  };
+
+/**
+ * История заказа по правам: записи о выплате и правке финансов («цена / выплата») — только с правом на выплаты,
+ * об оплатах и возвратах — с правом на деньги; переход в «Ожидает оплаты» без этого права — без суммы долга.
+ */
+export function historyFor(me: PermissionHolder): (h: Doc<"history">) => HistoryEvent | null {
+  const money = can(me, "money.view");
+  const payouts = can(me, "money.payouts");
+  return (h) => {
+    if (h.kind === "finance" && !payouts) return null;
+    if (h.kind === "payment" && !money) return null;
+    const e = toHistory(h);
+    if (!money && h.kind === "status" && h.to && MONEY_STATUSES.includes(h.to)) return { ...e, text: `Статус изменён на «${ORDER_STATUS[h.to].label}»` };
+    return e;
+  };
+}
+const MONEY_STATUSES: readonly OrderStatus[] = ["awaiting_payment", "paid", "refund", "closed"];
 
 /**
  * Заказ глазами исполнителя: без цены клиента, маржи и платежей. Адрес и контакты — только пока заказ у него в работе

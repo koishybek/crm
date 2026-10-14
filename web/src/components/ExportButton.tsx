@@ -1,9 +1,10 @@
-// «Выгрузка» для владельца (ТЗ п.26.9): CSV за выбранный период собирает сервер — все записи, а не только загруженные
-// на экран. Кнопка видна только владельцу: остальным сервер выгрузку и не отдаст.
+// «Выгрузка» (ТЗ п.26.9): CSV за выбранный период собирает сервер — все записи, а не только загруженные на экран.
+// Кнопка — по праву «Выгрузка в Excel» и только с теми выгрузками, на данные которых есть права (src/data/exportAccess.ts).
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { createExport, downloadFile, exportedText } from "../data/exportActions";
 import { almatyDay, EXPORT_KIND, exportRange, PERIOD_PRESETS, type ExportKind, type PeriodPreset } from "../data/exports";
+import { exportAllowed } from "../data/exportAccess";
 import { useMe } from "../data/hooks";
 import { report, toast } from "../data/store";
 import { cn } from "../lib/format";
@@ -16,13 +17,14 @@ const HEIGHT = { 44: "h-11", 46: "h-[46px]", 50: "h-[50px] text-[15px]" } as con
 export function ExportButton({ kinds, label = "Выгрузка", height = 46 }: { kinds: readonly [ExportKind, ...ExportKind[]]; label?: string; height?: keyof typeof HEIGHT }) {
   const me = useMe();
   const [open, setOpen] = useState(false);
-  if (me?.role !== "owner") return null;
+  const allowed = kinds.filter((k) => exportAllowed(me, k));
+  if (!allowed.length) return null;
   return (
     <>
       <Button variant="secondary" icon={Download} className={cn("bg-white", HEIGHT[height])} onClick={() => setOpen(true)}>
         {label}
       </Button>
-      {open && <ExportModal kinds={kinds} onClose={() => setOpen(false)} />}
+      {open && <ExportModal kinds={allowed as [ExportKind, ...ExportKind[]]} onClose={() => setOpen(false)} />}
     </>
   );
 }

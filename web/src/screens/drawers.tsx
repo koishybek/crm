@@ -67,18 +67,30 @@ import { DistrictField, DistrictPicker } from "../components/DistrictSelect";
 import { normalizeSkills, SKILLS_PER_EXECUTOR } from "../data/skills";
 import { Avatar, Badge, Button, Drawer, FormRow, Input, Segmented, Select, Textarea } from "../components/ui";
 import { cn, dateTime, digits, money, phone, phoneMask } from "../lib/format";
+import { normalizePhone, PHONE_HINT } from "../data/phone";
+import { can } from "../data/permissions";
+
+const PHONE_ERROR = "Укажите телефон полностью — или номер другой страны с «+» и кодом";
 
 // ── Общие поля ───────────────────────────────────────────────────────────────
 
-export function PhoneInput({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) {
+/**
+ * Телефон: по умолчанию Казахстан «+7 (___) ___-__-__»; клиенту можно ввести номер другой страны — с «+» и кодом
+ * (ТЗ п.7.1, E26). international = false — только +7 (логин исполнителя).
+ */
+export function PhoneInput({ value, onChange, id, international = true }: { value: string; onChange: (v: string) => void; id?: string; international?: boolean }) {
   return (
     <Input
       id={id}
       icon={Phone}
       inputMode="tel"
       placeholder="+7 (___) ___-__-__"
+      title={international ? PHONE_HINT : undefined}
       value={value}
-      onChange={(e) => onChange(digits(e.target.value) ? phoneMask(e.target.value) : "")}
+      onChange={(e) => {
+        const v = international ? e.target.value : e.target.value.replace(/^\s*\+(?!7)/, "");
+        onChange(v.trim() === "+" && international ? "+" : digits(v) ? phoneMask(v) : "");
+      }}
     />
   );
 }
@@ -229,7 +241,8 @@ function NewLeadForm({
   const q = useDebounced(name.trim());
   const matches = (useQuery(api.clients.list, q.length >= 2 && !client ? { q } : "skip") ?? []).slice(0, 6);
   // ТЗ п.7: по номеру ищем клиента, иначе создаём нового.
-  const byPhone = useQuery(api.clients.byPhone, digits(ph).length === 11 && !client ? { phone: digits(ph) } : "skip") ?? undefined;
+  const phoneValue = normalizePhone(ph);
+  const byPhone = useQuery(api.clients.byPhone, phoneValue && !client ? { phone: phoneValue } : "skip") ?? undefined;
 
   const pick = (c: Client) => {
     setClient(c);
@@ -267,7 +280,7 @@ function NewLeadForm({
   useEffect(() => {
     if (!call) return;
     const num = call.direction === "in" ? call.from : call.to;
-    if (num) setPh((x) => (digits(x).length === 11 ? x : phoneMask(num)));
+    if (num) setPh((x) => (normalizePhone(x) ? x : phoneMask(num)));
     setSource((x) => x || "phone");
     if (call.aiStatus === "done" && call.ai && appliedFor.current !== call.id) {
       appliedFor.current = call.id;
@@ -301,7 +314,7 @@ function NewLeadForm({
 
   // Заявка из «Сообщений»: номер, имя и разбор переписки — сразу в форму, оператор проверяет и сохраняет.
   const chatBusy = useConversationDraft(conversationId, (d) => {
-    if (d.phone) setPh((x) => (digits(x).length === 11 ? x : phoneMask(d.phone!)));
+    if (d.phone) setPh((x) => (normalizePhone(x) ? x : phoneMask(d.phone!)));
     if (d.name) setName((n) => (n.trim() ? n : d.name!));
     setSource((x) => x || d.channel);
     if (d.ai) apply(d.draft, d.ai);
@@ -317,7 +330,7 @@ function NewLeadForm({
     setError("");
     if (taken) return setError(`Из этого звонка уже создана заявка №${taken.number}`);
     if (!name.trim()) return setError("Укажите клиента");
-    if (digits(ph).length !== 11) return setError("Укажите телефон полностью");
+    if (!normalizePhone(ph)) return setError(PHONE_ERROR);
     if (!source || !serviceId || !city) return setError("Заполните источник, услугу и город");
     if (!description.trim()) return setError("Опишите, что требуется сделать");
     setBusy(true);
@@ -488,7 +501,9 @@ function NewLeadForm({
                   Подставить клиента
                 </button>
               </span>
-            ) : undefined
+            ) : (
+              PHONE_HINT
+            )
           }
         >
           {(id) => <PhoneInput id={id} value={ph} onChange={setPh} />}
@@ -640,7 +655,7 @@ function LeadView({ id }: { id: string }) {
         <div className="flex items-center gap-3">
           <Avatar name={client.name} size={46} />
           <div className="min-w-0 flex-1">
-            {me?.role === "manager" ? (
+            {!can(me, "clients.view") ? (
               <span className="block truncate text-[16px] font-semibold text-ink">{client.name}</span>
             ) : (
               <Link to={`/clients/${client.id}`} onClick={close} className="block truncate text-[16px] font-semibold text-ink hover:text-brand-ink">
@@ -662,7 +677,7 @@ function LeadView({ id }: { id: string }) {
           <span className="text-muted">Источник:</span>
           <Source source={lead.source} />
           <ConversationLink leadId={lead.id} onOpen={close} />
-          {lead.callId && !lead.ai && me?.role !== "manager" && (
+          {lead.callId && !lead.ai && can(me, "calls.view") && (
             <button onClick={() => (close(), nav(`/calls?open=${lead.callId}`))} className="ml-auto inline-flex items-center gap-1 text-[13px] font-semibold text-brand-ink hover:underline">
               <PhoneCall size={14} aria-hidden /> Звонок
             </button>
@@ -675,7 +690,7 @@ function LeadView({ id }: { id: string }) {
           ai={lead.ai}
           title={lead.callId ? "AI-разбор звонка" : "AI-разбор обращения"}
           action={
-            lead.callId && me?.role !== "manager" ? (
+            lead.callId && can(me, "calls.view") ? (
               <button onClick={() => (close(), nav(`/calls?open=${lead.callId}`))} className="inline-flex items-center gap-1 text-[13px] font-semibold text-violet hover:underline">
                 <PhoneCall size={14} aria-hidden /> Звонок
               </button>
@@ -890,7 +905,7 @@ function ClientForm({ existing }: { existing?: Client }) {
     if (!city || !source) return setError("Укажите город и источник");
     const data = { name: name.trim(), kind, phone: ph, email: email.trim() || undefined, city, address: address.trim() || undefined, source, preferredChannel: pref || undefined, notes: notes.trim() || undefined };
     if (existing) {
-      if (digits(ph).length !== 11) return setError("Укажите телефон полностью");
+      if (!normalizePhone(ph)) return setError(PHONE_ERROR);
       const r = await updateClient(existing.id, { ...data, tags: existing.tags });
       if (!r.ok) return setError(r.error);
       toast("Клиент обновлён");
@@ -917,7 +932,7 @@ function ClientForm({ existing }: { existing?: Client }) {
       <FormRow label={kind === "company" ? "Название компании" : "Имя и фамилия"} required>
         {(id) => <Input id={id} icon={UserIcon} value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === "company" ? "ТОО «Название»" : "Айгерим Сапарова"} />}
       </FormRow>
-      <FormRow label="Телефон" required>
+      <FormRow label="Телефон" required hint={PHONE_HINT}>
         {(id) => <PhoneInput id={id} value={ph} onChange={setPh} />}
       </FormRow>
       <FormRow label="Email">{(id) => <Input id={id} icon={Mail} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@mail.kz" />}</FormRow>
@@ -1064,7 +1079,7 @@ function ExecutorForm({ existingId }: { existingId?: string }) {
       </FormRow>
       <div className="grid grid-cols-2 gap-3">
         <FormRow label="Телефон" required>
-          {(id) => (ex ? <Input id={id} icon={Phone} value={phone(ex.phone)} disabled title="Телефон — это логин, его меняет владелец" /> : <PhoneInput id={id} value={ph} onChange={setPh} />)}
+          {(id) => (ex ? <Input id={id} icon={Phone} value={phone(ex.phone)} disabled title="Телефон — это логин, его меняет владелец" /> : <PhoneInput id={id} value={ph} onChange={setPh} international={false} />)}
         </FormRow>
         <FormRow label="Город" required>
           {(id) => (

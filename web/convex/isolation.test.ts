@@ -120,8 +120,12 @@ describe("справочник: мастеру — без денег (аудит
     expect(forExec.services.find((s) => s.id === "ac-repair")).toMatchObject({ label: "Ремонт кондиционера", icon: "snowflake", category: "ac" });
     expect(forExec.categories.find((c) => c.id === "ac")?.skills?.length).toBeGreaterThan(0);
 
+    // Оператору — цены услуг, но не доля мастера (ТЗ п.5.12); владельцу — всё.
     const forStaff = (await as(ids.operator).query(api.catalog.list, {}))!;
-    expect(forStaff.services.find((s) => s.id === "ac-repair")).toMatchObject({ price: [20000, 35000], payoutPct: 70 });
+    expect(forStaff.services.find((s) => s.id === "ac-repair")).toMatchObject({ price: [20000, 35000] });
+    expect(JSON.stringify(forStaff)).not.toMatch(/payoutPct/);
+    const forOwner = (await as(ids.owner).query(api.catalog.list, {}))!;
+    expect(forOwner.services.find((s) => s.id === "ac-repair")).toMatchObject({ price: [20000, 35000], payoutPct: 70 });
   });
 
   test("цены, сохранённые владельцем, мастеру тоже не уходят; в публичном бандле справочник по умолчанию без денег", async () => {
@@ -336,7 +340,7 @@ describe("AI-разбор: адрес и бюджет — не в описани
     expect(lead.comment ?? "").not.toContain("Самал");
 
     const created = await as(ids.operator).mutation(api.leads.convert, { id: lead._id });
-    await as(ids.operator).mutation(api.orders.updateFinance, { id: created.id, clientPrice: 30000, payoutMode: "fixed", payoutValue: 20000, payoutPaid: false });
+    await as(ids.operator).mutation(api.orders.updateFinance, { id: created.id, clientPrice: 30000 });
     await as(ids.operator).mutation(api.orders.changeStatus, { id: created.id, to: "awaiting_executor" });
     const feed = await as(ids.b.user).query(api.worker.feed, {});
     const card = feed.feed.find((o) => o.id === created.id)!;

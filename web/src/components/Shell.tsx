@@ -1,6 +1,7 @@
 import {
   Banknote,
   Bell,
+  BookOpen,
   Box,
   Briefcase,
   Building2,
@@ -34,6 +35,7 @@ import { APP_NAME, ROLE_LABEL } from "../data/catalog";
 import { useNow, useUi } from "../data/hooks";
 import { useInboxUnread } from "../data/inbox";
 import { markAllRead, report, telegramLink, telegramUnlink, toast } from "../data/store";
+import { can, type Permission } from "../data/permissions";
 import type { User } from "../data/types";
 import { cn, whenShort } from "../lib/format";
 import { Avatar, Badge, Button, IconButton, Menu, MenuItem, Toaster } from "./ui";
@@ -44,23 +46,24 @@ import { ClientDrawer, ExecutorDrawer, LeadDrawer } from "../screens/drawers";
 import { IncomingCalls } from "./IncomingCalls";
 import { WorkerShell } from "./worker/WorkerShell";
 
-type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean };
+/** perm — раздел виден только с этим правом (ТЗ п.5.12); ownerOnly — только владельцу. */
+type NavItem = { to: string; label: string; icon: LucideIcon; end?: boolean; perm?: Permission; ownerOnly?: boolean; notOwner?: boolean; notManager?: boolean };
 
 const STAFF_NAV: NavItem[] = [
   { to: "/", label: "Главная", icon: House, end: true },
   { to: "/leads", label: "Заявки", icon: FileText },
-  { to: "/calls", label: "Звонки", icon: PhoneCall },
-  { to: "/inbox", label: "Сообщения", icon: MessagesSquare },
+  { to: "/calls", label: "Звонки", icon: PhoneCall, perm: "calls.view" },
+  { to: "/inbox", label: "Сообщения", icon: MessagesSquare, perm: "inbox.view" },
   { to: "/orders", label: "Заказы", icon: Briefcase },
-  { to: "/clients", label: "Клиенты", icon: Users },
+  { to: "/clients", label: "Клиенты", icon: Users, perm: "clients.view" },
   { to: "/executors", label: "Исполнители", icon: UserRound },
-  { to: "/payouts", label: "Выплаты мастерам", icon: Banknote },
-  { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn },
-  { to: "/audit", label: "Журнал действий", icon: ScrollText },
-  { to: "/settings", label: "Настройки", icon: SettingsIcon },
+  { to: "/payouts", label: "Выплаты мастерам", icon: Banknote, perm: "money.payouts", notManager: true },
+  { to: "/analytics", label: "Аналитика", icon: ChartNoAxesColumn, perm: "analytics.view" },
+  // У владельца справочник — в «Настройках»; отдельный раздел — сотруднику с правом на справочник.
+  { to: "/catalog", label: "Справочник услуг", icon: BookOpen, perm: "catalog.edit", notOwner: true },
+  { to: "/audit", label: "Журнал действий", icon: ScrollText, ownerOnly: true },
+  { to: "/settings", label: "Настройки", icon: SettingsIcon, ownerOnly: true },
 ];
-/** Разделы только для владельца («Аналитику» видит и руководитель направления — по своим направлениям, без денег). */
-const OWNER_ONLY = ["/payouts", "/analytics", "/audit", "/settings"];
 const EXEC_NAV: NavItem[] = [
   { to: "/w", label: "Доступные заказы", icon: Box, end: true },
   { to: "/w/my", label: "Мои заказы", icon: ClipboardList },
@@ -71,8 +74,8 @@ const navFor = (u: User) =>
   u.role === "executor"
     ? EXEC_NAV
     : u.role === "owner"
-      ? STAFF_NAV
-      : STAFF_NAV.filter((n) => (u.role === "manager" && n.to === "/analytics") || (!OWNER_ONLY.includes(n.to) && (u.role !== "manager" || (n.to !== "/clients" && n.to !== "/calls" && n.to !== "/inbox"))));
+      ? STAFF_NAV.filter((n) => !n.notOwner)
+      : STAFF_NAV.filter((n) => !n.ownerOnly && !n.notOwner && !(n.notManager && u.role === "manager") && (!n.perm || can(u, n.perm)));
 
 /** badges — счётчики у пунктов меню (непрочитанные «Сообщения»). */
 function SideNav({ items, onNavigate, badges }: { items: NavItem[]; onNavigate?: () => void; badges?: Record<string, number> }) {
@@ -466,8 +469,8 @@ function TeamShell({ me, children }: { me: User; children?: ReactNode }) {
         </button>
       )}
 
-      {/* Звонки от АТС видят те, кто их принимает: владелец и операторы. */}
-      {(me.role === "owner" || me.role === "operator") && <IncomingCalls />}
+      {/* Звонки от АТС видят те, кто их принимает: сотрудники с правом на звонки. */}
+      {can(me, "calls.view") && <IncomingCalls />}
       <LeadDrawer />
       <ClientDrawer />
       <ExecutorDrawer />

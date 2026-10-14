@@ -1,11 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { query } from "./_generated/server";
-import { inScope, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
+import { can, inScope, requirePerm, requireRole, scopeOf, TEAM } from "./lib/access";
 import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";
-import { orderWithoutMoney as withoutMoney, toLead, toOrder } from "./lib/dto";
+import { orderFor, toLead } from "./lib/dto";
 import { monthOf } from "../src/data/analytics";
+import { canSeeCompanyMoney } from "../src/data/permissions";
 import { ACTIVE_STATUSES } from "../src/data/catalog";
 
 /** «Главной» не владельца хватает воронки за 90 дней и сравнения 30 дней с прошлыми 30 — глубже срез не отдаём. */
@@ -49,11 +50,11 @@ export const dashboard = query({
     const start = isoFrom(from);
     if (me.role === "owner") {
       const s = await slice(ctx, start);
-      return { leads: s.leads.map(toLead), orders: s.orders.map(toOrder) };
+      return { leads: s.leads.map(toLead), orders: s.orders.map(orderFor(me)) };
     }
     const floor = new Date(Date.now() - TEAM_MAX_DAYS * 86400_000).toISOString();
     const s = await slice(ctx, start > floor ? start : floor, scopeOf(me));
-    return { leads: s.leads.map(toLead), orders: s.orders.map((o) => withoutMoney(toOrder(o))) };
+    return { leads: s.leads.map(toLead), orders: s.orders.map(orderFor(me)) };
   },
 });
 
@@ -65,18 +66,23 @@ export const dashboard = query({
 export const analytics = query({
   args: { from: v.string() },
   handler: async (ctx, { from }) => {
-    await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "analytics.view");
     const start = isoFrom(from);
-    const s = await slice(ctx, start, null, true);
-    const payouts = await ctx.db
-      .query("payouts")
-      .withIndex("by_at", (q) => q.gte("at", start))
-      .collect();
+    // Руководитель с правом на аналитику видит свои направления; деньги — по его правам (orderFor).
+    const s = await slice(ctx, start, scopeOf(me), can(me, "money.view"));
+    // Реестр выплат и расходы на рекламу не делятся по направлениям — только сотрудникам без области (canSeeCompanyMoney).
+    const company = canSeeCompanyMoney(me);
+    const payouts = company
+      ? await ctx.db
+          .query("payouts")
+          .withIndex("by_at", (q) => q.gte("at", start))
+          .collect()
+      : [];
     return {
       leads: s.leads.map(toLead),
-      orders: s.orders.map(toOrder),
+      orders: s.orders.map(orderFor(me)),
       autoLeads: await autoLeadIds(ctx, s.leads),
-      adSpend: await spendRows(ctx, monthOf(Date.parse(start)), monthOf(Date.now())),
+      adSpend: company ? await spendRows(ctx, monthOf(Date.parse(start)), monthOf(Date.now())) : [],
       payouts: payouts.map((p) => ({ at: p.at, amount: p.amount })),
     };
   },

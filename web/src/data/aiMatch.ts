@@ -17,8 +17,8 @@ export interface AiMatchItem {
   name: string;
   /** Почему он на этом месте — по-русски, коротко. */
   why: string;
-  /** Сколько получит по своей ставке. */
-  payout: number;
+  /** Сумма мастера по его ставке — только сотруднику с правом на выплаты. */
+  payout?: number;
 }
 
 export interface AiMatchResult {

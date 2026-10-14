@@ -140,7 +140,7 @@ export default function Settings() {
           }
           bodyClass="px-3 pb-3 sm:px-4"
         >
-          <p className="px-1 pb-3 text-[13.5px] text-muted">Владельцы видят всё, включая деньги и аналитику. Операторы — заявки, заказы, клиентов и исполнителей. Руководитель направления — только заказы и исполнителей своих направлений. Исполнителей добавляют в разделе «Исполнители».</p>
+          <p className="px-1 pb-3 text-[13.5px] text-muted">Владельцы видят всё, включая деньги и аналитику. Операторы — заявки, заказы, клиентов, звонки и сообщения, цену и оплаты (без выплат мастерам и маржи). Руководитель направления — только заказы и исполнителей своих направлений, без денег. Права каждого можно изменить: «Доступ» → «Роль и права». Исполнителей добавляют в разделе «Исполнители».</p>
           <ul className="divide-y divide-line">
             {staff.map((u) => (
               <li key={u.id} className="flex items-center gap-3 px-1 py-3">
@@ -178,8 +178,8 @@ export default function Settings() {
                   >
                     {(close) => (
                       <>
-                        <MenuItem icon={ShieldCheck} hint="Оператор, руководитель или владелец" onClick={() => (close(), setAccessOf(u))}>
-                          Изменить роль
+                        <MenuItem icon={ShieldCheck} hint="Роль, направления, деньги, клиенты, выгрузки" onClick={() => (close(), setAccessOf(u))}>
+                          Роль и права
                         </MenuItem>
                         <MenuItem
                           icon={KeyRound}

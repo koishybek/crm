@@ -9,6 +9,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { report, resetPassword, setExecutorAvailable, setUserActive, toast } from "../data/store";
 import { useMe } from "../data/hooks";
+import { can } from "../data/permissions";
 import type { CategoryId, Executor } from "../data/types";
 import { EntityHistory } from "../components/AuditHistory";
 import { ExecutorReviews } from "../components/ExecutorReviews";
@@ -324,8 +325,13 @@ export function ExecutorDetail() {
         <KpiCard icon={Briefcase} tone="blue" label="В работе" value={s.active} />
         <KpiCard icon={Clock} tone="red" label="Просрочки" value={s.overdue} caption={`${s.lateDone} сдано позже срока`} />
         <KpiCard icon={Ban} tone="gray" label="Отмены" value={s.cancelled} />
-        <KpiCard icon={TrendingUp} tone="violet" label="Доход за 30 дней" value={money(s.incomeMonth)} />
-        <KpiCard icon={Wallet} tone="amber" label="К выплате" value={money(s.toPay)} caption="выполнено, ещё не выплачено" />
+        {/* Доход мастера и долг ему — выплаты: по праву «Выплаты мастерам и маржа» (ТЗ п.5.12). */}
+        {can(me, "money.payouts") && (
+          <>
+            <KpiCard icon={TrendingUp} tone="violet" label="Доход за 30 дней" value={money(s.incomeMonth)} />
+            <KpiCard icon={Wallet} tone="amber" label="К выплате" value={money(s.toPay)} caption="выполнено, ещё не выплачено" />
+          </>
+        )}
       </div>
       <ExecutorShiftCard e={e} className="mt-4" />
       <ExecutorMatchCard e={e} className="mt-4" />

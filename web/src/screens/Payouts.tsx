@@ -10,6 +10,8 @@ import { PAYMENT_METHODS, serviceById } from "../data/catalog";
 import { almatyDateInput, moneyMoment } from "../data/money";
 import { createPayout, undoPayout } from "../data/moneyActions";
 import { toast } from "../data/store";
+import { useMe } from "../data/hooks";
+import { can } from "../data/permissions";
 import type { OwedExecutor, PaymentMethod, PayoutEntry } from "../data/types";
 import { date, dateTime, money, plural } from "../lib/format";
 import { ExportButton } from "../components/ExportButton";
@@ -29,6 +31,8 @@ export default function Payouts() {
   const [picked, setPicked] = useState<Record<string, string[]>>({});
   const [paying, setPaying] = useState<{ x: OwedExecutor; orderIds: string[] } | null>(null);
   const [undoing, setUndoing] = useState<PayoutEntry | null>(null);
+  // Провести и отменить выплату — с правом «Менять деньги заказа»; смотреть реестр — с правом на выплаты (ТЗ п.5.12).
+  const canPay = can(useMe(), "money.edit");
 
   if (owed === undefined || history === undefined) return <Loading />;
   const total = owed.reduce((s, x) => s + x.amount, 0);
@@ -103,7 +107,7 @@ export default function Payouts() {
                           <Button size="sm" variant="ghost" onClick={() => setPicked({ ...picked, [x.executorId]: sel.length === x.orders.length ? [] : x.orders.map((o) => o.id) })}>
                             {sel.length === x.orders.length ? "Снять все" : "Выбрать все"}
                           </Button>
-                          <Button size="sm" icon={Wallet} disabled={!sel.length} onClick={() => setPaying({ x, orderIds: sel })}>
+                          <Button size="sm" icon={Wallet} disabled={!sel.length || !canPay} onClick={() => setPaying({ x, orderIds: sel })}>
                             Выплатить {money(sum)}
                           </Button>
                         </div>
@@ -156,7 +160,7 @@ export default function Payouts() {
                       <span className="block text-[12px] text-muted">{dateTime(p.createdAt)}</span>
                     </td>
                     <td className="text-right">
-                      {p.canUndo && (
+                      {p.canUndo && canPay && (
                         <Button size="sm" variant="ghost" icon={Undo2} onClick={() => setUndoing(p)}>
                           Отменить
                         </Button>

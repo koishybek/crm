@@ -2,10 +2,11 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { assertScope, currentUser, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
+import { assertScope, can, currentUser, inScope, noAccess, requireRole, scopeOf, TEAM, type Me } from "./lib/access";
+import { canAddPayment, canEditPrice } from "../src/data/permissions";
 import { almatyStamp, audit, lowerFirst, quote } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, staffIds, uid, userActor, type StatusMove } from "./lib/domain";
-import { toExecutor, toHistory, toMessage, toOrder, toOrderWithFiles } from "./lib/dto";
+import { executorFor, historyFor, orderFor, toMessage, toOrderWithFiles } from "./lib/dto";
 import { cleanFileName, fileSigner, takeUpload } from "./lib/files";
 import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { archiveArgs, archivePage } from "./lib/orderArchive";
@@ -35,7 +36,8 @@ async function activeOrders(ctx: QueryCtx) {
 export const board = query({
   args: { days: v.optional(v.number()) },
   handler: async (ctx, { days }) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     // Глубина — от 1 до 120 дней: запрос «за всё время» упёрся бы в лимиты чтения (аудит M-2).
     const d = Math.min(Math.max(Math.round(typeof days === "number" && Number.isFinite(days) ? days : 45), 1), 120);
     const since = new Date(Date.now() - d * 86400_000).toISOString();
@@ -45,7 +47,7 @@ export const board = query({
     const refunds = await ctx.db.query("orders").withIndex("by_status", (q) => q.eq("status", "refund")).take(30);
     const seen = new Set<string>();
     const all = [...active, ...done, ...cancelled, ...refunds].filter((o) => (seen.has(o._id) ? false : (seen.add(o._id), true)));
-    return all.filter((o) => inScope(scope, o.category)).map(toOrder);
+    return all.filter((o) => inScope(scope, o.category)).map(orderFor(me));
   },
 });
 
@@ -53,8 +55,9 @@ export const board = query({
 export const active = query({
   args: {},
   handler: async (ctx) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
-    return (await activeOrders(ctx)).filter((o) => inScope(scope, o.category)).map(toOrder);
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
+    return (await activeOrders(ctx)).filter((o) => inScope(scope, o.category)).map(orderFor(me));
   },
 });
 
@@ -71,7 +74,8 @@ export const list = query({
 export const detail = query({
   args: { id: v.id("orders"), t: v.optional(v.number()) },
   handler: async (ctx, { id }) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     const o = await ctx.db.get(id);
     if (!o || !inScope(scope, o.category)) return null;
     const [client, messages, history, all, active, reachable] = await Promise.all([
@@ -88,11 +92,11 @@ export const detail = query({
     // Отметка «видно мастеру» у вложений переписки — по файлам заказа: их переключает «Показать мастеру».
     const shown = new Set(o.files.filter((f) => f.forExecutor === true).map((f) => f.id));
     return {
-      order: toOrderWithFiles(o, signer),
+      order: toOrderWithFiles(o, signer, me),
       client: client ? { id: client._id, name: client.name, phone: client.phone } : null,
       messages: messages.map((m) => toMessage(m, signer, shown)),
-      history: history.map(toHistory),
-      executors: executors.filter((e) => !scope || e.categories.some((c) => scope.includes(c))).map(toExecutor),
+      history: history.map(historyFor(me)).filter((h) => h !== null),
+      executors: executors.filter((e) => !scope || e.categories.some((c) => scope.includes(c))).map(executorFor(me)),
       // Для подбора: кто чем занят (без цен — только статус и исполнитель).
       load: active.filter((x) => x.executorId).map((x) => ({ executorId: x.executorId!, status: x.status })),
     };
@@ -254,14 +258,21 @@ export const updateFinance = mutation({
   args: {
     id: v.id("orders"),
     clientPrice: v.number(),
-    payoutMode: v.union(v.literal("fixed"), v.literal("percent")),
-    payoutValue: v.number(),
+    /** Выплата исполнителю. Не передана — прежняя (так сохраняет цену сотрудник без права на выплаты). */
+    payoutMode: v.optional(v.union(v.literal("fixed"), v.literal("percent"))),
+    payoutValue: v.optional(v.number()),
     /** Выплату исполнителю проводят реестром (payouts.create). Поле оставлено для старых клиентов: менять им нельзя. */
     payoutPaid: v.optional(v.boolean()),
   },
-  handler: async (ctx, { id, payoutPaid, ...f }) => {
+  handler: async (ctx, { id, payoutPaid, clientPrice, payoutMode, payoutValue }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
+    if (!can(me, "money.view")) throw new ConvexError(noAccess("money.view"));
+    // Права (ТЗ п.5.12): до принятия мастером цену ставит тот, кто видит деньги; дальше — только с правом «Менять деньги».
+    if (!canEditPrice(me, o.status)) throw new ConvexError(`${noAccess("money.edit")}. Без него цену меняют только до принятия заказа исполнителем`);
+    const f = { clientPrice, payoutMode: payoutMode ?? o.payoutMode, payoutValue: payoutValue ?? o.payoutValue };
+    const seesPayout = can(me, "money.payouts");
+    if ((f.payoutMode !== o.payoutMode || f.payoutValue !== o.payoutValue) && !seesPayout) throw new ConvexError(noAccess("money.payouts"));
     assertMoneyEditable(me, o, "Финансы");
     if (payoutPaid !== undefined && payoutPaid !== o.payoutPaid) throw new ConvexError("Выплату исполнителю проводят в разделе «Выплаты мастерам» — так она попадает в реестр выплат");
     if (f.clientPrice < 0 || f.payoutValue < 0 || !Number.isFinite(f.clientPrice) || !Number.isFinite(f.payoutValue)) throw new ConvexError("Суммы не могут быть отрицательными");
@@ -272,7 +283,9 @@ export const updateFinance = mutation({
       payoutMode: f.payoutMode,
       payoutValue: f.payoutMode === "fixed" ? cleanMoney(f.payoutValue, "Выплата исполнителю") : f.payoutValue,
     };
-    if (payout(next) > next.clientPrice) throw new ConvexError("Выплата исполнителю больше цены клиента — маржа уйдёт в минус");
+    if (payout(next) > next.clientPrice) {
+      throw new ConvexError(seesPayout ? "Выплата исполнителю больше цены клиента — маржа уйдёт в минус" : "Цена ниже суммы исполнителю — согласуйте цену с владельцем");
+    }
     // Выплату по реестру уже провели — её сумма зафиксирована; отменить выплату можно в «Выплатах мастерам» в течение суток.
     if (o.payoutPaid && payout(next) !== payout(o)) throw new ConvexError(`Исполнителю уже выплачено ${money(payout(o))} — эта сумма зафиксирована. Меняя цену, оставьте выплату прежней (фиксированной суммой)`);
     if (next.clientPrice === o.clientPrice && next.payoutMode === o.payoutMode && next.payoutValue === o.payoutValue) return;
@@ -315,6 +328,7 @@ export const addPayment = mutation({
   handler: async (ctx, { id, amount, method, paidAt, note, confirmOverpay }) => {
     const me = await requireRole(ctx, TEAM);
     const o = await staffOrder(ctx, id);
+    if (!canAddPayment(me)) throw new ConvexError(noAccess("payments.add"));
     const blocked = PAYMENT_BLOCKED[o.status];
     if (blocked) throw new ConvexError(blocked);
     assertMoneyEditable(me, o, "Оплаты");

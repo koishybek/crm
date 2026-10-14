@@ -58,7 +58,8 @@ export function AiMatchPanel({ orderId, disabled, onPick }: { orderId: string; d
                 <span className="mt-0.5 w-5 shrink-0 text-[13px] font-semibold text-violet">{i + 1}.</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[14px] font-semibold text-ink">
-                    {it.name} <span className="font-normal text-muted">· получит {money(it.payout)}</span>
+                    {it.name}
+                    {it.payout !== undefined && <span className="font-normal text-muted"> · получит {money(it.payout)}</span>}
                   </div>
                   <div className="text-[12.5px] text-ink-2">{it.why}</div>
                 </div>

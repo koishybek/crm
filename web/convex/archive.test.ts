@@ -174,10 +174,11 @@ describe("архив заказов", () => {
     expect((await readAll(s, s.ids.manager, { category: "plumbing" })).rows).toEqual([]);
     expect((await readAll(s, s.ids.manager, { q: "3043" })).rows).toEqual([]);
     expect(numbers((await readAll(s, s.ids.manager, { q: "Иванов" })).rows).every((n) => n % 2 === 0)).toBe(true);
-    for (const who of [s.ids.manager, s.ids.operator]) {
-      const o = (await readAll(s, who, { q: "3006" })).rows[0]!;
-      expect(o).toMatchObject({ number: 3006, clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
-    }
+    // Руководитель — без денег, оператор — с ценой, но без выплаты мастеру (ТЗ п.5.12).
+    expect((await readAll(s, s.ids.manager, { q: "3006" })).rows[0]!).toMatchObject({ number: 3006, clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
+    const op = (await readAll(s, s.ids.operator, { q: "3006" })).rows[0]!;
+    expect(op).toMatchObject({ number: 3006, payoutValue: 0, payoutPaid: false });
+    expect(op.clientPrice).toBeGreaterThan(0);
     await expect(s.as(s.ids.exUser).query(api.orders.list, { paginationOpts: { numItems: 10, cursor: null } })).rejects.toThrow("Нет доступа");
     await expect(s.t.query(api.orders.list, { paginationOpts: { numItems: 10, cursor: null } })).rejects.toThrow("Нужно войти");
   });

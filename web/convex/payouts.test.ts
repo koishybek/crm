@@ -185,13 +185,17 @@ describe("деньги в аналитике", () => {
     const s = await setup();
     await s.mkOrder({ refunds: [{ id: "r1", amount: 5000, method: "kaspi", at: iso(s.now - DAY), reason: "Скидка", by: s.ids.owner }], acceptedPayout: 21000, payoutPaid: true, payoutPaidAt: iso(s.now - DAY) });
     for (const who of [s.ids.operator, s.ids.manager]) {
-      await expect(s.as(who).query(api.metrics.analytics, { from: iso(s.now - 30 * DAY) })).rejects.toThrow("Нет доступа");
+      // Сырой срез «Аналитики»: оператору права нет; у руководителя оно по умолчанию — свои направления без денег.
+      if (who === s.ids.operator) await expect(s.as(who).query(api.metrics.analytics, { from: iso(s.now - 30 * DAY) })).rejects.toThrow("Нет доступа");
       await expect(s.as(who).query(api.payouts.list, {})).rejects.toThrow("Нет доступа");
       const d = await s.as(who).query(api.metrics.dashboard, { from: iso(s.now - 30 * DAY) });
       expect(d.orders).toHaveLength(1);
       const o = d.orders[0]!;
-      expect(o).toMatchObject({ clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
-      expect([o.refunds, o.acceptedPayout, o.payoutPaidAt]).toEqual([undefined, undefined, undefined]);
+      // Выплаты мастеру нет ни у кого из них; цену и возвраты оператор видит (ТЗ п.5.12), руководитель — нет.
+      expect(o).toMatchObject({ payoutValue: 0, payoutPaid: false });
+      expect([o.acceptedPayout, o.payoutPaidAt]).toEqual([undefined, undefined]);
+      if (who === s.ids.manager) expect([o.clientPrice, o.payments, o.refunds]).toEqual([0, [], undefined]);
+      else expect(o.refunds).toHaveLength(1);
     }
     const own = await s.as(s.ids.owner).query(api.metrics.dashboard, { from: iso(s.now - 30 * DAY) });
     expect(own.orders[0]!.refunds).toHaveLength(1);

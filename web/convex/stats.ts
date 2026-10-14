@@ -8,7 +8,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { autoLeadIds, spendRows } from "./analytics";
 import { loadCatalog } from "./catalog";
-import { OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
+import { can, OWNER, requirePerm, requireRole, scopeOf, TEAM } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
 import { queueStats, recountLoad, syncLoad } from "./lib/stats";
@@ -360,11 +360,14 @@ const cleanFilter = (a: FilterArgs) => ({
   city: a.city?.trim().slice(0, 60) || undefined,
 });
 
-/** Кто что видит: владелец — всё и с деньгами, оператор — без денег, руководитель — свои направления без денег. */
-async function viewer(ctx: QueryCtx, a: FilterArgs): Promise<{ money: boolean; filter: StatsFilter; scope: string[] | null }> {
-  const me = await requireRole(ctx, TEAM);
+/**
+ * Кто что видит (ТЗ п.5.12): суммы компании — с правом «Выплаты мастерам и маржа» (руководителю — никогда, как в
+ * canSeeCompanyMoney), руководитель — только свои направления. «Аналитика» дополнительно требует права analytics.view.
+ */
+async function viewer(ctx: QueryCtx, a: FilterArgs, analytics = false): Promise<{ money: boolean; filter: StatsFilter; scope: string[] | null }> {
+  const me = analytics ? await requirePerm(ctx, "analytics.view") : await requireRole(ctx, TEAM);
   const scope = scopeOf(me);
-  return { money: me.role === "owner", scope, filter: { ...cleanFilter(a), scope } };
+  return { money: can(me, "money.payouts") && me.role !== "manager", scope, filter: { ...cleanFilter(a), scope } };
 }
 
 /** Ряд «Динамики» без пропусков: каждый день (или месяц) периода, пустые — нулями. */
@@ -398,7 +401,7 @@ async function executorsOf(ctx: QueryCtx, scope: string[] | null, category: stri
 export const report = query({
   args: { from: v.string(), to: v.string(), ...filterArgs },
   handler: async (ctx, a): Promise<StatsReport> => {
-    const { money, filter, scope } = await viewer(ctx, a);
+    const { money, filter, scope } = await viewer(ctx, a, true);
     const p = periodOf(a.from, a.to);
     const prevFrom = shiftDay(p.from, -p.days);
     const prevTo = shiftDay(p.from, -1);
@@ -444,7 +447,7 @@ export const totals = query({
 export const months = query({
   args: filterArgs,
   handler: async (ctx, a): Promise<MonthPoint[]> => {
-    const { money, filter } = await viewer(ctx, a);
+    const { money, filter } = await viewer(ctx, a, true);
     const last = monthOfDay(todayDay());
     const first = shiftMonth(last, -11);
     const rows = (await rowsOf(ctx, "month", first, last)).filter((r) => matchesFilter(r, filter));

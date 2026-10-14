@@ -11,6 +11,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { convertLead, report, setLeadStatus, toast } from "../data/store";
 import { useMe, useTeam } from "../data/hooks";
+import { can } from "../data/permissions";
 import { Source } from "../components/icons";
 import { ExportButton } from "../components/ExportButton";
 import { Avatar, Badge, Button, EmptyState, KpiCard, Loading, Menu, MenuItem, PageHeader, Pagination, Select, Tabs } from "../components/ui";
@@ -276,7 +277,7 @@ export default function Leads() {
                                       </MenuItem>
                                     )
                                   )}
-                                  {me?.role !== "manager" && (
+                                  {can(me, "clients.view") && (
                                     <MenuItem icon={Users} onClick={() => (close(), nav(`/clients/${c.id}`))}>
                                       Карточка клиента
                                     </MenuItem>

@@ -158,7 +158,7 @@ describe("оплата (E3, аудит L-4)", () => {
     const id = await s.mkOrder({ status: "paid", payments: s.paidFull(), doneAt: iso(s.now - DAY) });
     const op = s.as(s.ids.operator);
     await expect(op.mutation(api.orders.addPayment, { id, amount: 1000, method: "cash", confirmOverpay: true })).rejects.toThrow("только владелец");
-    await expect(op.mutation(api.orders.updateFinance, { id, clientPrice: 32000, payoutMode: "fixed", payoutValue: 21000 })).rejects.toThrow("только владелец");
+    await expect(op.mutation(api.orders.updateFinance, { id, clientPrice: 32000 })).rejects.toThrow("Менять деньги заказа");
     await s.as(s.ids.owner).mutation(api.orders.updateFinance, { id, clientPrice: 30000, payoutMode: "fixed", payoutValue: 20000 });
     expect((await s.get(id)).payoutValue).toBe(20000);
   });
@@ -340,7 +340,7 @@ describe("условия мастера после принятия (E7)", () =>
   test("выплату поменяли после принятия — мастеру колокольчик и Telegram «было → стало», след в истории и журнале", async () => {
     const s = await setup();
     const id = await s.mkOrder({ status: "accepted", acceptedPayout: 21000 });
-    await s.as(s.ids.operator).mutation(api.orders.updateFinance, { id, clientPrice: 30000, payoutMode: "fixed", payoutValue: 18000 });
+    await s.as(s.ids.owner).mutation(api.orders.updateFinance, { id, clientPrice: 30000, payoutMode: "fixed", payoutValue: 18000 });
     const text = `Выплата по заказу №${(await s.get(id)).number} изменена: ${money(21000)} → ${money(18000)}`;
     expect((await s.bells(s.ids.a.user)).map((n) => n.text)).toEqual([text]);
     await s.t.finishAllScheduledFunctions(() => {});
@@ -349,7 +349,7 @@ describe("условия мастера после принятия (E7)", () =>
     expect((await s.history(id)).at(-1)!.text).toContain("исполнитель уведомлён");
     expect((await s.journal("order.finance"))[0]!.meta).toMatchObject({ executorNotified: true, acceptedPayout: 21000 });
     // Поменялась только цена клиента, выплата та же — мастера не дёргаем.
-    await s.as(s.ids.operator).mutation(api.orders.updateFinance, { id, clientPrice: 32000, payoutMode: "fixed", payoutValue: 18000 });
+    await s.as(s.ids.owner).mutation(api.orders.updateFinance, { id, clientPrice: 32000, payoutMode: "fixed", payoutValue: 18000 });
     expect(await s.bells(s.ids.a.user)).toHaveLength(1);
   });
 

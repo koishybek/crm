@@ -4,6 +4,7 @@ import { MapPinned, Percent, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { SERVICES, serviceById } from "../data/catalog";
 import { useMe } from "../data/hooks";
+import { can } from "../data/permissions";
 import { HISTORY, onTimePct, qualityScore } from "../data/logic";
 import { saveExecutorRates } from "../data/matchActions";
 import { report } from "../data/store";
@@ -26,11 +27,13 @@ export function ratesSummary(r: ExecutorRates | undefined): string {
 export function ExecutorMatchCard({ e, className }: { e: Executor; className?: string }) {
   const me = useMe();
   const owner = me?.role === "owner";
+  // Ставки мастера — данные о выплатах: без права на них сервер их не отдаёт (ТЗ п.5.12).
+  const seesRates = can(me, "money.payouts");
   const [editing, setEditing] = useState(false);
   const s = e.stats90;
   const pct = onTimePct(s);
   return (
-    <Card className={className} icon={MapPinned} title="Подбор и ставки" bodyClass="px-0 pb-0">
+    <Card className={className} icon={MapPinned} title={seesRates ? "Подбор и ставки" : "Подбор"} bodyClass="px-0 pb-0">
       <div className="grid gap-4 px-5 pb-5 md:grid-cols-3">
         <div>
           <div className="text-[13px] font-semibold text-muted">Районы</div>
@@ -51,6 +54,7 @@ export function ExecutorMatchCard({ e, className }: { e: Executor; className?: s
             <p className="mt-1 text-[14.5px] text-muted">Пока нет — появится после первого сданного заказа или отказа</p>
           )}
         </div>
+        {seesRates && (
         <div>
           <div className="text-[13px] font-semibold text-muted">Ставки</div>
           <p className="mt-1 text-[14.5px] text-ink">{ratesSummary(e.rates)}</p>
@@ -60,6 +64,7 @@ export function ExecutorMatchCard({ e, className }: { e: Executor; className?: s
             </Button>
           )}
         </div>
+        )}
       </div>
       {owner && editing && <RatesEditor e={e} onDone={() => setEditing(false)} />}
     </Card>

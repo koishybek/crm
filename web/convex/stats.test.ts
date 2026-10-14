@@ -250,6 +250,11 @@ describe("кто что видит", () => {
     expect(mm.flatMap((x) => Object.keys(x.t)).some((k) => moneyKeys.includes(k))).toBe(false);
     expect(Object.keys(await s.as(s.ids.manager).query(api.stats.totals, { from: s.today, to: s.today }))).not.toContain("revenue");
 
+    // Оператору «Аналитика» по умолчанию не выдана (ТЗ п.5.12); «Главная» — итоги без денег.
+    await expect(s.report(s.ids.operator)).rejects.toThrow("Нет доступа");
+    expect(Object.keys(await s.as(s.ids.operator).query(api.stats.totals, { from: s.today, to: s.today }))).not.toContain("revenue");
+    // Выдали «Аналитику» без денежных прав — отчёт есть, сумм нет.
+    await s.t.run((ctx) => ctx.db.patch(s.ids.operator, { permissions: ["money.view", "payments.add", "clients.view", "calls.view", "inbox.view", "analytics.view"] }));
     const op = await s.report(s.ids.operator);
     expect(op.money).toBe(false);
     expect(n(op.cur.t, "done")).toBe(2);

@@ -4,7 +4,7 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { EXECUTOR, OWNER, requireRole } from "./lib/access";
+import { can, EXECUTOR, noAccess, requirePerm, requireRole, STAFF, type Me } from "./lib/access";
 import { almatyStamp, audit } from "./lib/audit";
 import { executorUser, log, notify, nowIso, TENANT, userActor } from "./lib/domain";
 import { moneyDate, noteText } from "./lib/money";
@@ -25,11 +25,18 @@ function numbersText(numbers: readonly number[]): string {
   return numbers.length > 5 ? `${head} и ещё ${numbers.length - 5}` : head;
 }
 
+/** Провести или отменить выплату: видеть выплаты и менять деньги (ТЗ п.5.12; по умолчанию — владелец). */
+async function payer(ctx: QueryCtx): Promise<Me> {
+  const me = await requirePerm(ctx, "money.payouts", STAFF);
+  if (!can(me, "money.edit")) throw new ConvexError(noAccess("money.edit"));
+  return me;
+}
+
 /** Кому и сколько компания должна сейчас: сданные заказы, выплата за которые не проведена. Больший долг — выше. */
 export const owed = query({
   args: {},
   handler: async (ctx): Promise<OwedExecutor[]> => {
-    await requireRole(ctx, OWNER);
+    await requirePerm(ctx, "money.payouts", STAFF);
     // Невыплаченные выполненные — по индексу, без перебора всей истории заказов.
     const rows = await ctx.db
       .query("orders")
@@ -79,7 +86,7 @@ async function toEntry(ctx: QueryCtx, p: Doc<"payouts">, names: Map<string, stri
 export const list = query({
   args: { executorId: v.optional(v.id("executors")) },
   handler: async (ctx, { executorId }): Promise<PayoutEntry[]> => {
-    await requireRole(ctx, OWNER);
+    await requirePerm(ctx, "money.payouts", STAFF);
     const rows = executorId
       ? await ctx.db
           .query("payouts")
@@ -102,7 +109,7 @@ export const list = query({
 export const create = mutation({
   args: { executorId: v.id("executors"), orderIds: v.array(v.id("orders")), method: paymentMethod, at: v.optional(v.string()), note: v.optional(v.string()) },
   handler: async (ctx, a): Promise<{ id: Id<"payouts">; amount: number }> => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await payer(ctx);
     const ids = [...new Set(a.orderIds)];
     if (!ids.length) throw new ConvexError("Выберите заказы для выплаты");
     if (ids.length > PAYOUT_MAX_ORDERS) throw new ConvexError(`Не больше ${PAYOUT_MAX_ORDERS} заказов в одной выплате`);
@@ -151,7 +158,7 @@ export const create = mutation({
 export const undo = mutation({
   args: { id: v.id("payouts") },
   handler: async (ctx, { id }) => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await payer(ctx);
     const p = await ctx.db.get(id);
     if (!p) throw new ConvexError("Выплата не найдена — возможно, её уже отменили");
     if (Date.now() - Date.parse(p.createdAt) >= PAYOUT_UNDO_MS) throw new ConvexError("Отменить выплату можно только в течение суток после проведения");

@@ -5,6 +5,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SOURCES } from "./catalog";
 import { convex, run } from "./convex";
+import { can } from "./permissions";
 import { report } from "./store";
 import type { Channel, ConversationDraft, User } from "./types";
 
@@ -14,7 +15,8 @@ export const CHANNELS: Channel[] = ["telegram", "whatsapp", "olx", "site"];
 export const channelLabel = (c: Channel): string => SOURCES[c].label;
 
 /** «Сообщения» видят владелец и операторы; руководитель направления и мастера — нет. */
-export const canUseInbox = (u: Pick<User, "role"> | null | undefined): boolean => u?.role === "owner" || u?.role === "operator";
+/** Сообщения клиентов — по праву «Сообщения клиентов» (ТЗ п.5.12; по умолчанию владелец и операторы). */
+export const canUseInbox = (u: Pick<User, "role" | "permissions"> | null | undefined): boolean => can(u, "inbox.view");
 
 /** Сколько диалогов ждут ответа — бейдж в меню. У остальных ролей запрос не отправляется. */
 export function useInboxUnread(me: User | null | undefined): number {

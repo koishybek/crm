@@ -89,6 +89,7 @@ import type * as notifications from "../notifications.js";
 import type * as orderClientChat from "../orderClientChat.js";
 import type * as orders from "../orders.js";
 import type * as payouts from "../payouts.js";
+import type * as permissions from "../permissions.js";
 import type * as publicApi from "../publicApi.js";
 import type * as receivables from "../receivables.js";
 import type * as reminders from "../reminders.js";
@@ -190,6 +191,7 @@ declare const fullApi: ApiFromModules<{
   orderClientChat: typeof orderClientChat;
   orders: typeof orders;
   payouts: typeof payouts;
+  permissions: typeof permissions;
   publicApi: typeof publicApi;
   receivables: typeof receivables;
   reminders: typeof reminders;

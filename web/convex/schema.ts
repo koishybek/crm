@@ -1,10 +1,12 @@
 import { authTables } from "@convex-dev/auth/server";
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { PERMISSIONS } from "../src/data/permissions";
 
 // Даты — ISO-строки в UTC: сортируются как строки и совпадают с типами фронта (src/data/types.ts).
 
 export const role = v.union(v.literal("owner"), v.literal("operator"), v.literal("manager"), v.literal("executor"));
+export const permission = v.union(...PERMISSIONS.map((p) => v.literal(p)));
 export const source = v.union(
   v.literal("olx"),
   v.literal("phone"),
@@ -195,6 +197,8 @@ export default defineSchema({
     notifyEmail: v.optional(v.boolean()),
     /** Временный пароль (выдан владельцем или оператором): до смены пароля — только экран «Смените пароль» (аудит M-8). */
     mustChangePassword: v.optional(v.boolean()),
+    /** Права сотрудника, заданные владельцем (ТЗ п.5.12); нет — умолчания роли (src/data/permissions.ts). */
+    permissions: v.optional(v.array(permission)),
   })
     .index("email", ["email"])
     .index("phone", ["phone"])

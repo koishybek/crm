@@ -1,10 +1,10 @@
-import { Download, CalendarDays, Check, Clock, Ellipsis, FileText, MapPin, Settings, Wallet, ArrowRight, UserPlus, Ban, LayoutGrid, List, Archive } from "lucide-react";
+import { CalendarDays, Check, Clock, Ellipsis, FileText, MapPin, Settings, Wallet, ArrowRight, UserPlus, Ban, LayoutGrid, List, Archive } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { CITIES, KANBAN, ORDER_STATUS, serviceById, type Tone } from "../data/catalog";
 import { useMe, useNow } from "../data/hooks";
-import { isOverdue, margin, orderBadge, paidAmount, payout } from "../data/logic";
-import { exportCsv, stamp } from "../lib/csv";
+import { isOverdue, orderBadge, payout } from "../data/logic";
+import { can } from "../data/permissions";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { changeStatus, toast } from "../data/store";
@@ -13,7 +13,7 @@ import type { Order, OrderStatus } from "../data/types";
 import { ExportButton } from "../components/ExportButton";
 import { ServiceLabel } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
-import { Avatar, Badge, Button, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
+import { Avatar, Badge, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
 import { cn, dayDiff, dateTime, deadline, money } from "../lib/format";
 import { OrdersArchive } from "./OrdersArchive";
 
@@ -36,6 +36,9 @@ type Due = "" | "late" | "today" | "tomorrow" | "week";
 
 export default function Orders() {
   const me = useMe();
+  // Деньги в списке — по правам (ТЗ п.5.12): цена — «Цена клиента и оплаты», маржа — «Выплаты мастерам и маржа».
+  const seesMoney = can(me, "money.view");
+  const seesMargin = can(me, "money.payouts");
   const team = useTeam();
   const [params] = useSearchParams();
   const [view, setView] = useState<"board" | "list" | "archive">(params.get("view") === "archive" ? "archive" : "board");
@@ -85,42 +88,8 @@ export default function Orders() {
         subtitle="Управляйте заказами на услуги и отслеживайте их выполнение"
         actions={
           <>
-          {me?.role === "owner" ? (
-            <ExportButton kinds={["orders", "payments"]} />
-          ) : (
-          <Button
-            variant="secondary"
-            icon={Download}
-            className="h-[46px]"
-            disabled={!board?.length}
-            onClick={() =>
-              exportCsv(
-                [
-                  ["Заказ", "Создан", "Клиент", "Телефон", "Услуга", "Город", "Адрес", "Срок", "Статус", "Исполнитель", "Цена клиента", "Выплата", "Маржа", "Оплачено"],
-                  ...filtered.map((o) => [
-                    o.number,
-                    dateTime(o.createdAt),
-                    o.clientName,
-                    o.clientPhone,
-                    serviceById(o.serviceId).label,
-                    o.city,
-                    o.address,
-                    dateTime(o.deadline),
-                    ORDER_STATUS[o.status].label,
-                    db.executors.find((e) => e.id === o.executorId)?.name,
-                    o.clientPrice,
-                    payout(o),
-                    margin(o),
-                    paidAmount(o),
-                  ]),
-                ],
-                `zakazy-${stamp()}.csv`,
-              )
-            }
-          >
-            Экспорт
-          </Button>
-          )}
+          {/* Выгрузка — по праву «Выгрузка в Excel», деньги в файле — по правам на деньги (src/data/exportAccess.ts). */}
+          <ExportButton kinds={["orders", "payments"]} />
           <div className="inline-flex rounded-[12px] border border-line bg-white p-1">
             {(
               [
@@ -235,8 +204,8 @@ export default function Orders() {
                   <th>Город</th>
                   <th>Срок</th>
                   <th>Исполнитель</th>
-                  <th className="text-right">Цена</th>
-                  <th className="text-right">Маржа</th>
+                  {seesMoney && <th className="text-right">Цена</th>}
+                  {seesMargin && <th className="text-right">Маржа</th>}
                   <th>Статус</th>
                 </tr>
               </thead>
@@ -255,8 +224,8 @@ export default function Orders() {
                       <td className="text-ink-2">{o.city}</td>
                       <td className={cn("whitespace-nowrap", isOverdue(o, now) ? "font-medium text-bad" : "text-ink-2")}>{deadline(o.deadline, new Date(now))}</td>
                       <td className="text-ink-2">{ex ? ex.name : <span className="text-muted">—</span>}</td>
-                      <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>
-                      <td className="text-right text-ok-ink tabular-nums">{o.clientPrice ? money(o.clientPrice - payout(o)) : "—"}</td>
+                      {seesMoney && <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>}
+                      {seesMargin && <td className="text-right text-ok-ink tabular-nums">{o.clientPrice ? money(o.clientPrice - payout(o)) : "—"}</td>}
                       <td>
                         <Badge tone={b.tone}>{b.label}</Badge>
                       </td>
@@ -287,6 +256,7 @@ function FilterCard({ label, children }: { label: string; children: ReactNode })
 
 function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: number }) {
   const nav = useNavigate();
+  const seesMoney = can(useMe(), "money.view");
   const b = orderBadge(o, now);
   const late = isOverdue(o, now);
   return (
@@ -362,10 +332,14 @@ function OrderCard({ o, clientName, now }: { o: Order; clientName: string; now: 
       <ServiceLabel serviceId={o.serviceId} className="mt-3 w-full text-[14.5px] text-ink-2" />
       <SkillChips skills={o.requiredSkills} max={2} variant="outline" className="mt-2" />
       <div className="mt-3 flex items-center justify-between gap-2">
-        <span className="inline-flex items-center gap-2 text-[16px] font-bold text-ink tabular-nums">
-          <Wallet size={18} className="text-muted" strokeWidth={1.8} />
-          {o.clientPrice ? money(o.clientPrice) : <span className="text-[14px] font-medium text-warn-ink">цена не указана</span>}
-        </span>
+        {seesMoney ? (
+          <span className="inline-flex items-center gap-2 text-[16px] font-bold text-ink tabular-nums">
+            <Wallet size={18} className="text-muted" strokeWidth={1.8} />
+            {o.clientPrice ? money(o.clientPrice) : <span className="text-[14px] font-medium text-warn-ink">цена не указана</span>}
+          </span>
+        ) : (
+          <span />
+        )}
         <Badge tone={b.tone} className="max-w-[150px] truncate">
           {b.label}
         </Badge>

@@ -1,10 +1,10 @@
 // Карточка клиента (ТЗ п.5 «Клиенты: звонки, файлы»): звонки клиента с записями и файлы его заказов и переписки.
 // Только владельцу и операторам — как и сама клиентская база. Ссылки на записи и файлы — подписанные, на 15 минут
 // (lib/files.ts); t — метка их обновления (src/data/files.ts).
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { query } from "./_generated/server";
-import { requireRole, STAFF } from "./lib/access";
+import { can, noAccess, requirePerm } from "./lib/access";
 import { toCall } from "./lib/dto";
 import { fileSigner } from "./lib/files";
 import type { ClientFile, ClientFileGroup, ClientFileKind } from "../src/data/clientRecords";
@@ -31,7 +31,8 @@ const newestFirst = (a: string, b: string) => (a < b ? 1 : a > b ? -1 : 0);
 export const calls = query({
   args: { clientId: v.id("clients"), t: v.optional(v.number()) },
   handler: async (ctx, { clientId }): Promise<Call[] | null> => {
-    await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
+    if (!can(me, "calls.view")) throw new ConvexError(noAccess("calls.view"));
     const c = await ctx.db.get(clientId);
     if (!c) return null;
     const linked = await ctx.db
@@ -74,7 +75,7 @@ const CHAT_FILE_NAME: Record<ClientFileKind, string> = { image: "Фото", audi
 export const files = query({
   args: { clientId: v.id("clients"), t: v.optional(v.number()) },
   handler: async (ctx, { clientId }): Promise<ClientFileGroup[] | null> => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(clientId);
     if (!c) return null;
     const signer = await fileSigner(ctx);

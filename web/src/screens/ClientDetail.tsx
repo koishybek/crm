@@ -22,7 +22,8 @@ import {
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { CATEGORIES, SOURCES } from "../data/catalog";
-import { useNow, useTeam, useUi } from "../data/hooks";
+import { useMe, useNow, useTeam, useUi } from "../data/hooks";
+import { can } from "../data/permissions";
 import { clientState, debt, isActive, leadBadge, orderBadge, paidAmount } from "../data/logic";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
@@ -45,6 +46,7 @@ export default function ClientDetail() {
   const now = useNow();
   const nav = useNavigate();
   const ui = useUi();
+  const me = useMe();
   const [allTouches, setAllTouches] = useState(false);
   const [note, setNote] = useState("");
   const [noting, setNoting] = useState(false);
@@ -260,6 +262,7 @@ export default function ClientDetail() {
         </Card>
 
         <div className="flex min-w-0 flex-col gap-4 lg:col-span-2 2xl:col-span-1">
+          {can(me, "money.view") && (
           <Card title="Финансы клиента">
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-[14px] bg-ok-bg/60 p-4">
@@ -286,6 +289,7 @@ export default function ClientDetail() {
               </div>
             </div>
           </Card>
+          )}
 
           <Card
             title="Комментарии"
@@ -377,6 +381,7 @@ export function OrdersTable({ orders, empty }: { orders: Order[]; empty: string 
   const db = useTeam();
   const now = useNow();
   const nav = useNavigate();
+  const seesMoney = can(useMe(), "money.view");
   if (!orders.length) return <div className="py-6 text-center text-[14px] text-muted">{empty}</div>;
   return (
     <div className="scroll-x">
@@ -388,7 +393,7 @@ export function OrdersTable({ orders, empty }: { orders: Order[]; empty: string 
             <th>Услуга</th>
             <th>Исполнитель</th>
             <th>Статус</th>
-            <th className="text-right">Сумма</th>
+            {seesMoney && <th className="text-right">Сумма</th>}
             <th className="w-8" />
           </tr>
         </thead>
@@ -418,7 +423,7 @@ export function OrdersTable({ orders, empty }: { orders: Order[]; empty: string 
                 <td>
                   <Badge tone={b.tone}>{b.label}</Badge>
                 </td>
-                <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>
+                {seesMoney && <td className="text-right font-semibold text-ink tabular-nums">{o.clientPrice ? money(o.clientPrice) : "—"}</td>}
                 <td className="text-right text-muted">
                   <ChevronRight size={18} />
                 </td>

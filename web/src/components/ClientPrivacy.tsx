@@ -7,13 +7,14 @@ import { report } from "../data/store";
 import { anonymizeClient } from "../data/systemActions";
 import type { Client } from "../data/types";
 import { date, digits, phoneMask } from "../lib/format";
+import { normalizePhone } from "../data/phone";
 import { Button, Card, FormRow, Input, Modal } from "./ui";
 
 const ERASED = ["Имя, телефон, email, адрес, заметки и теги", "Записи звонков, расшифровки и разборы AI", "Тексты и файлы переписки во всех каналах", "Комментарии сотрудников и текст отзывов"];
 const KEPT = ["Номера заявок и заказов, услуги, даты и статусы", "Цены, оплаты и выплаты мастерам — для отчётов", "Оценки мастерам — рейтинг не изменится", "Журнал действий сотрудников"];
 
 /** «+7 (701) 123-45-67» → «77011234567» — как телефон хранится в карточке. */
-const typedPhone = (masked: string) => `7${digits(masked).slice(1)}`;
+const typedPhone = (masked: string) => normalizePhone(masked) ?? digits(masked);
 
 /** Плашка над обезличенной карточкой: почему в ней нет данных и что делать, если человек обратится снова. */
 export function ErasedClientNotice({ at }: { at: string }) {
@@ -93,7 +94,7 @@ export function ClientEraseCard({ client }: { client: Client }) {
         </div>
         <div className="mt-4">
           <FormRow label="Телефон клиента — для подтверждения" required hint="Наберите номер клиента полностью">
-            {(id) => <Input id={id} inputMode="tel" autoComplete="off" placeholder="+7 (___) ___-__-__" value={typed} onChange={(e) => setTyped(phoneMask(e.target.value))} />}
+            {(id) => <Input id={id} inputMode="tel" autoComplete="off" placeholder="+7 (___) ___-__-__" value={typed} onChange={(e) => setTyped(e.target.value.trim() === "+" ? "+" : phoneMask(e.target.value))} />}
           </FormRow>
         </div>
       </Modal>

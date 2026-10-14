@@ -300,12 +300,15 @@ describe("деньги компании — только владельцу", ()
 
     for (const user of [ids.operator, ids.manager]) {
       const who = as(user);
-      await expect(who.query(api.metrics.analytics, { from })).rejects.toThrow("Нет доступа");
+      // Оператору «Аналитика» не выдана; руководителю выдана по умолчанию — свои направления без денег (permissions.test.ts).
+      if (user === ids.operator) await expect(who.query(api.metrics.analytics, { from })).rejects.toThrow("Нет доступа");
       await expect(who.query(api.analytics.payouts, { from })).rejects.toThrow("Нет доступа");
       await expect(who.query(api.analytics.adSpendMonth, { month: monthOf(Date.now()) })).rejects.toThrow("Нет доступа");
       const d = await who.query(api.metrics.dashboard, { from });
       expect(d.orders.length).toBeGreaterThan(0);
-      for (const o of d.orders) expect(o).toMatchObject({ clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
+      // Оператор по умолчанию видит цену и оплаты, но не выплату мастеру; руководитель — без денег вообще (ТЗ п.5.12).
+      const money = user === ids.operator ? { clientPrice: 20000 } : { clientPrice: 0, payments: [] };
+      for (const o of d.orders) expect(o).toMatchObject({ ...money, payoutValue: 0, payoutPaid: false });
       expect(d.leads).toHaveLength(0);
     }
     // Руководитель видит только своё направление.

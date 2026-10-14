@@ -2,6 +2,7 @@
 // с прошлым периодом и по месяцам, полная таблица исполнителей, повторные клиенты. Цифры — из предрасчёта
 // (convex/stats.ts, O(дней)), формулы — общие с сервером (src/data/dailyStats.ts, src/data/analytics.ts).
 // Владельцу — всё; руководителю направления — его направления и без денег (сервер денег ему не отдаёт).
+import { can } from "../data/permissions";
 import { BadgeCheck, Ban, Briefcase, ChartNoAxesColumn, Banknote, FileText, Percent, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
@@ -51,6 +52,7 @@ export default function Analytics() {
   const now = useNow(60_000);
   const team = useTeam();
   const owner = me.role === "owner";
+  const manager = me.role === "manager";
   const [preset, setPreset] = useState<PresetId>("30d");
   const [custom, setCustom] = useState<DayRange>(() => lastDays(30));
   const [filter, setFilter] = useState<StatsFilters>({});
@@ -59,7 +61,7 @@ export default function Analytics() {
   const valid = rangeProblem(range) === null;
   const r = useQuery(api.stats.report, valid ? { ...range, ...filter } : "skip");
   // Руководителю — только его направления: сервер всё равно отдаёт лишь их, список фильтра не обещает лишнего.
-  const categories = owner ? CATEGORIES.map((c) => c.id) : (me.categories ?? []);
+  const categories = manager ? (me.categories ?? []) : CATEGORIES.map((c) => c.id);
   const caption = PRESETS.find((p) => p.id === preset)!.prev;
 
   const d = useMemo(() => {
@@ -99,11 +101,11 @@ export default function Analytics() {
   const header = (
     <>
       <PageHeader
-        title={owner ? "Аналитика" : "Аналитика направления"}
+        title={manager ? "Аналитика направления" : "Аналитика"}
         subtitle={`${rangeLabel(range)}${filter.city ? ` · ${filter.city}` : ""}${filter.category ? ` · ${categoryById(filter.category).label}` : ""}${filter.source ? ` · ${SOURCES[filter.source].label}` : ""}`}
         actions={
           <>
-            {owner && <ExportButton kinds={["payments", "orders", "payouts", "leads", "calls", "executors", "audit"]} label="Выгрузки за период" />}
+            {can(me, "data.export") && <ExportButton kinds={["payments", "orders", "payouts", "leads", "calls", "executors", "audit"]} label="Выгрузки за период" />}
             <PeriodPicker preset={preset} onPreset={setPreset} custom={custom} onCustom={setCustom} />
           </>
         }

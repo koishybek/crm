@@ -3,7 +3,8 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { internalMutation, internalQuery, type QueryCtx } from "./_generated/server";
-import { inScope, scopeOf, type Me } from "./lib/access";
+import { can, inScope, scopeOf, type Me } from "./lib/access";
+import { canSeeCompanyMoney } from "../src/data/permissions";
 import { almatyDayStart, esc, whenAlmaty } from "./lib/tg";
 import { loadCatalog } from "./catalog";
 import { env } from "./env";
@@ -53,14 +54,15 @@ function staffText(me: Me, n: Awaited<ReturnType<typeof numbers>>, morning: bool
   const lines = [morning ? `<b>☀️ Доброе утро${me.name ? `, ${esc(me.name.split(" ")[0]!)}` : ""}!</b>` : `<b>Сводка ${esc(APP_NAME)}</b>`, ""];
   if (morning) {
     lines.push(`Вчера: заявок <b>${n.leads}</b>${n.sources.length ? ` (${esc(n.sources.join(", "))})` : ""}, выполнено заказов <b>${n.done}</b>`);
-    if (me.role === "owner") lines.push(`Выручка ${esc(money(n.revenue))}, маржа <b>${esc(money(n.margin))}</b>`);
+    // Деньги в сводке — по правам (ТЗ п.5.12), как на «Главной».
+    if (canSeeCompanyMoney(me)) lines.push(`Выручка ${esc(money(n.revenue))}, маржа <b>${esc(money(n.margin))}</b>`);
     lines.push("");
   }
   lines.push(`Сейчас в работе: <b>${n.active}</b>`);
   if (n.fresh) lines.push(`• без цены / не опубликованы: ${n.fresh}`);
   if (n.waiting) lines.push(`• ждут исполнителя: ${n.waiting}`);
   if (n.overdue) lines.push(`• 🔴 просрочено: <b>${n.overdue}</b>`);
-  if (me.role === "owner" && n.debt) lines.push(`• клиенты должны: ${esc(money(n.debt))}`);
+  if (can(me, "money.view") && n.debt) lines.push(`• клиенты должны: ${esc(money(n.debt))}`);
   return lines.join("\n");
 }
 

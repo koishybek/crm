@@ -1,10 +1,10 @@
 // Аналитика владельца (ТЗ п.5 «Dashboard: выплаты, маржа», п.17): расходы на рекламу, выплаты исполнителям
-// и кто на самом деле завёл заявку. Деньги компании целиком видит только владелец — всё здесь только для OWNER.
+// и кто на самом деле завёл заявку. Только с правом «Аналитика» и правами на деньги (ТЗ п.5.12; по умолчанию — владелец).
 // Формулы — общие с интерфейсом (src/data/analytics.ts).
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type QueryCtx } from "./_generated/server";
-import { OWNER, requireRole } from "./lib/access";
+import { can, noAccess, requirePerm, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
 import { cleanMoney } from "./lib/limits";
@@ -67,7 +67,8 @@ function checkMonth(month: string): void {
 export const adSpendMonth = query({
   args: { month: v.string() },
   handler: async (ctx, { month }): Promise<AdSpendRow[]> => {
-    await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "analytics.view", STAFF);
+    if (!can(me, "money.view")) throw new ConvexError(noAccess("money.view"));
     if (!MONTH_RE.test(month)) throw new ConvexError("Неверный месяц");
     return spendRows(ctx, month, month);
   },
@@ -80,7 +81,8 @@ export const adSpendMonth = query({
 export const setAdSpend = mutation({
   args: { month: v.string(), items: v.array(v.object({ source, amount: v.number() })) },
   handler: async (ctx, { month, items }): Promise<{ changed: number }> => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "analytics.view", STAFF);
+    if (!can(me, "money.edit")) throw new ConvexError(noAccess("money.edit"));
     checkMonth(month);
     if (items.length > SOURCE_IDS.length) throw new ConvexError("Слишком много строк");
     const seen = new Set<SourceId>();
@@ -124,7 +126,7 @@ export interface PayoutView {
 export const payouts = query({
   args: { from: v.string() },
   handler: async (ctx, { from }): Promise<PayoutView> => {
-    await requireRole(ctx, OWNER);
+    await requirePerm(ctx, "money.payouts", STAFF);
     const start = Date.parse(from);
     if (Number.isNaN(start)) throw new ConvexError("Неверная дата");
     const fromDay = dayOf(new Date(start).toISOString());

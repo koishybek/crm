@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { inScope, requireRole, scopeOf, TEAM } from "./lib/access";
-import { normalizeLogin } from "./lib/login";
+import { can, inScope, requireRole, scopeOf, TEAM } from "./lib/access";
+import { normalizePhone } from "./lib/phone";
 import { loadCatalog } from "./catalog";
 import { phone as fmtPhone } from "../src/lib/format";
 
@@ -11,16 +11,17 @@ type Hit = { key: string; group: string; title: string; sub: string; to: string 
 export const global = query({
   args: { q: v.string() },
   handler: async (ctx, { q }): Promise<Hit[]> => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     const s = q.trim();
     if (s.length < 2) return [];
     const digits = s.replace(/\D/g, "");
     const out: Hit[] = [];
     const cat = await loadCatalog(ctx);
-    if (scope) {
-      // Руководитель направления клиентскую базу не видит — только номера своих заказов и заявок.
-    } else if (digits.length >= 10) {
-      const c = await ctx.db.query("clients").withIndex("by_phone", (x) => x.eq("phone", normalizeLogin(digits))).first();
+    if (!can(me, "clients.view")) {
+      // Без права на клиентскую базу (руководитель направления по умолчанию) — только номера своих заказов и заявок.
+    } else if (digits.length >= 8 && normalizePhone(s)) {
+      const c = await ctx.db.query("clients").withIndex("by_phone", (x) => x.eq("phone", normalizePhone(s)!)).first();
       if (c) out.push({ key: c._id, group: "Клиенты", title: c.name, sub: `${fmtPhone(c.phone)} · ${c.city}`, to: `/clients/${c._id}` });
     } else if (!/^\d+$/.test(s)) {
       for (const c of await ctx.db.query("clients").withSearchIndex("search_name", (x) => x.search("name", s)).take(5)) {
