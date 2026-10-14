@@ -79,6 +79,20 @@ wrangler в зависимостях проекта нет — `npx wrangler` (�
 
 Сгенерированные скриптом значения (`KEY=random`, `KEY=random32`) в консоль не печатаются — они дописываются в `.secrets.local` (в git не попадает).
 
+## Боевая база (уже поднята, пустая)
+
+| | Адрес |
+|---|---|
+| Сайт | https://homemax-app.koishybek-o.workers.dev |
+| Convex | `live` = `blissful-giraffe-614` (Европа, Ирландия) — отдельно от демо `fleet-weasel-433` |
+
+Заданы: ключи входа (`JWT_*`, `SITE_URL`), `APP_URL`, `INTEGRATIONS_KEY`, `FILES_SIGNING_KEY`, LLM и AI-сервис, свои ключи VAPID; создана строка компании. **Нет** `ALLOW_SEED` и демо-данных. Бот Telegram, WhatsApp, OLX, email, АТС и оплата — не подключены (бот пока привязан к демо: у бота один вебхук).
+Команды к ней — только с её ключом деплоя (`npx convex deployment token create … --deployment blissful-giraffe-614`), `npx convex deploy` без ключа по-прежнему выкатывает демо.
+
+1. Владелец: `CONVEX_DEPLOY_KEY='prod:blissful-giraffe-614|…' npx convex run seed:bootstrapOwner '{"name":"…","login":"…","password":"…"}'` (пароль от 12 символов).
+2. Выкладка: `CONVEX_DEPLOY_KEY=… npx convex deploy`, сборка с `VITE_CONVEX_URL=https://blissful-giraffe-614.eu-west-1.convex.cloud VITE_CONVEX_SITE_URL=https://blissful-giraffe-614.eu-west-1.convex.site` и `npx wrangler deploy --name homemax-app`.
+3. Перевод бота с демо: `CONVEX_DEPLOY_KEY=… node scripts/setup-telegram.mjs` (вебхук переедет на боевую базу).
+
 ## Боевой запуск у заказчика
 
 1. Отдельный деплоймент, где демо-данные никогда не заливались (или очистка: временно `ALLOW_SEED=1`, `CONVEX_DEPLOY_KEY='prod:…' npm run seed -- --wipe`, прервать после «Очищаю базу…», затем `npx convex env remove ALLOW_SEED --prod`).
