@@ -92,6 +92,7 @@ wrangler в зависимостях проекта нет — `npx wrangler` (�
 1. Владелец: `CONVEX_DEPLOY_KEY='prod:blissful-giraffe-614|…' npx convex run seed:bootstrapOwner '{"name":"…","login":"…","password":"…"}'` (пароль от 12 символов).
 2. Выкладка: `CONVEX_DEPLOY_KEY=… npx convex deploy`, сборка с `VITE_CONVEX_URL=https://blissful-giraffe-614.eu-west-1.convex.cloud VITE_CONVEX_SITE_URL=https://blissful-giraffe-614.eu-west-1.convex.site` и `npx wrangler deploy --name homemax-app`.
 3. Перевод бота с демо: `CONVEX_DEPLOY_KEY=… node scripts/setup-telegram.mjs` (вебхук переедет на боевую базу).
+4. Скрипты с ключом деплоя (`seed-convex.ts`, `restore.ts`) — с явным `CONVEX_URL=https://blissful-giraffe-614.eu-west-1.convex.cloud`: адрес с регионом из ключа не выводится.
 
 ## Боевой запуск у заказчика
 

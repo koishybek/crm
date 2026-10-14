@@ -52,7 +52,7 @@ if (profileOnly) {
 }
 
 const site = convexEnv(["get", "CONVEX_SITE_URL"]) || "";
-const deployment = /https:\/\/([a-z0-9-]+)\.convex\.site/.exec(site)?.[1];
+const deployment = /https:\/\/([a-z0-9-]+)(?:\.[a-z0-9-]+)?\.convex\.site/.exec(site)?.[1]; // и адрес с регионом: name.eu-west-1.convex.site
 const siteUrl = site.startsWith("https://") ? site : null;
 if (!siteUrl || !deployment) throw new Error("Не получилось узнать CONVEX_SITE_URL деплоймента");
 
