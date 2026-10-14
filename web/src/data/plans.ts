@@ -96,12 +96,12 @@ export interface TenantInfo {
   status: "active" | "suspended";
   /** Администратор платформы (PLATFORM_ADMINS) — экран «Платформа». */
   platformAdmin: boolean;
-  /** Только владельцу: лимиты тарифа и сколько уже занято, комиссия платформы, шаги «С чего начать» (null — скрыты). */
-  owner?: {
-    usage: Record<LimitKind, { used: number; cap: number | null }>;
-    platformFee: PlatformFee | null;
-    onboarding: { step: OnboardingStep; done: boolean }[] | null;
-  };
+}
+
+/** Карточка «Компания» (владельцу): лимиты тарифа и сколько уже занято, комиссия платформы. */
+export interface CompanyInfo {
+  usage: Record<LimitKind, { used: number; cap: number | null }>;
+  platformFee: PlatformFee | null;
 }
 
 /** Строка экрана «Платформа». */

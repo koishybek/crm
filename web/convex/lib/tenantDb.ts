@@ -18,7 +18,8 @@ import schema from "../schema";
 export const DEFAULT_TENANT = "t-komfort";
 
 /** Общие таблицы: вход, реестр компаний, счётчики лимитов (ключ лимита сам включает компанию, где нужно). */
-export const GLOBAL_TABLES: ReadonlySet<string> = new Set([...Object.keys(authTables), "tenants", "rateLimits"]);
+// authTables включает и users — но пользователи принадлежат компании (users.tenantId), их изолируем как всё остальное.
+export const GLOBAL_TABLES: ReadonlySet<string> = new Set([...Object.keys(authTables).filter((t) => t !== "users"), "tenants", "rateLimits"]);
 
 type Db = GenericDatabaseWriter<DataModel>;
 type Doc = Record<string, unknown> & { _id: string };

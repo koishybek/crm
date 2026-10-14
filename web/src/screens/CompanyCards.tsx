@@ -1,7 +1,9 @@
 // Компания (ТЗ §2.5, §23.7, §24.3–§24.5): карточка «Компания» в «Настройках» и «С чего начать» на «Главной» — только владельцу.
 import { Building2, Check, Circle, Pencil, Rocket } from "lucide-react";
 import { useState } from "react";
+import { useQuery } from "convex/react";
 import { Link } from "react-router";
+import { api } from "../../convex/_generated/api";
 import { Badge, Button, Card, IconButton, Input } from "../components/ui";
 import { dismissOnboarding, renameCompany, useTenant } from "../data/tenant";
 import { LIMIT_TEXT, MODULE_LABEL, MODULES, ONBOARDING_INFO, PLAN_INFO, planFor, type LimitKind } from "../data/plans";
@@ -16,10 +18,10 @@ const LIMIT_ROWS: { kind: LimitKind; label: string }[] = [
 
 export function CompanyCard() {
   const t = useTenant();
+  const owner = useQuery(api.tenants.company);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
-  if (!t?.owner) return null;
-  const owner = t.owner;
+  if (!t || !owner) return null;
 
   const save = async () => {
     if (report(await renameCompany(name), "Название сохранено")) setEditing(false);
@@ -95,8 +97,7 @@ export function CompanyCard() {
 
 /** «С чего начать» — пока владелец не прошёл шаги или не скрыл список. */
 export function OnboardingCard() {
-  const t = useTenant();
-  const steps = t?.owner?.onboarding;
+  const steps = useQuery(api.tenants.onboarding);
   if (!steps) return null;
   const left = steps.filter((s) => !s.done).length;
   return (

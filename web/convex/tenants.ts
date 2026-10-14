@@ -17,7 +17,7 @@ import { createLogin } from "./users";
 import schema, { tenantModule } from "./schema";
 import { CITIES } from "../src/data/catalog";
 import { passwordProblem } from "../src/data/passwordRules";
-import { MODULES, ONBOARDING_STEPS, PLAN_INFO, slugify, SLUG_RE, type LimitKind, type OnboardingStep, type TenantInfo } from "../src/data/plans";
+import { MODULES, ONBOARDING_STEPS, PLAN_INFO, slugify, SLUG_RE, type CompanyInfo, type LimitKind, type OnboardingStep, type TenantInfo } from "../src/data/plans";
 
 /** Компания вошедшего пользователя — для планировщика публичных action (lib/functions.ts). */
 export const _mine = internalQuery({
@@ -75,22 +75,42 @@ async function onboardingOf(ctx: QueryCtx): Promise<{ step: OnboardingStep; done
   return ONBOARDING_STEPS.map((step) => ({ step, done: done[step] }));
 }
 
+/** Своя компания для интерфейса: тариф, модули, статус — лёгкий запрос, его читает каждая страница. */
 export const current = query({
   args: {},
   handler: async (ctx): Promise<TenantInfo | null> => {
     const me = await currentUser(ctx);
     if (!me) return null;
-    const row = await tenantRow(ctx, me.tenantId);
+    return { ...(await tenantView(ctx, me.tenantId)), platformAdmin: isPlatformAdmin(me) };
+  },
+});
+
+/** Карточка «Компания» владельца: лимиты тарифа и сколько занято, комиссия платформы. */
+export const company = query({
+  args: {},
+  handler: async (ctx): Promise<CompanyInfo> => {
+    const me = await requireRole(ctx, OWNER);
     const view = await tenantView(ctx, me.tenantId);
-    const info: TenantInfo = { ...view, platformAdmin: isPlatformAdmin(me) };
-    if (me.role !== "owner") return info;
-    const usage = {} as NonNullable<TenantInfo["owner"]>["usage"];
+    const usage = {} as CompanyInfo["usage"];
     for (const kind of LIMITS) {
       const cap = PLAN_INFO[view.plan][kind];
       usage[kind] = { cap, used: await usageOf(ctx, kind, cap ?? USAGE_CAP) };
     }
-    const onboarding = row?.onboardingDoneAt || !row ? null : await onboardingOf(ctx);
-    return { ...info, owner: { usage, platformFee: row?.platformFee ?? null, onboarding: onboarding && onboarding.every((s) => s.done) ? null : onboarding } };
+    return { usage, platformFee: (await tenantRow(ctx, me.tenantId))?.platformFee ?? null };
+  },
+});
+
+/** «С чего начать» владельцу: шаги, пока он их не прошёл или не скрыл список; null — показывать нечего. */
+export const onboarding = query({
+  args: {},
+  handler: async (ctx): Promise<{ step: OnboardingStep; done: boolean }[] | null> => {
+    const me = await currentUser(ctx);
+    if (!me || me.role !== "owner") return null;
+    const row = await tenantRow(ctx, me.tenantId);
+    // Компания по умолчанию работала до SaaS — ей список не нужен; без строки — тоже она.
+    if (!row || row.onboardingDoneAt || row.slug === DEFAULT_TENANT) return null;
+    const steps = await onboardingOf(ctx);
+    return steps.every((x) => x.done) ? null : steps;
   },
 });
 

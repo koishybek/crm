@@ -9,7 +9,7 @@ import { internalAction, internalMutation, internalQuery, type MutationCtx } fro
 import { normalizeLogin } from "./lib/login";
 import { env } from "./env";
 import { createLogin } from "./users";
-import { bindTenant, DEFAULT_TENANT, unscopedDb } from "./lib/tenantDb";
+import { DEFAULT_TENANT, forTenant, unscopedDb } from "./lib/tenantDb";
 import { MODULES } from "../src/data/plans";
 import { passwordProblem } from "../src/data/passwordRules";
 
@@ -70,10 +70,10 @@ async function resetStats(ctx: MutationCtx, table: string): Promise<void> {
 /** Вставка пачки документов. Схема всё равно проверяет каждый документ. */
 export const ingest = internalMutation({
   args: { table: tableArg, rows: v.array(v.any()) },
-  handler: async (ctx, { table, rows }) => {
+  handler: async (base, { table, rows }) => {
     assertSeedAllowed();
     // Демо-данные — компании по умолчанию (t-komfort, «Home Max Service»).
-    bindTenant(ctx, DEFAULT_TENANT);
+    const ctx = forTenant(base, DEFAULT_TENANT);
     const ids: string[] = [];
     for (const r of rows) ids.push(await ctx.db.insert(table, r));
     await resetStats(ctx, table);
@@ -83,9 +83,9 @@ export const ingest = internalMutation({
 
 export const patchMany = internalMutation({
   args: { table: tableArg, patches: v.array(v.object({ id: v.string(), fields: v.any() })) },
-  handler: async (ctx, { table, patches }) => {
+  handler: async (base, { table, patches }) => {
     assertSeedAllowed();
-    bindTenant(ctx, DEFAULT_TENANT);
+    const ctx = forTenant(base, DEFAULT_TENANT);
     for (const p of patches) {
       const id = ctx.db.normalizeId(table, p.id);
       if (id) await ctx.db.patch(id, p.fields);

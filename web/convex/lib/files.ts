@@ -5,7 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./functions";
 import { env } from "../env";
 import { hmacSha256Hex, randomToken, safeEqual } from "./crypto";
-import { boundTenant, DEFAULT_TENANT } from "./tenantDb";
+import { boundTenant, DEFAULT_TENANT, tenantOf, tenantOfDoc, unscopedDb } from "./tenantDb";
 
 /** Удалить файл; уже удалённый — не ошибка (на один файл бывает несколько ссылок). true — файл был и удалён. */
 export async function dropFile(ctx: MutationCtx, id: Id<"_storage">): Promise<boolean> {
@@ -79,9 +79,13 @@ const uploadRow = (ctx: QueryCtx, storageId: Id<"_storage">) =>
  */
 export async function registerUpload(ctx: MutationCtx, userId: Id<"users">, storageId: Id<"_storage">): Promise<UploadCheck> {
   const meta = await ctx.db.system.get("_storage", storageId);
-  const row = await uploadRow(ctx, storageId);
+  // Хранилище файлов общее для всех компаний: загрузку ищем среди всех — файл другой компании присвоить нельзя.
+  const row = await unscopedDb(ctx)
+    .query("uploads")
+    .withIndex("by_storage", (q) => q.eq("storageId", storageId))
+    .first();
   // Повтор подтверждения (сеть оборвалась на ответе) — тот же ответ; чужая загрузка — «не найдена».
-  if (row) return row.userId === userId && meta ? checkUpload(meta) : { ok: false, error: NOT_FOUND };
+  if (row) return row.userId === userId && tenantOfDoc(row) === tenantOf(ctx) && meta ? checkUpload(meta) : { ok: false, error: NOT_FOUND };
   if (!meta || Date.now() - meta._creationTime > CLAIM_WINDOW_MS) return { ok: false, error: NOT_FOUND };
   const check = checkUpload(meta);
   if (!check.ok) {
