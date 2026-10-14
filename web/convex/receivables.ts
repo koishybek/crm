@@ -1,7 +1,7 @@
 // Долги клиентов (ТЗ п.5 «Dashboard: выручка, выплаты», п.13 «задолженность»): для плитки «Долги клиентов»
-// и списка должников на «Главной» владельца. Деньги компании — только владельцу (аудит M-2).
+// и списка должников на «Главной». Только с правом «Цена клиента и оплаты» (ТЗ п.5.12; аудит M-2).
 import { query } from "./_generated/server";
-import { OWNER, requireRole } from "./lib/access";
+import { inScope, requirePerm, scopeOf } from "./lib/access";
 import { debt } from "../src/data/logic";
 import type { Debtor, Receivables } from "../src/data/receivables";
 import type { OrderStatus } from "../src/data/types";
@@ -18,7 +18,8 @@ const MAX_PER_STATUS = 1000;
 export const list = query({
   args: {},
   handler: async (ctx): Promise<Receivables> => {
-    await requireRole(ctx, OWNER);
+    // Руководителю с правом на деньги — должники его направлений.
+    const scope = scopeOf(await requirePerm(ctx, "money.view"));
     const debtors: Debtor[] = [];
     let truncated = false;
     for (const status of DEBT_STATUSES) {
@@ -28,6 +29,7 @@ export const list = query({
         .take(MAX_PER_STATUS + 1);
       if (rows.length > MAX_PER_STATUS) truncated = true;
       for (const o of rows.slice(0, MAX_PER_STATUS)) {
+        if (!inScope(scope, o.category)) continue;
         const owed = debt(o);
         if (owed > 0) debtors.push({ orderId: o._id, number: o.number, clientId: o.clientId, clientName: o.clientName, debt: owed, since: o.doneAt ?? o.createdAt });
       }

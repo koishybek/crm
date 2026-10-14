@@ -1,3 +1,5 @@
+import { formatPhone, phoneMask as maskPhone } from "../data/phone";
+
 const nf = new Intl.NumberFormat("ru-RU");
 
 export const money = (n: number) => `${nf.format(Math.round(n))} ₸`;
@@ -14,30 +16,11 @@ export const pct = (part: number, total: number) => (total > 0 ? Math.round((par
 
 export const digits = (s: string) => s.replace(/\D/g, "");
 
-/** «77011234567» → «+7 701 123 45 67». */
-export const phone = (raw: string) => {
-  const d = digits(raw).replace(/^8/, "7");
-  if (d.length !== 11) return raw;
-  return `+${d[0]} ${d.slice(1, 4)} ${d.slice(4, 7)} ${d.slice(7, 9)} ${d.slice(9, 11)}`;
-};
+/** «77011234567» → «+7 701 123 45 67», «996555123456» → «+996 555 123 456» (src/data/phone.ts). */
+export const phone = (raw: string) => formatPhone(raw);
 
-/**
- * Маска ввода «+7 (___) ___-__-__». «+7» — постоянный префикс, человек набирает свои 10 цифр
- * («701 111 22 33»); вставка «8 701…», «+7 701…» и «7701…» тоже понимается.
- */
-export const phoneMask = (raw: string) => {
-  const d = digits(raw);
-  const local = (raw.trim().startsWith("+7") ? digits(raw.trim().slice(2)) : d.length === 11 && /^[78]/.test(d) ? d.slice(1) : d).slice(0, 10);
-  if (!local) return "";
-  const p = local;
-  let out = "+7";
-  if (p.length > 0) out += ` (${p.slice(0, 3)}`;
-  if (p.length >= 3) out += ")";
-  if (p.length > 3) out += ` ${p.slice(3, 6)}`;
-  if (p.length > 6) out += `-${p.slice(6, 8)}`;
-  if (p.length > 8) out += `-${p.slice(8, 10)}`;
-  return out;
-};
+/** Маска ввода телефона: Казахстан «+7 (___) ___-__-__» по умолчанию, с «+» и кодом — другая страна (src/data/phone.ts). */
+export const phoneMask = (raw: string) => maskPhone(raw);
 
 const MONTHS = ["янв.", "фев.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."];
 const MONTHS_SHORT = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];

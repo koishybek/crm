@@ -2,10 +2,11 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, mutation } from "./_generated/server";
-import { currentUser, requireRole, STAFF } from "./lib/access";
+import { currentUser, requirePerm, STAFF } from "./lib/access";
 import { audit } from "./lib/audit";
 import { insertClient } from "./clients";
 import { normalizeLogin } from "./lib/login";
+import { normalizePhone } from "./lib/phone";
 import { createLogin } from "./users";
 import { SOURCES, type Category } from "../src/data/catalog";
 import { normalizeCity } from "../src/data/cities";
@@ -21,14 +22,14 @@ const sourceOf = (s: string | undefined): SourceId => {
 export const clients = mutation({
   args: { rows: v.array(v.object({ name: v.string(), phone: v.string(), city: v.optional(v.string()), address: v.optional(v.string()), source: v.optional(v.string()), email: v.optional(v.string()) })) },
   handler: async (ctx, { rows }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view", STAFF);
     if (rows.length > 1000) throw new ConvexError("Не больше 1000 строк за раз");
     let added = 0;
     let duplicates = 0;
     const skipped: string[] = [];
     for (const r of rows) {
-      const phone = normalizeLogin(r.phone);
-      if (!r.name.trim() || !/^7\d{10}$/.test(phone)) {
+      const phone = normalizePhone(r.phone.slice(0, 40));
+      if (!r.name.trim() || !phone) {
         skipped.push(`${r.name || "без имени"}: неверный телефон`);
         continue;
       }

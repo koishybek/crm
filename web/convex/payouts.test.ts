@@ -190,8 +190,11 @@ describe("деньги в аналитике", () => {
       const d = await s.as(who).query(api.metrics.dashboard, { from: iso(s.now - 30 * DAY) });
       expect(d.orders).toHaveLength(1);
       const o = d.orders[0]!;
-      expect(o).toMatchObject({ clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
-      expect([o.refunds, o.acceptedPayout, o.payoutPaidAt]).toEqual([undefined, undefined, undefined]);
+      // Выплаты мастеру нет ни у кого из них; цену и возвраты оператор видит (ТЗ п.5.12), руководитель — нет.
+      expect(o).toMatchObject({ payoutValue: 0, payoutPaid: false });
+      expect([o.acceptedPayout, o.payoutPaidAt]).toEqual([undefined, undefined]);
+      if (who === s.ids.manager) expect([o.clientPrice, o.payments, o.refunds]).toEqual([0, [], undefined]);
+      else expect(o.refunds).toHaveLength(1);
     }
     const own = await s.as(s.ids.owner).query(api.metrics.dashboard, { from: iso(s.now - 30 * DAY) });
     expect(own.orders[0]!.refunds).toHaveLength(1);

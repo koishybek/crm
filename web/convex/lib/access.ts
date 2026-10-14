@@ -2,6 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
+import { can as hasPermission, PERMISSION_INFO, type Permission, type PermissionHolder } from "../../src/data/permissions";
 import type { Role } from "../../src/data/types";
 
 export type Me = Doc<"users"> & { role: Role };
@@ -45,3 +46,16 @@ export function assertScope(me: Me, category: string) {
 }
 export const OWNER: Role[] = ["owner"];
 export const EXECUTOR: Role[] = ["executor"];
+
+/** Право сотрудника поверх роли (ТЗ п.5.12) — та же функция, что в интерфейсе (src/data/permissions.ts). */
+export const can = (me: PermissionHolder | null | undefined, p: Permission): boolean => hasPermission(me, p);
+
+/** Роль из roles и право p — иначе понятный отказ: какого права не хватает и кто его выдаёт. */
+export async function requirePerm(ctx: QueryCtx, p: Permission, roles: Role[] = TEAM): Promise<Me> {
+  const me = await requireRole(ctx, roles);
+  if (!can(me, p)) throw new ConvexError(noAccess(p));
+  return me;
+}
+
+/** Текст отказа по праву. */
+export const noAccess = (p: Permission): string => `Нет доступа: «${PERMISSION_INFO[p].label}» — право выдаёт владелец`;

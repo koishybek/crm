@@ -7,7 +7,7 @@ import { ConvexError, v, type Infer } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { currentUser, requireRole, STAFF } from "./lib/access";
+import { can, currentUser, requirePerm } from "./lib/access";
 import { audit, type AuditActor } from "./lib/audit";
 import { isMeaningful, isPlaceholder, PLACEHOLDER } from "./lib/chat";
 import { notify, nowIso, TENANT } from "./lib/domain";
@@ -368,11 +368,11 @@ export async function linkConversation(
   return c._id;
 }
 
-/** Кому сообщать о новых сообщениях: назначенному сотруднику, иначе — владельцам и операторам. */
+/** Кому сообщать о новых сообщениях: назначенному сотруднику, иначе — владельцам и операторам с правом на сообщения. */
 async function inboxRecipients(ctx: QueryCtx, c: Doc<"conversations">): Promise<Id<"users">[]> {
   if (c.assigneeId) {
     const u = await ctx.db.get(c.assigneeId);
-    if (u && u.active !== false && (u.role === "owner" || u.role === "operator")) return [u._id];
+    if (u && u.active !== false && (u.role === "owner" || u.role === "operator") && can(u, "inbox.view")) return [u._id];
   }
   const ids: Id<"users">[] = [];
   for (const role of ["owner", "operator"] as const) {
@@ -380,7 +380,7 @@ async function inboxRecipients(ctx: QueryCtx, c: Doc<"conversations">): Promise<
       .query("users")
       .withIndex("by_role", (q) => q.eq("role", role))
       .collect()) {
-      if (u.active !== false) ids.push(u._id);
+      if (u.active !== false && can(u, "inbox.view")) ids.push(u._id);
     }
   }
   return ids;
@@ -541,7 +541,7 @@ const isChannel = (f: Infer<typeof inboxFilter>): f is Channel => f === "telegra
 export const list = query({
   args: { filter: inboxFilter, paginationOpts: paginationOptsValidator },
   handler: async (ctx, { filter, paginationOpts }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     let q = ctx.db
       .query("conversations")
       .withIndex("by_status_last", (x) => x.eq("status", filter === "closed" ? "closed" : "open"))
@@ -559,7 +559,7 @@ export const unreadCount = query({
   args: {},
   handler: async (ctx): Promise<number | null> => {
     const me = await currentUser(ctx);
-    if (!me || !STAFF.includes(me.role)) return null;
+    if (!me || !can(me, "inbox.view")) return null;
     // Непрочитанный диалог всегда открыт: новое сообщение открывает закрытый.
     const since = new Date(Date.now() - 60 * 86400_000).toISOString();
     const rows = await ctx.db
@@ -578,7 +578,7 @@ export const unreadCount = query({
 export const get = query({
   args: { id: v.string(), limit: v.optional(v.number()), t: v.optional(v.number()) },
   handler: async (ctx, { id: raw, limit }): Promise<ConversationDetail | null> => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "inbox.view");
     const id = ctx.db.normalizeId("conversations", raw);
     const c = id ? await ctx.db.get(id) : null;
     if (!id || !c) return null;
@@ -611,7 +611,7 @@ export const forLead = query({
   args: { leadId: v.id("leads") },
   handler: async (ctx, { leadId }): Promise<{ id: string; channel: Channel } | null> => {
     const me = await currentUser(ctx);
-    if (!me || !STAFF.includes(me.role)) return null;
+    if (!me || !can(me, "inbox.view")) return null;
     const c = await ctx.db
       .query("conversations")
       .withIndex("by_lead", (q) => q.eq("leadId", leadId))
@@ -632,7 +632,7 @@ const who = (c: Doc<"conversations">) => c.contactName || `клиент ${CHANNE
 export const markRead = mutation({
   args: { id: v.id("conversations") },
   handler: async (ctx, { id }): Promise<void> => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     if (!c.unread) return;
     await ctx.db.patch(id, { unread: 0 });
@@ -645,7 +645,7 @@ export const markRead = mutation({
 export const reply = mutation({
   args: { conversationId: v.id("conversations"), text: v.string() },
   handler: async (ctx, { conversationId, text }): Promise<{ messageId: Id<"conversationMessages"> }> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const body = text.replace(/\u0000/g, "").trim();
     if (!body) throw new ConvexError("Напишите сообщение");
     const c = await mustGet(ctx, conversationId);
@@ -669,7 +669,7 @@ export const reply = mutation({
 export const resend = mutation({
   args: { messageId: v.id("conversationMessages") },
   handler: async (ctx, { messageId }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const m = await ctx.db.get(messageId);
     if (!m || m.direction !== "out" || m.kind === "system" || m.status !== "failed") throw new ConvexError("Это сообщение нельзя отправить повторно");
     const c = await mustGet(ctx, m.conversationId);
@@ -684,7 +684,7 @@ export const resend = mutation({
 export const close = mutation({
   args: { id: v.id("conversations") },
   handler: async (ctx, { id }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     if (c.status === "closed") return;
     await ctx.db.patch(id, { status: "closed", unread: 0 });
@@ -695,7 +695,7 @@ export const close = mutation({
 export const reopen = mutation({
   args: { id: v.id("conversations") },
   handler: async (ctx, { id }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     if (c.status === "open") return;
     await ctx.db.patch(id, { status: "open" });
@@ -707,7 +707,7 @@ export const reopen = mutation({
 export const assign = mutation({
   args: { id: v.id("conversations"), userId: v.optional(v.id("users")) },
   handler: async (ctx, { id, userId }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     let name = "";
     if (userId) {
@@ -727,7 +727,7 @@ export const assign = mutation({
 export const linkClient = mutation({
   args: { id: v.id("conversations"), clientId: v.id("clients") },
   handler: async (ctx, { id, clientId }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     const client = await ctx.db.get(clientId);
     if (!client) throw new ConvexError("Клиент не найден");
@@ -740,7 +740,7 @@ export const linkClient = mutation({
 export const linkLead = mutation({
   args: { id: v.id("conversations"), leadId: v.id("leads") },
   handler: async (ctx, { id, leadId }): Promise<void> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "inbox.view");
     const c = await mustGet(ctx, id);
     const lead = await ctx.db.get(leadId);
     if (!lead) throw new ConvexError("Заявка не найдена");
@@ -849,8 +849,7 @@ export const _draftSource = internalQuery({
 export const draftFromConversation = action({
   args: { id: v.id("conversations") },
   handler: async (ctx, { id }): Promise<ConversationDraft> => {
-    const role = await ctx.runQuery(internal.users._viewerRole, {});
-    if (role !== "owner" && role !== "operator") throw new ConvexError("Нет доступа");
+    if (!(await ctx.runQuery(internal.permissions._viewerCan, { permission: "inbox.view" }))) throw new ConvexError("Нет доступа");
     const src = await ctx.runQuery(internal.inbox._draftSource, { id });
     if (!src) throw new ConvexError("Диалог не найден");
     const base: ConversationDraft = { channel: src.channel, phone: src.phone, name: src.name, text: src.text, draft: { description: src.text || undefined } };

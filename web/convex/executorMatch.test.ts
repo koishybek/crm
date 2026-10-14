@@ -314,7 +314,7 @@ describe("ставки исполнителя", () => {
   test("ручная правка выплаты в заказе важнее ставки мастера", async () => {
     const { ids, as, order } = await setup();
     await as(ids.owner).mutation(api.executorRates.set, { id: ids.anywhere.id, rates: { mode: "percent", percent: 70 } });
-    await as(ids.operator).mutation(api.orders.updateFinance, { id: ids.noDistrict, clientPrice: 30000, payoutMode: "fixed", payoutValue: 10000 });
+    await as(ids.owner).mutation(api.orders.updateFinance, { id: ids.noDistrict, clientPrice: 30000, payoutMode: "fixed", payoutValue: 10000 });
     expect((await order(ids.noDistrict)).payoutManual).toBe(true);
     await as(ids.anywhere.user).mutation(api.worker.take, { id: ids.noDistrict });
     expect(await order(ids.noDistrict)).toMatchObject({ payoutMode: "fixed", payoutValue: 10000, acceptedPayout: 10000 });

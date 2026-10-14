@@ -1,12 +1,12 @@
 import { ConvexError, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import { OWNER, requireRole, STAFF } from "./lib/access";
+import { inScope, OWNER, requirePerm, requireRole, scopeOf } from "./lib/access";
 import { audit, ChangeLog, listDiff, listDiffText, maskPhone, quote } from "./lib/audit";
 import { nowIso, TENANT } from "./lib/domain";
-import { toClient, toInteraction, toLead, toNote, toOrder } from "./lib/dto";
+import { orderFor, toClient, toInteraction, toLead, toNote } from "./lib/dto";
 import { cleanCity, cleanText } from "./lib/limits";
-import { normalizeLogin } from "./lib/login";
+import { clientPhone, normalizePhone } from "./lib/phone";
 import { assertCanErase, eraseClient } from "./lib/privacy";
 import { source } from "./schema";
 import { SOURCES } from "../src/data/catalog";
@@ -23,12 +23,13 @@ const KIND: Record<Doc<"clients">["kind"], string> = { person: "частное �
 export const list = query({
   args: { q: v.optional(v.string()) },
   handler: async (ctx, { q }) => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "clients.view");
     const s = (q ?? "").trim();
     if (s) {
-      const digits = s.replace(/\D/g, "");
-      if (digits.length >= 10) {
-        const phone = normalizeLogin(digits);
+      // Похоже на номер (цифры, «+», скобки) — точный поиск по телефону: казахстанский или с кодом другой страны.
+      if (/^[\d\s+()\-.]+$/.test(s) && s.replace(/\D/g, "").length >= 8) {
+        const phone = normalizePhone(s);
+        if (!phone) return [];
         const hit = await ctx.db
           .query("clients")
           .withIndex("by_phone", (x) => x.eq("phone", phone))
@@ -49,16 +50,17 @@ export const list = query({
 export const detail = query({
   args: { id: v.id("clients") },
   handler: async (ctx, { id }) => {
-    await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(id);
     if (!c) return null;
+    const scope = scopeOf(me);
     const [orders, leads, interactions, notes] = await Promise.all([
       ctx.db.query("orders").withIndex("by_client", (q) => q.eq("clientId", id)).order("desc").take(200),
       ctx.db.query("leads").withIndex("by_client", (q) => q.eq("clientId", id)).order("desc").take(200),
       ctx.db.query("interactions").withIndex("by_client", (q) => q.eq("clientId", id)).order("desc").take(100),
       ctx.db.query("clientNotes").withIndex("by_client", (q) => q.eq("clientId", id)).order("desc").take(50),
     ]);
-    return { client: toClient(c), orders: orders.map(toOrder), leads: leads.map(toLead), interactions: interactions.map(toInteraction), notes: notes.map(toNote) };
+    return { client: toClient(c), orders: orders.filter((o) => inScope(scope, o.category)).map(orderFor(me)), leads: leads.map(toLead), interactions: interactions.map(toInteraction), notes: notes.map(toNote) };
   },
 });
 
@@ -66,7 +68,7 @@ export const detail = query({
 export const get = query({
   args: { id: v.id("clients") },
   handler: async (ctx, { id }) => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(id);
     return c ? toClient(c) : null;
   },
@@ -76,9 +78,9 @@ export const get = query({
 export const byPhone = query({
   args: { phone: v.string() },
   handler: async (ctx, { phone }) => {
-    await requireRole(ctx, STAFF);
-    const p = normalizeLogin(phone);
-    if (p.length !== 11) return null;
+    await requirePerm(ctx, "clients.view");
+    const p = normalizePhone(phone.slice(0, 40));
+    if (!p) return null;
     const c = await ctx.db
       .query("clients")
       .withIndex("by_phone", (q) => q.eq("phone", p))
@@ -99,11 +101,8 @@ const clientFields = {
   notes: v.optional(v.string()),
 };
 
-export function cleanPhone(raw: string): string {
-  const p = normalizeLogin(raw);
-  if (!/^7\d{10}$/.test(p)) throw new ConvexError("Укажите телефон полностью");
-  return p;
-}
+/** Телефон клиента: казахстанский или с кодом другой страны (lib/phone.ts), иначе понятная ошибка. */
+export const cleanPhone = clientPhone;
 
 /** Обезличенная карточка не меняется: иначе в «удалённого» клиента снова попали бы чьи-то данные. */
 export function assertNotErased(c: Pick<Doc<"clients">, "anonymizedAt">): void {
@@ -162,7 +161,7 @@ export async function insertClient(ctx: MutationCtx, a: { name: string; kind?: D
 export const create = mutation({
   args: clientFields,
   handler: async (ctx, a) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
     const name = cleanText(a.name, MAX.name, "Имя");
     if (!name) throw new ConvexError("Укажите имя или название компании");
     const city = cleanCity(a.city);
@@ -189,7 +188,7 @@ export const create = mutation({
 export const update = mutation({
   args: { id: v.id("clients"), ...clientFields, tags: v.optional(v.array(v.string())) },
   handler: async (ctx, { id, ...a }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Клиент не найден");
     assertNotErased(c);
@@ -244,7 +243,7 @@ export const update = mutation({
 export const setTags = mutation({
   args: { id: v.id("clients"), tags: v.array(v.string()) },
   handler: async (ctx, { id, tags }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Клиент не найден");
     assertNotErased(c);
@@ -259,7 +258,7 @@ export const setTags = mutation({
 export const addNote = mutation({
   args: { clientId: v.id("clients"), text: v.string() },
   handler: async (ctx, { clientId, text }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "clients.view");
     const c = await ctx.db.get(clientId);
     if (!c) throw new ConvexError("Клиент не найден");
     assertNotErased(c);
@@ -282,7 +281,7 @@ export const anonymize = mutation({
     const c = await ctx.db.get(clientId);
     if (!c) throw new ConvexError("Клиент не найден");
     if (c.anonymizedAt) throw new ConvexError("Данные этого клиента уже удалены");
-    if (normalizeLogin(confirmPhone.slice(0, 40)) !== c.phone) throw new ConvexError("Телефон не совпадает — данные не удалены");
+    if (normalizePhone(confirmPhone.slice(0, 40)) !== c.phone) throw new ConvexError("Телефон не совпадает — данные не удалены");
     const [leads, orders] = await Promise.all([
       ctx.db.query("leads").withIndex("by_client", (q) => q.eq("clientId", clientId)).collect(),
       ctx.db.query("orders").withIndex("by_client", (q) => q.eq("clientId", clientId)).collect(),

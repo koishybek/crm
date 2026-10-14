@@ -42,6 +42,7 @@ import { assignConversation, channelLabel, closeConversation, linkConversationCl
 import { report, type Result } from "../data/store";
 import type { Channel, Conversation, ConversationDetail, ConversationMessage, InboxFilter, MessageStatus } from "../data/types";
 import { cn, dayDiff, hm, phone, shortName, whenShort } from "../lib/format";
+import { isPhone } from "../data/phone";
 
 const FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "all", label: "Все" },
@@ -292,7 +293,7 @@ function ChatHeader({ detail, onBack }: { detail: ConversationDetail; onBack: ()
     report(await p, okText);
     setBusy(false);
   };
-  const createLead = () => ui.openLead({ conversationId: c.id, phone: c.contactPhone && /^7\d{10}$/.test(c.contactPhone) ? c.contactPhone : undefined, clientId: detail.client?.id });
+  const createLead = () => ui.openLead({ conversationId: c.id, phone: c.contactPhone && isPhone(c.contactPhone) ? c.contactPhone : undefined, clientId: detail.client?.id });
   const openLead = () => detail.lead && (detail.lead.orderId ? nav(`/orders/${detail.lead.orderId}`) : ui.openLead({ leadId: detail.lead.id }));
   const toggle = () => (c.status === "open" ? act(closeConversation(c.id), "Диалог закрыт") : act(reopenConversation(c.id), "Диалог снова открыт"));
 

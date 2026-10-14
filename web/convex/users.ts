@@ -6,7 +6,7 @@ import { action, internalAction, internalMutation, internalQuery, mutation, quer
 import { currentUser, OWNER, requireRole, scopeOf, signedInUser, TEAM } from "./lib/access";
 import { audit, listDiff, listDiffText } from "./lib/audit";
 import { notify, TENANT } from "./lib/domain";
-import { toExecutor, toUser } from "./lib/dto";
+import { executorFor, toExecutor, toUser } from "./lib/dto";
 import { cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
 import { loginEmail } from "./lib/mail";
@@ -49,9 +49,9 @@ export const team = query({
     if (scope) {
       const mine = executors.filter((e) => e.categories.some((c) => scope.includes(c)));
       const ids = new Set<string>(mine.map((e) => e._id));
-      return { users: users.filter((u) => u.role !== "executor" || (!!u.executorId && ids.has(u.executorId))).map(nameOnly), executors: mine.map(toExecutor) };
+      return { users: users.filter((u) => u.role !== "executor" || (!!u.executorId && ids.has(u.executorId))).map(nameOnly), executors: mine.map(executorFor(me)) };
     }
-    return { users: users.map(toUser), executors: executors.map(toExecutor) };
+    return { users: users.map(toUser), executors: executors.map(executorFor(me)) };
   },
 });
 
@@ -321,7 +321,8 @@ export const updateAccess = mutation({
     const roleChanged = next !== u.role;
     if (!roleChanged && !cats.added.length && !cats.removed.length) return;
 
-    await ctx.db.patch(userId, { role: next, categories: next === "manager" ? keys : undefined });
+    // Новая роль — права по её умолчаниям: заданные для прежней роли к новой не относятся (ТЗ п.5.12).
+    await ctx.db.patch(userId, { role: next, categories: next === "manager" ? keys : undefined, ...(roleChanged ? { permissions: undefined } : {}) });
     const parts = roleChanged ? [`${ROLE_LABEL[u.role]} → ${ROLE_LABEL[next]}`] : [];
     if (next === "manager") parts.push(`направления: ${roleChanged ? keys.map(label).join(", ") : listDiffText(cats, label)}`);
     await audit(ctx, me, "user.role", `${shortName(u.name || u.email || "без имени")}: ${parts.join("; ")}`, {

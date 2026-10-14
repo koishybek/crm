@@ -2,7 +2,8 @@ import { Briefcase, ChartNoAxesColumn, Download, Wallet, Banknote } from "lucide
 import { useMemo, useState } from "react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { SOURCES, categoryById, serviceById } from "../data/catalog";
-import { useNow } from "../data/hooks";
+import { useMe, useNow } from "../data/hooks";
+import { canSeeCompanyMoney } from "../data/permissions";
 import { PERIODS, dailySeries, doneIn, funnel, rangeOf, sums, topExecutors, trend, type PeriodId } from "../data/metrics";
 import { operatorRows, sourceRows, spendWithin } from "../data/analytics";
 import { useQuery } from "convex/react";
@@ -50,6 +51,8 @@ export default function Analytics() {
   const team = useTeam();
   const [period, setPeriod] = useState<PeriodId>("30d");
   const [spendOpen, setSpendOpen] = useState(false);
+  // Суммы — только с правом на выплаты и маржу (ТЗ п.5.12): без него сервер отдаёт заказы без денег.
+  const fullMoney = canSeeCompanyMoney(useMe());
   // С сервера — срез от начала прошлого периода (для сравнения), формулы — общие с «Главной».
   const slice = useQuery(api.metrics.analytics, { from: new Date(rangeOf(period, now).prev.from).toISOString() });
   const db = useMemo(() => ({ leads: slice?.leads ?? [], orders: slice?.orders ?? [], executors: team.executors, users: team.users }), [slice, team]);
@@ -117,24 +120,36 @@ export default function Analytics() {
         subtitle="Ключевые показатели и динамика по вашему бизнесу"
         actions={
           <>
-            <Button variant="secondary" icon={Download} className="h-[46px] bg-white" onClick={download}>
-              Экспорт CSV
-            </Button>
+            {fullMoney && (
+              <Button variant="secondary" icon={Download} className="h-[46px] bg-white" onClick={download}>
+                Экспорт CSV
+              </Button>
+            )}
             <ExportButton kinds={["payments", "orders", "payouts", "leads", "calls", "executors", "audit"]} label="Выгрузки за период" />
             <PeriodSelect value={period} onChange={setPeriod} options={["7d", "30d", "90d"]} />
           </>
         }
       />
 
+      {!fullMoney && (
+        <p className="mb-4 rounded-[12px] bg-[#f8f6f1] px-4 py-3 text-[13.5px] text-ink-2">
+          Суммы — выручка, выплаты мастерам, маржа и расходы на рекламу — видны с правами «Цена клиента и оплаты» и «Выплаты мастерам и маржа». Их выдаёт владелец.
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard icon={Briefcase} tone="green" label="Выручка" value={money(d.s.revenue)} trend={d.trends.revenue} />
-        <KpiCard icon={Wallet} tone="red" label="Начислено мастерам" value={money(d.s.payouts)} trend={{ ...d.trends.payouts, good: true }} />
-        <KpiCard icon={ChartNoAxesColumn} tone="violet" label="Маржа" value={money(d.s.margin)} trend={d.trends.margin} />
+        {fullMoney && (
+          <>
+            <KpiCard icon={Briefcase} tone="green" label="Выручка" value={money(d.s.revenue)} trend={d.trends.revenue} />
+            <KpiCard icon={Wallet} tone="red" label="Начислено мастерам" value={money(d.s.payouts)} trend={{ ...d.trends.payouts, good: true }} />
+            <KpiCard icon={ChartNoAxesColumn} tone="violet" label="Маржа" value={money(d.s.margin)} trend={d.trends.margin} />
+          </>
+        )}
         <KpiCard icon={Banknote} tone="yellow" label="Выполнено заказов" value={num(d.s.count)} trend={d.trends.count} />
       </div>
-      <CashFlowRow orders={db.orders} payouts={slice.payouts} cur={d.cur} prev={d.prev} caption={d.caption} />
+      {fullMoney && <CashFlowRow orders={db.orders} payouts={slice.payouts} cur={d.cur} prev={d.prev} caption={d.caption} />}
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr_0.85fr]">
+        {fullMoney && (
         <Card title="Выручка по источникам">
           <div className="h-[260px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -153,6 +168,7 @@ export default function Analytics() {
             </ResponsiveContainer>
           </div>
         </Card>
+        )}
 
         <Card title="Динамика заказов">
           <div className="h-[260px]">
@@ -196,6 +212,7 @@ export default function Analytics() {
         </Card>
       </div>
 
+      {fullMoney && (
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
         <Card title="Топ исполнителей" bodyClass="px-3 pb-3 sm:px-4">
           <div className="scroll-x">
@@ -254,14 +271,17 @@ export default function Analytics() {
           </div>
         </Card>
       </div>
+      )}
 
-      <div className="mt-4">
-        <SourceCostsCard rows={d.sources} onSpend={() => setSpendOpen(true)} />
-      </div>
+      {fullMoney && (
+        <div className="mt-4">
+          <SourceCostsCard rows={d.sources} onSpend={() => setSpendOpen(true)} />
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.35fr_1fr]">
         <OperatorsCard rows={d.ops.rows} auto={d.ops.auto} users={team.users} />
-        <PayoutsCard from={d.cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} />
+        {fullMoney && <PayoutsCard from={d.cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} />}
       </div>
 
       {spendOpen && <AdSpendModal onClose={() => setSpendOpen(false)} />}

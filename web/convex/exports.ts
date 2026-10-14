@@ -1,11 +1,11 @@
-// Выгрузки CSV владельца (ТЗ п.26.9 «Экспорт CSV/Excel»): заявки, заказы, звонки, исполнители, оплаты, выплаты и журнал
+// Выгрузки CSV (владелец и сотрудники с правом «Выгрузка в Excel») (ТЗ п.26.9 «Экспорт CSV/Excel»): заявки, заказы, звонки, исполнители, оплаты, выплаты и журнал
 // за выбранный период. Файл собирается на сервере постранично (не только то, что загружено в браузер), ячейки защищены
 // от формул (src/lib/csv.ts), кодировка — UTF-8 с BOM. Готовый файл отдаётся только по подписанной ссылке на 15 минут,
 // хранится сутки и удаляется уборкой; каждая выгрузка — в журнале (без персональных данных в деталях).
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
-import { OWNER, requireRole } from "./lib/access";
+import { requireRole, STAFF, type Me } from "./lib/access";
 import { almatyStamp, audit } from "./lib/audit";
 import { nowIso } from "./lib/domain";
 import { exportPage, EXPORT_HEADERS, executorStatsPage, type AuditExportFilters, type Cell, type ExecutorStat, type ExportPage, type ExportRange, type ExportRow } from "./lib/exportRows";
@@ -14,6 +14,7 @@ import { hitLimit } from "./lib/rateLimit";
 import { auditEntity } from "./schema";
 import { AUDIT_QUERY_MAX } from "../src/data/audit";
 import { EXPORT_KIND, EXPORT_KINDS, EXPORT_MAX_ROWS, EXPORT_TTL_MS, exportFileName, type ExportKind } from "../src/data/exports";
+import { exportAllowed, exportColumns } from "../src/data/exportAccess";
 import { toCsv } from "../src/lib/csv";
 import { num, plural } from "../src/lib/format";
 
@@ -31,11 +32,21 @@ export interface ExportResult {
   truncated: boolean;
 }
 
-/** Проверка до сборки файла: только владелец, период — даты по порядку, не чаще EXPORTS_PER_HOUR в час. */
+/** Выгрузка — только с правом на неё и на сами данные (src/data/exportAccess.ts). */
+async function exporter(ctx: Parameters<typeof requireRole>[0], kind: ExportKind): Promise<Me> {
+  const me = await requireRole(ctx, STAFF);
+  if (!exportAllowed(me, kind)) throw new ConvexError(`Нет доступа к выгрузке «${EXPORT_KIND[kind].label}» — права выдаёт владелец`);
+  return me;
+}
+
+/**
+ * Проверка до сборки файла: права, период — даты по порядку, не чаще EXPORTS_PER_HOUR в час. columns — какие колонки
+ * пользователь видит (деньги — по правам).
+ */
 export const _start = internalMutation({
-  args: { from: v.string(), to: v.string() },
-  handler: async (ctx, a): Promise<ExportRange> => {
-    const me = await requireRole(ctx, OWNER);
+  args: { kind: exportKind, from: v.string(), to: v.string() },
+  handler: async (ctx, a): Promise<{ range: ExportRange; columns: number[] }> => {
+    const me = await exporter(ctx, a.kind);
     const from = Date.parse(a.from);
     const to = Date.parse(a.to);
     if (Number.isNaN(from) || Number.isNaN(to)) throw new ConvexError("Неверная дата периода");
@@ -43,7 +54,7 @@ export const _start = internalMutation({
     if (!(await hitLimit(ctx, `export:${me._id}`, EXPORTS_PER_HOUR, 3600_000))) throw new ConvexError("Слишком много выгрузок подряд — попробуйте через час");
     // Ссылку на готовый файл подписываем — ключ подписи должен быть (без FILES_SIGNING_KEY он создаётся один раз).
     await ensureSigningKey(ctx);
-    return { from: new Date(from).toISOString(), to: new Date(to).toISOString() };
+    return { range: { from: new Date(from).toISOString(), to: new Date(to).toISOString() }, columns: exportColumns(me, a.kind, EXPORT_HEADERS[a.kind]) };
   },
 });
 
@@ -63,7 +74,7 @@ export const _stats = internalQuery({
 export const _saved = internalMutation({
   args: { kind: exportKind, from: v.string(), to: v.string(), rows: v.number(), size: v.number(), fileId: v.id("_storage"), truncated: v.boolean(), filtered: v.boolean() },
   handler: async (ctx, a): Promise<{ url: string; name: string }> => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await exporter(ctx, a.kind);
     const now = Date.now();
     const id = await ctx.db.insert("exports", { kind: a.kind, from: a.from, to: a.to, rows: a.rows, size: a.size, fileId: a.fileId, by: me._id, at: nowIso(), expiresAt: new Date(now + EXPORT_TTL_MS).toISOString() });
     const name = exportFileName(a.kind, a);
@@ -125,7 +136,7 @@ async function executorStats(ctx: ActionCtx, range: ExportRange): Promise<Map<st
 export const create = action({
   args: { kind: exportKind, from: v.string(), to: v.string(), ...auditArgs },
   handler: async (ctx, { kind, from, to, ...auditFilters }): Promise<ExportResult> => {
-    const range = await ctx.runMutation(internal.exports._start, { from, to });
+    const { range, columns } = await ctx.runMutation(internal.exports._start, { kind, from, to });
     const filters: AuditExportFilters = kind === "audit" ? { ...auditFilters, q: auditFilters.q?.trim().slice(0, AUDIT_QUERY_MAX) || undefined } : {};
     const { rows, truncated } = await collect(ctx, kind, range, filters);
     let cells: Cell[][] = rows.map((r) => r.cells);
@@ -136,7 +147,8 @@ export const create = action({
         return [...r.cells, s?.done ?? 0, s?.accrued ?? 0, s?.paid ?? 0];
       });
     }
-    const blob = new Blob([toCsv([EXPORT_HEADERS[kind], ...cells])], { type: "text/csv;charset=utf-8" });
+    const pick = <T>(row: readonly T[]): T[] => columns.map((i) => row[i]!);
+    const blob = new Blob([toCsv([pick(EXPORT_HEADERS[kind]), ...cells.map(pick)])], { type: "text/csv;charset=utf-8" });
     const fileId = await ctx.storage.store(blob);
     try {
       const filtered = kind === "audit" && Object.values(filters).some((x) => x !== undefined);

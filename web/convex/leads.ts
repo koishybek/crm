@@ -5,7 +5,7 @@ import { assertScope, inScope, requireRole, scopeOf, TEAM, type Me } from "./lib
 import { almatyStamp, audit, ChangeLog, quote } from "./lib/audit";
 import { assertNotErased, cleanPhone, insertClient } from "./clients";
 import { log, nextNumber, notify, nowIso, refreshClient, staffIds, TENANT, userActor } from "./lib/domain";
-import { toLead, toOrder } from "./lib/dto";
+import { orderFor, toLead } from "./lib/dto";
 import { districtFor } from "./lib/districts";
 import { cleanCity, cleanMoney, cleanText } from "./lib/limits";
 import { loadCatalog } from "./catalog";
@@ -42,7 +42,8 @@ function touch(l: Doc<"leads">, me: Me, claim: boolean): Partial<Doc<"leads">> {
 export const list = query({
   args: { from: v.optional(v.string()) },
   handler: async (ctx, { from }) => {
-    const visible = await scoped(ctx, await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const visible = await scoped(ctx, me);
     const all = await ctx.db
       .query("leads")
       .withIndex("by_created", (q) => (from ? q.gte("createdAt", from) : q))
@@ -50,7 +51,7 @@ export const list = query({
       .take(CAP);
     const leads = all.filter((l) => visible(l.serviceId));
     const orders = await Promise.all(leads.filter((l) => l.orderId).map((l) => ctx.db.get(l.orderId!)));
-    return { leads: leads.map(toLead), orders: orders.filter((o) => o !== null).map(toOrder), capped: all.length === CAP };
+    return { leads: leads.map(toLead), orders: orders.filter((o) => o !== null).map(orderFor(me)), capped: all.length === CAP };
   },
 });
 
@@ -67,11 +68,12 @@ export const openCounts = query({
 export const get = query({
   args: { id: v.id("leads") },
   handler: async (ctx, { id }) => {
-    const visible = await scoped(ctx, await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const visible = await scoped(ctx, me);
     const l = await ctx.db.get(id);
     if (!l || !visible(l.serviceId)) return null;
     const order = l.orderId ? await ctx.db.get(l.orderId) : null;
-    return { lead: toLead(l), order: order ? toOrder(order) : null };
+    return { lead: toLead(l), order: order ? orderFor(me)(order) : null };
   },
 });
 

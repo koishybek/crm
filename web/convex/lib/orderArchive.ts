@@ -6,8 +6,9 @@ import { ConvexError, v, type Infer } from "convex/values";
 import type { DataModel, Doc, Id } from "../_generated/dataModel";
 import type { QueryCtx } from "../_generated/server";
 import { scopeOf, type Me } from "./access";
-import { orderWithoutMoney, toOrder } from "./dto";
+import { orderFor } from "./dto";
 import { normalizeLogin } from "./login";
+import { normalizePhone } from "./phone";
 import { orderStatus, source } from "../schema";
 import type { Order, OrderStatus } from "../../src/data/types";
 
@@ -47,7 +48,7 @@ export function parseOrderQuery(raw: string | undefined): Text | null {
   const compact = s.replace(/^№\s*/, "");
   if (/^\d{1,9}$/.test(compact)) return { kind: "number", number: Number(compact) };
   const digits = s.replace(/\D/g, "");
-  if (digits.length >= 10 && /^[\d\s+()-]+$/.test(s)) return { kind: "phone", phone: normalizeLogin(digits) };
+  if (digits.length >= 8 && /^[\d\s+()-]+$/.test(s)) return { kind: "phone", phone: normalizePhone(s) ?? normalizeLogin(digits) };
   return { kind: "name", text: s };
 }
 
@@ -127,7 +128,7 @@ export async function archivePage(ctx: QueryCtx, me: Me, f: ArchiveFilters, opts
   const statuses = f.statuses?.length ? [...new Set(f.statuses)] : undefined;
   const period = cleanPeriod(f.period);
   const base: Omit<Conditions, "period"> = { categories, statuses, executorId: f.executorId, source: f.source };
-  const dto = me.role === "owner" ? toOrder : (o: Doc<"orders">) => orderWithoutMoney(toOrder(o));
+  const dto = orderFor(me);
   const text = parseOrderQuery(f.q);
 
   if (text?.kind === "number") {

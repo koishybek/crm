@@ -300,7 +300,9 @@ describe("деньги компании — только владельцу", ()
       await expect(who.query(api.analytics.adSpendMonth, { month: monthOf(Date.now()) })).rejects.toThrow("Нет доступа");
       const d = await who.query(api.metrics.dashboard, { from });
       expect(d.orders.length).toBeGreaterThan(0);
-      for (const o of d.orders) expect(o).toMatchObject({ clientPrice: 0, payoutValue: 0, payments: [], payoutPaid: false });
+      // Оператор по умолчанию видит цену и оплаты, но не выплату мастеру; руководитель — без денег вообще (ТЗ п.5.12).
+      const money = user === ids.operator ? { clientPrice: 20000 } : { clientPrice: 0, payments: [] };
+      for (const o of d.orders) expect(o).toMatchObject({ ...money, payoutValue: 0, payoutPaid: false });
       expect(d.leads).toHaveLength(0);
     }
     // Руководитель видит только своё направление.

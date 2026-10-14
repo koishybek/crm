@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { serviceById } from "../data/catalog";
 import { useMe, useNow, useTeam, useUi } from "../data/hooks";
+import { can, canSeeCompanyMoney } from "../data/permissions";
 import { EXEC_STATE, executorState, isActive, isDueSoon, isOverdue, leadBadge, orderBadge } from "../data/logic";
 import { PERIODS, funnel, leadsIn, ordersCreatedIn, rangeOf, sums, doneIn, trend, type PeriodId } from "../data/metrics";
 import { useQuery } from "convex/react";
@@ -47,7 +48,9 @@ export default function Dashboard() {
   const fromMs = Math.min(rangeOf(period, now).prev.from, rangeOf(funnelPeriod, now).cur.from);
   const data = useQuery(api.metrics.dashboard, { from: new Date(fromMs).toISOString() });
   const db = useMemo(() => ({ leads: data?.leads ?? [], orders: data?.orders ?? [], executors: team.executors, users: team.users }), [data, team]);
-  const isOwner = me.role === "owner";
+  // Денежные плитки — по правам (ТЗ п.5.12): выручка и маржа, выплаты — «Выплаты мастерам и маржа», долги — «Цена клиента и оплаты».
+  const seesPayouts = canSeeCompanyMoney(me);
+  const seesMoney = can(me, "money.view");
 
   const k = useMemo(() => {
     const { cur, prev } = rangeOf(period, now);
@@ -57,7 +60,7 @@ export default function Dashboard() {
     const active = db.orders.filter(isActive);
     const created = ordersCreatedIn(db, cur).length;
     const overdue = db.orders.filter((o) => isOverdue(o, now));
-    // Деньги — только у владельца: остальным сервер отдаёт заказы без сумм.
+    // Деньги — по правам: без них сервер отдаёт заказы без сумм (convex/lib/dto.ts moneyFor).
     const done = sums(doneIn(db, cur));
     const donePrev = sums(doneIn(db, prev));
     return {
@@ -108,7 +111,7 @@ export default function Dashboard() {
         />
         <KpiCard deco icon={Hourglass} tone="amber" label="Ждут исполнителя" value={num(k.waiting)} caption="в ленте исполнителей" onClick={() => nav("/orders")} />
       </div>
-      {isOwner && <OwnerMoneyKpis from={rangeOf(period, now).cur.from} revenue={k.revenue} margin={k.margin} />}
+      {seesPayouts && <OwnerMoneyKpis from={rangeOf(period, now).cur.from} revenue={k.revenue} margin={k.margin} />}
 
       <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1fr]">
         <Card icon={FileText} title="Последние заявки" action={<TextLink to="/leads">Все заявки</TextLink>} bodyClass="px-3 pb-3 sm:px-4">
@@ -243,8 +246,8 @@ export default function Dashboard() {
           </div>
         </Card>
 
-        {isOwner && <PayoutsCard from={rangeOf(period, now).cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
-        {isOwner && <DebtorsCard className="xl:col-span-2" />}
+        {seesPayouts && <PayoutsCard from={rangeOf(period, now).cur.from} period={`за ${PERIODS.find((p) => p.id === period)!.label.toLowerCase()}`} className="xl:col-span-2" />}
+        {seesMoney && <DebtorsCard className="xl:col-span-2" />}
       </div>
     </>
   );

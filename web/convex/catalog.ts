@@ -4,7 +4,7 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { currentUser, OWNER, requireRole, type Me } from "./lib/access";
+import { can, currentUser, requirePerm, type Me } from "./lib/access";
 import { audit, ChangeLog, listDiffText, quote } from "./lib/audit";
 import { withDefaultPrices } from "./lib/defaultPrices";
 import { loadDistricts } from "./lib/districts";
@@ -58,7 +58,8 @@ const toInfo = ({ price: _p, payoutPct: _q, ...info }: Service): ServiceInfo => 
 
 /**
  * Справочник для интерфейса. Мастеру — без цен и доли исполнителя (аудит H-2, E14): по доле и своей выплате
- * он вычислил бы цену клиента и маржу. Ему хватает подписей, значков, направлений и навыков.
+ * он вычислил бы цену клиента и маржу. Ему хватает подписей, значков, направлений и навыков. Сотруднику — по правам
+ * (ТЗ п.5.12): цены услуг — с правом на деньги, доля мастера — с правом на выплаты.
  */
 export const list = query({
   args: {},
@@ -66,7 +67,8 @@ export const list = query({
     const me = await currentUser(ctx);
     if (!me) return null;
     const c = await loadCatalog(ctx);
-    return { categories: c.categories, services: me.role === "executor" ? c.services.map(toInfo) : c.services };
+    const services = can(me, "money.payouts") ? c.services : can(me, "money.view") ? c.services.map((s) => ({ ...toInfo(s), price: s.price })) : c.services.map(toInfo);
+    return { categories: c.categories, services };
   },
 });
 
@@ -113,7 +115,7 @@ const key = (p: string) => `${p}-${Date.now().toString(36)}${Math.random().toStr
 export const saveCategory = mutation({
   args: { id: v.optional(v.string()), label: v.string(), tone: v.string(), active: v.boolean(), skills: v.optional(v.array(v.string())) },
   handler: async (ctx, a) => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "catalog.edit");
     const label = a.label.trim();
     if (!label) throw new ConvexError("Укажите название направления");
     if (label.length > 60) throw new ConvexError("Название направления — не длиннее 60 символов");
@@ -190,7 +192,7 @@ export const saveService = mutation({
     active: v.boolean(),
   },
   handler: async (ctx, a) => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "catalog.edit");
     const label = cleanText(a.label, 80, "Название услуги");
     if (!label) throw new ConvexError("Укажите название услуги");
     const priceMin = cleanMoney(a.priceMin, "Цена «от»");

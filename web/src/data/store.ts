@@ -89,7 +89,8 @@ export const convertLead = (id: string) => run(convex.mutation(api.leads.convert
 // ── Заказы ───────────────────────────────────────────────────────────────────
 export const updateOrderInfo = (id: string, a: Pick<Order, "serviceId" | "description" | "city" | "address" | "deadline" | "priority"> & { requiredSkills?: string[]; district?: string }) =>
   run(convex.mutation(api.orders.updateInfo, { id: oid(id), ...a }));
-export const updateFinance = (id: string, f: { clientPrice: number; payoutMode: Order["payoutMode"]; payoutValue: number }) =>
+/** Без payoutMode/payoutValue выплата остаётся прежней — так сохраняет цену сотрудник без права на выплаты. */
+export const updateFinance = (id: string, f: { clientPrice: number; payoutMode?: Order["payoutMode"]; payoutValue?: number }) =>
   run(convex.mutation(api.orders.updateFinance, { id: oid(id), ...f }));
 export const changeStatus = (id: string, to: OrderStatus, reason?: string) => run(convex.mutation(api.orders.changeStatus, { id: oid(id), to, reason }));
 /** expected — каким заказ был на экране: если его успели взять или сменился статус, сервер откажет. */

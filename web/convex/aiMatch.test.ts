@@ -100,7 +100,9 @@ describe("AI-подбор исполнителя", () => {
     expect(r.note).toContain("выключен владельцем");
     expect(r.items.map((x) => x.executorId)).toEqual([ids.arman, ids.bolat]);
     expect(r.items[1]!.why).toContain("вовремя 100% · отказов 0");
-    expect(r.items[0]!.payout).toBe(15000);
+    // Сумму мастера оператор не видит (ТЗ п.5.12: выплаты и маржа — по праву), владелец — видит.
+    expect(r.items[0]!.payout).toBeUndefined();
+    expect((await ask(ids.owner)).items[0]!.payout).toBe(15000);
     expect(sent).toHaveLength(0);
   });
 

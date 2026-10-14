@@ -8,7 +8,8 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { PAYMENT_METHODS, type Tone } from "../data/catalog";
 import { clientPayments, clientPaymentTotals, type ClientFile, type ClientFileGroup, type ClientPaymentRow } from "../data/clientRecords";
 import { useFileQuery } from "../data/files";
-import { useTeam } from "../data/hooks";
+import { useMe, useTeam } from "../data/hooks";
+import { can } from "../data/permissions";
 import type { Call, Order } from "../data/types";
 import { cn, dateTime, money, plural } from "../lib/format";
 import { SignedAudio, SignedImg } from "./SignedMedia";
@@ -18,9 +19,13 @@ type Tab = "calls" | "payments" | "files";
 
 /** Вкладки «Звонки», «Оплаты», «Файлы». orders — заказы клиента из clients.detail (оплаты считаются по ним). */
 export function ClientRecords({ clientId, orders, className }: { clientId: string; orders: Order[]; className?: string }) {
-  const [tab, setTab] = useState<Tab>("calls");
+  // Вкладки по правам (ТЗ п.5.12): звонки — «Звонки и записи», оплаты — «Цена клиента и оплаты».
+  const me = useMe();
+  const seesCalls = can(me, "calls.view");
+  const seesMoney = can(me, "money.view");
+  const [tab, setTab] = useState<Tab>(seesCalls ? "calls" : seesMoney ? "payments" : "files");
   const id = clientId as Id<"clients">;
-  const calls = useFileQuery(api.clientRecords.calls, { clientId: id });
+  const calls = useFileQuery(api.clientRecords.calls, seesCalls ? { clientId: id } : "skip");
   const files = useFileQuery(api.clientRecords.files, { clientId: id });
   const payments = clientPayments(orders);
   const fileCount = files ? files.reduce((s, g) => s + g.files.length, 0) : undefined;
@@ -28,9 +33,9 @@ export function ClientRecords({ clientId, orders, className }: { clientId: strin
     <Card className={className}>
       <Tabs
         items={[
-          { id: "calls", label: "Звонки", count: calls?.length },
-          { id: "payments", label: "Оплаты", count: payments.length },
-          { id: "files", label: "Файлы", count: fileCount },
+          ...(seesCalls ? [{ id: "calls" as const, label: "Звонки", count: calls?.length }] : []),
+          ...(seesMoney ? [{ id: "payments" as const, label: "Оплаты", count: payments.length }] : []),
+          { id: "files" as const, label: "Файлы", count: fileCount },
         ]}
         value={tab}
         onChange={setTab}

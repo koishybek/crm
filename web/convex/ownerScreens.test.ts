@@ -115,7 +115,9 @@ describe("«Главная» владельца: долги клиентов", (
     expect(r.debtors.map((d) => d.debt)).toEqual(docs.map((o) => debt(o!)));
     expect(debtDays(r.debtors[1]!.since, s.now)).toBe(5);
 
-    for (const who of [s.ids.operator, s.ids.manager, s.ids.exUser]) await expect(s.as(who).query(api.receivables.list, {})).rejects.toThrow("Нет доступа");
+    // Долги клиентов — право «Цена клиента и оплаты»: у оператора по умолчанию есть, у руководителя и мастера — нет.
+    expect(await s.as(s.ids.operator).query(api.receivables.list, {})).toMatchObject({ total: 57000, count: 3 });
+    for (const who of [s.ids.manager, s.ids.exUser]) await expect(s.as(who).query(api.receivables.list, {})).rejects.toThrow("Нет доступа");
   });
 });
 

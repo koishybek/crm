@@ -1,9 +1,10 @@
-// Исправление денег заказа (ТЗ п.10, п.13; E1, E3; аудит L-4): сторно ошибочной оплаты и возврат клиенту — только владелец.
+// Исправление денег заказа (ТЗ п.10, п.13; E1, E3; аудит L-4): сторно ошибочной оплаты и возврат клиенту — право
+// «Менять деньги заказа» (по умолчанию — только владелец, ТЗ п.5.12).
 // Ничего не удаляется: сторнированный платёж остаётся в списке с причиной, возврат — отдельной записью с суммой,
 // способом, датой и причиной. Статус по деньгам и выручка пересчитываются сами (lib/money.ts, src/data/money.ts).
 import { ConvexError, v } from "convex/values";
 import { mutation } from "./_generated/server";
-import { OWNER, requireRole } from "./lib/access";
+import { assertScope, requirePerm } from "./lib/access";
 import { almatyStamp, audit, lowerFirst } from "./lib/audit";
 import { executorUser, log, notify, nowIso, setStatus, uid, userActor } from "./lib/domain";
 import { laterMoment, moneyDate, positiveMoney, reasonText, settle } from "./lib/money";
@@ -20,9 +21,10 @@ import { money } from "../src/lib/format";
 export const voidPayment = mutation({
   args: { id: v.id("orders"), paymentId: v.string(), reason: v.string() },
   handler: async (ctx, { id, paymentId, reason }) => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "money.edit");
     const o = await ctx.db.get(id);
     if (!o) throw new ConvexError("Заказ не найден");
+    assertScope(me, o.category);
     const p = o.payments.find((x) => x.id === paymentId);
     if (!p) throw new ConvexError("Платёж не найден");
     if (p.voidedAt) throw new ConvexError("Этот платёж уже сторнирован");
@@ -51,9 +53,10 @@ export const voidPayment = mutation({
 export const addRefund = mutation({
   args: { id: v.id("orders"), amount: v.number(), method: paymentMethod, at: v.optional(v.string()), reason: v.string() },
   handler: async (ctx, { id, amount, method, at, reason }) => {
-    const me = await requireRole(ctx, OWNER);
+    const me = await requirePerm(ctx, "money.edit");
     const o = await ctx.db.get(id);
     if (!o) throw new ConvexError("Заказ не найден");
+    assertScope(me, o.category);
     if (!REFUNDABLE_STATUSES.includes(o.status)) throw new ConvexError(`Возврат оформляется по выполненному или отменённому заказу, а этот — «${ORDER_STATUS[o.status].label}»`);
     const value = positiveMoney(amount, "Возврат");
     const received = paidAmount(o) - refundedAmount(o);

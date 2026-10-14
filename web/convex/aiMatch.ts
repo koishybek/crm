@@ -7,7 +7,7 @@
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
-import { assertScope, OWNER, requireRole, TEAM } from "./lib/access";
+import { assertScope, can, OWNER, requireRole, TEAM } from "./lib/access";
 import { audit } from "./lib/audit";
 import { activeExecutorIds } from "./lib/matching";
 import { hitLimit } from "./lib/rateLimit";
@@ -141,7 +141,8 @@ export const _prepare = internalMutation({
         priority: o.priority,
         requiredSkills: o.requiredSkills ?? [],
       },
-      candidates: ranked.map((c, i) => ({ executorId: c.e.id, name: c.e.name, why: rulesWhy(c), payout: payoutFor(c.e.rates, o), facts: candidateFacts(c, i) })),
+      // Сумма мастера — только тому, кто видит выплаты (ТЗ п.5.12).
+      candidates: ranked.map((c, i) => ({ executorId: c.e.id, name: c.e.name, why: rulesWhy(c), payout: can(me, "money.payouts") ? payoutFor(c.e.rates, o) : undefined, facts: candidateFacts(c, i) })),
     };
   },
 });

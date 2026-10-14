@@ -9,7 +9,9 @@ import { Shell } from "./components/Shell";
 import { LogoMark } from "./components/icons";
 import { Button } from "./components/ui";
 import { useMe } from "./data/hooks";
+import { can, type Permission } from "./data/permissions";
 import type { Role } from "./data/types";
+import CatalogScreen from "./screens/CatalogScreen";
 import ClientDetail from "./screens/ClientDetail";
 import Calls from "./screens/Calls";
 import Clients from "./screens/Clients";
@@ -24,6 +26,7 @@ import PublicRequest from "./screens/PublicRequest";
 import Settings from "./screens/Settings";
 import { WorkerError } from "./screens/worker/WorkerError";
 
+const TEAM_ROLES: Role[] = ["owner", "operator", "manager"];
 const Analytics = lazy(() => import("./screens/Analytics"));
 const AuditLog = lazy(() => import("./screens/AuditLog"));
 const Payouts = lazy(() => import("./screens/Payouts"));
@@ -61,8 +64,11 @@ function Blocked() {
   );
 }
 
-/** Доступ по ролям (RBAC): исполнитель видит только свой кабинет, аналитика и настройки — только владельцу. */
-function Guard({ roles }: { roles: Role[] }) {
+/**
+ * Доступ по ролям (RBAC) и правам (ТЗ п.5.12): исполнитель видит только свой кабинет, настройки — только владелец,
+ * клиенты, звонки, сообщения, аналитика и выплаты — по правам сотрудника (src/data/permissions.ts).
+ */
+function Guard({ roles, perm }: { roles: Role[]; perm?: Permission }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const me = useMe();
   const loc = useLocation();
@@ -75,7 +81,7 @@ function Guard({ roles }: { roles: Role[] }) {
   if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
   if (!me) return <Blocked />;
   if (forced) return <ForcedPasswordChange me={me} />;
-  if (!roles.includes(me.role)) return <Navigate to={me.role === "executor" ? "/w" : "/"} replace />;
+  if (!roles.includes(me.role) || (perm && !can(me, perm))) return <Navigate to={me.role === "executor" ? "/w" : "/"} replace />;
   return <Shell me={me} />;
 }
 
@@ -132,22 +138,25 @@ const router = createBrowserRouter([
       { path: "/executors/:id", element: <ExecutorDetail /> },
     ],
   },
+  // Клиентская база, звонки, переписка, аналитика, выплаты и справочник — по правам (по умолчанию: клиенты, звонки
+  // и сообщения — владельцу и операторам, аналитика и выплаты — владельцу).
+  { element: <Guard roles={TEAM_ROLES} perm="calls.view" />, children: [{ path: "/calls", element: <Calls /> }] },
+  { element: <Guard roles={TEAM_ROLES} perm="inbox.view" />, children: [{ path: "/inbox", element: <Inbox /> }] },
   {
-    // Клиентская база, звонки и переписка — владельцу и операторам; руководитель направления их не видит.
-    element: <Guard roles={["owner", "operator"]} />,
+    element: <Guard roles={TEAM_ROLES} perm="clients.view" />,
     children: [
-      { path: "/calls", element: <Calls /> },
-      { path: "/inbox", element: <Inbox /> },
       { path: "/clients", element: <Clients /> },
       { path: "/clients/:id", element: <ClientDetail /> },
     ],
   },
+  { element: <Guard roles={TEAM_ROLES} perm="analytics.view" />, children: [{ path: "/analytics", element: lazyAnalytics }] },
+  // Реестр выплат не делится по направлениям — руководителю направления не открываем.
+  { element: <Guard roles={["owner", "operator"]} perm="money.payouts" />, children: [{ path: "/payouts", element: lazyPayouts }] },
+  { element: <Guard roles={TEAM_ROLES} perm="catalog.edit" />, children: [{ path: "/catalog", element: <CatalogScreen /> }] },
   {
     element: <Guard roles={["owner"]} />,
     children: [
-      { path: "/analytics", element: lazyAnalytics },
       { path: "/audit", element: lazyAudit },
-      { path: "/payouts", element: lazyPayouts },
       { path: "/settings", element: <Settings /> },
     ],
   },

@@ -4,12 +4,13 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { OWNER, requireRole, STAFF } from "./lib/access";
+import { OWNER, requirePerm, requireRole } from "./lib/access";
 import { almatyStamp, audit, maskPhone } from "./lib/audit";
 import { nextNumber, notify, nowIso, staffIds, TENANT } from "./lib/domain";
 import { toCall } from "./lib/dto";
 import { markError, markOk } from "./lib/health";
 import { normalizeLogin } from "./lib/login";
+import { isClientPhone, pbxPhone } from "./lib/phone";
 import { districtOrNone } from "./lib/districts";
 import { dropFile, fileSigner, takeUpload } from "./lib/files";
 import { hitLimit } from "./lib/rateLimit";
@@ -22,13 +23,14 @@ import { phone as fmtPhone, shortName } from "../src/lib/format";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
 const clientNumber = (c: Pick<Doc<"calls">, "direction" | "from" | "to">) => (c.direction === "in" ? c.from : c.to);
-const validPhone = (p: string) => /^7\d{10}$/.test(p);
-const normPhone = (raw?: string) => (raw ? normalizeLogin(raw.replace(/[^\d+]/g, "")) : "");
+/** Номер клиента, которого можно искать в базе: казахстанский или иностранный (ТЗ п.7.1, E26). */
+const validPhone = isClientPhone;
+const normPhone = (raw?: string) => (raw ? pbxPhone(raw) : "");
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "calls.view");
     const rows = await ctx.db.query("calls").withIndex("by_started").order("desc").take(300);
     return rows.map((c) => toCall(c, null));
   },
@@ -38,7 +40,7 @@ export const list = query({
 export const get = query({
   args: { id: v.id("calls"), t: v.optional(v.number()) },
   handler: async (ctx, { id }) => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "calls.view");
     const c = await ctx.db.get(id);
     if (!c) return null;
     const lead = c.leadId ? await ctx.db.get(c.leadId) : null;
@@ -50,7 +52,7 @@ export const get = query({
 export const live = query({
   args: { now: v.number() },
   handler: async (ctx, { now }) => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "calls.view");
     const since = new Date(now - 30 * 60_000).toISOString();
     const rows = [
       ...(await ctx.db.query("calls").withIndex("by_status", (q) => q.eq("status", "ringing").gte("startedAt", since)).collect()),
@@ -78,7 +80,7 @@ export const live = query({
 export const upload = mutation({
   args: { storageId: v.id("_storage"), phone: v.optional(v.string()), autoLead: v.optional(v.boolean()) },
   handler: async (ctx, { storageId, phone, autoLead }): Promise<Id<"calls">> => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "calls.view");
     await takeUpload(ctx, me._id, storageId, ["audio"]);
     const p = normPhone(phone);
     const client = validPhone(p) ? await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first() : null;
@@ -109,7 +111,7 @@ export const upload = mutation({
 export const reprocess = mutation({
   args: { id: v.id("calls") },
   handler: async (ctx, { id }): Promise<void> => {
-    await requireRole(ctx, STAFF);
+    await requirePerm(ctx, "calls.view");
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Звонок не найден");
     if (!c.recordingId && !c.recordingUrl) throw new ConvexError("У звонка нет записи");
@@ -126,7 +128,7 @@ export const reprocess = mutation({
 export const linkLead = mutation({
   args: { id: v.id("calls"), leadId: v.id("leads") },
   handler: async (ctx, { id, leadId }) => {
-    const me = await requireRole(ctx, STAFF);
+    const me = await requirePerm(ctx, "calls.view");
     const c = await ctx.db.get(id);
     if (!c) throw new ConvexError("Звонок не найден");
     const lead = await ctx.db.get(leadId);

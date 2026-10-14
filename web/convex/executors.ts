@@ -5,7 +5,7 @@ import { action, internalMutation, mutation, query, type MutationCtx, type Query
 import { currentUser, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
 import { almatyStamp, audit, ChangeLog, listDiff, listDiffText, quote, type AuditActor } from "./lib/audit";
 import { executorUser, notify, nowIso, TENANT } from "./lib/domain";
-import { toExecutor, toOrder, toUser } from "./lib/dto";
+import { executorFor, orderFor, toUser } from "./lib/dto";
 import { executorDistricts } from "./lib/districts";
 import { cleanCity, cleanText } from "./lib/limits";
 import { normalizeLogin } from "./lib/login";
@@ -124,7 +124,8 @@ export const _restoreShifts = internalMutation({
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     const executors = (await ctx.db.query("executors").collect()).filter((e) => !scope || e.categories.some((c) => scope.includes(c)));
     const ids = new Set<string>(executors.map((e) => e._id));
     const load: { executorId: string; status: Doc<"orders">["status"] }[] = [];
@@ -133,19 +134,20 @@ export const list = query({
         if (o.executorId && ids.has(o.executorId)) load.push({ executorId: o.executorId, status: o.status });
       }
     }
-    return { executors: executors.map(toExecutor), load };
+    return { executors: executors.map(executorFor(me)), load };
   },
 });
 
 export const detail = query({
   args: { id: v.id("executors") },
   handler: async (ctx, { id }) => {
-    const scope = scopeOf(await requireRole(ctx, TEAM));
+    const me = await requireRole(ctx, TEAM);
+    const scope = scopeOf(me);
     const e = await ctx.db.get(id);
     if (!e || (scope && !e.categories.some((c) => scope.includes(c)))) return null;
     const orders = await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", id)).collect();
     const user = await ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", id)).first();
-    return { executor: toExecutor(e), orders: orders.map(toOrder), user: user ? toUser(user) : null };
+    return { executor: executorFor(me)(e), orders: orders.map(orderFor(me)), user: user ? toUser(user) : null };
   },
 });
 

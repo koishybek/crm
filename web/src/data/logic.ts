@@ -8,6 +8,7 @@ import {
   type Tone,
 } from "./catalog";
 import { cityKey, districtKey } from "./cities";
+import { can } from "./permissions";
 import { textKey } from "./skills";
 import { dateAlmaty, timeAlmaty } from "./workerTime";
 import type { Client, DB, Executor, ExecutorRates, ExecutorStats90, Lead, Order, OrderStatus, PayoutTerms, User } from "./types";
@@ -298,7 +299,7 @@ export const clientState = (c: Client, now = Date.now()): ClientState => {
 };
 
 /** Что видит пользователь: исполнитель — только свои заказы и ленту, сотрудники — всё. */
-export const canSeeFinance = (u: User) => u.role === "owner" || u.role === "operator";
-export const canSeeAnalytics = (u: User) => u.role === "owner";
+export const canSeeFinance = (u: User) => can(u, "money.view");
+export const canSeeAnalytics = (u: User) => can(u, "analytics.view");
 
 export const userName = (db: DB, id: string) => db.users.find((u) => u.id === id)?.name ?? "Система";
