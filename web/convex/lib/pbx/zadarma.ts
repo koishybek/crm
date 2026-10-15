@@ -40,8 +40,19 @@ async function api(creds: PbxCreds, method: string, params: Record<string, strin
   const { query, authorization } = await zadarmaAuth(creds, method, params);
   const r = await providerFetch(`${ZADARMA_API}${method}${query ? `?${query}` : ""}`, { method: "GET", headers: { Authorization: authorization } }, LABEL);
   const body = jsonObject(r, LABEL);
-  if (str(body, "status") !== "success") throw new ProviderError(`Zadarma: ${str(body, "message")?.slice(0, 160) || `отказ (HTTP ${r.status})`}`);
+  if (str(body, "status") !== "success") {
+    const message = str(body, "message") ?? "";
+    throw new ProviderError(`Zadarma: ${explain(message) ?? (message.slice(0, 160) || `отказ (HTTP ${r.status})`)}`);
+  }
   return body;
+}
+
+/** Частые отказы Zadarma — по-русски и с тем, что делать: владелец читает их в «Состоянии системы» и в окне звонка. */
+function explain(message: string): string | null {
+  if (/equal to callerid/i.test(message)) return "номер клиента совпадает с CallerID внутреннего номера (АТС → Внутренние номера → CallerID) — позвоните на другой номер или укажите CallerID номером Zadarma";
+  if (/not enough money|insufficient|balance/i.test(message)) return "на балансе Zadarma не хватает денег — пополните баланс";
+  if (/wrong.*(from|sip)|sip.*not found|incorrect.*from/i.test(message)) return "внутренний номер сотрудника не найден в АТС Zadarma — проверьте номер в «Настройки → Телефония»";
+  return null;
 }
 
 /** Подпись события: проверяем до разбора. */
