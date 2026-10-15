@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { AuditObjectLink, AuditWho } from "../components/AuditHistory";
-import { Button, EmptyState, Input, Loading, PageHeader, Select } from "../components/ui";
+import { Button, EmptyState, Input, Loading, MobileFilters, PageHeader, Select } from "../components/ui";
 import { AUDIT_ENTITIES, AUDIT_ENTITY, AUDIT_QUERY_MAX } from "../data/audit";
 import type { AuditFilters } from "../data/auditLog";
 import { createExport, downloadFile, exportedText } from "../data/exportActions";
@@ -122,6 +122,7 @@ export default function AuditLog() {
       />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1.4fr)_auto]">
+        <MobileFilters active={period !== "7d" || !!actor || !!entity}>
         <Select icon={CalendarDays} aria-label="Период" value={period} onChange={(e) => setPeriod(e.target.value as Period)} className={FIELD}>
           {PERIODS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -147,6 +148,7 @@ export default function AuditLog() {
             </option>
           ))}
         </Select>
+        </MobileFilters>
         <Input
           icon={Search}
           aria-label="Поиск по описанию"

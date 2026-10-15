@@ -74,7 +74,7 @@ export default function Executors() {
           </>
         }
       />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <KpiCard icon={Users} tone="green" label="Свободны сейчас" value={count("free")} caption={`из ${all.length} исполнителей`} onClick={() => setSt("free")} />
         <KpiCard icon={Briefcase} tone="blue" label="На заказе" value={count("busy")} caption="назначены, ещё не выехали" onClick={() => setSt("busy")} />
         <KpiCard icon={Truck} tone="red" label="На выезде" value={count("onsite")} caption="заказ в статусе «В работе»" onClick={() => setSt("onsite")} />

@@ -7,7 +7,7 @@ import { clientState } from "../data/logic";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Source } from "../components/icons";
-import { Avatar, Badge, Button, EmptyState, Input, Loading, Menu, MenuItem, PageHeader, Pagination, Select } from "../components/ui";
+import { Avatar, Badge, Button, EmptyState, Input, Loading, Menu, MenuItem, MobileFilters, PageHeader, Pagination, Select } from "../components/ui";
 import { date, phone } from "../lib/format";
 import { exportCsv, stamp } from "../lib/csv";
 
@@ -69,6 +69,7 @@ export default function Clients() {
       />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[1.6fr_1fr_1fr_1fr_auto]">
         <Input icon={Search} placeholder="Поиск по имени, телефону или компании..." value={q} onChange={(e) => setQ(e.target.value)} className="[&_input]:h-[48px] [&_input]:border-line" />
+        <MobileFilters active={!!(city || source || state)}>
         <Select icon={MapPin} value={city} onChange={(e) => setCity(e.target.value)} className="[&_select]:h-[48px] [&_select]:border-line">
           <option value="">Все города</option>
           {CITIES.map((c) => (
@@ -103,6 +104,7 @@ export default function Clients() {
         >
           Сбросить
         </Button>
+        </MobileFilters>
       </div>
 
       <div className="card mt-4 p-3 sm:p-4">

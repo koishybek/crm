@@ -14,7 +14,7 @@ import { useMe, useTeam } from "../data/hooks";
 import { can } from "../data/permissions";
 import { Source } from "../components/icons";
 import { ExportButton } from "../components/ExportButton";
-import { Avatar, Badge, Button, EmptyState, KpiCard, Loading, Menu, MenuItem, PageHeader, Pagination, Select, Tabs } from "../components/ui";
+import { Avatar, Badge, Button, EmptyState, KpiCard, Loading, Menu, MenuItem, MobileFilters, PageHeader, Pagination, Select, Tabs } from "../components/ui";
 import { cn, dayDiff, phone, when } from "../lib/format";
 
 type Period = "today" | "yesterday" | "7d" | "30d" | "all";
@@ -109,7 +109,7 @@ export default function Leads() {
     <>
       <PageHeader title="Заявки" subtitle="Все входящие заявки из разных источников" actions={<ExportButton kinds={["leads"]} />} />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
         <KpiCard icon={FileText} tone="blue" label="Новые заявки" value={newCount} caption={newCount ? "ждут первого ответа" : "все разобраны"} onClick={() => (setTab("new"), setPeriod("all"))} />
         <KpiCard icon={Users} tone="violet" label="На квалификации" value={qualifying} caption="уточняем детали с клиентом" onClick={() => (setTab("qualifying"), setPeriod("all"))} />
         <KpiCard icon={CalendarDays} tone="green" label="Сегодня" value={today.length} trend={trend(today.length, yesterdaySameTime.length, "к вчера")} onClick={() => setPeriod("today")} />
@@ -117,6 +117,7 @@ export default function Leads() {
 
       <div className="card mt-4 p-4 sm:p-5">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1fr_1fr_auto] xl:items-end">
+          <MobileFilters active={!!filtered}>
           <div>
             <div className="mb-2 text-[13.5px] font-medium text-ink-2">Источник</div>
             <Select value={source} onChange={(e) => setSource(e.target.value)}>
@@ -163,6 +164,7 @@ export default function Leads() {
           <Button variant="soft" icon={Filter} onClick={reset} disabled={!filtered}>
             Сбросить
           </Button>
+          </MobileFilters>
         </div>
 
         <div className="mt-5">

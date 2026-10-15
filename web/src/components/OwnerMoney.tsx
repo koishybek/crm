@@ -28,7 +28,7 @@ export function OwnerMoneyKpis({ from, revenue, margin }: { from: number; revenu
   const now = useNow();
   const oldest = debts?.debtors[0];
   return (
-    <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="mt-3 grid grid-cols-2 gap-3 sm:mt-4 sm:gap-4 xl:grid-cols-4">
       <KpiCard deco icon={Banknote} tone="green" label="Выручка" value={money(revenue.value)} trend={revenue.trend} onClick={() => nav("/analytics")} />
       <KpiCard deco icon={ChartNoAxesColumn} tone="amber" label="Маржа" value={money(margin.value)} trend={margin.trend} onClick={() => nav("/analytics")} />
       <KpiCard

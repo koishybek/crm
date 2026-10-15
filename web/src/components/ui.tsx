@@ -8,6 +8,7 @@ import {
   CircleCheck,
   CircleX,
   Info,
+  SlidersHorizontal,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -248,24 +249,25 @@ export function KpiCard({ icon: Icon, tone, label, value, trend, caption, onClic
   const Tag = onClick ? "button" : "div";
   const tint = KPI_TINT[tone];
   return (
-    <Tag onClick={onClick} className={cn("card @container relative block min-w-0 overflow-hidden p-5 text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
+    <Tag onClick={onClick} className={cn("card @container/kpi relative block min-w-0 overflow-hidden text-left", tint?.bg, onClick && "transition-shadow hover:shadow-[0_8px_28px_rgba(60,45,10,0.1)]")}>
       {deco && tint && (
-        <span className="pointer-events-none absolute top-6 right-5 hidden items-end gap-[5px] @min-[330px]:flex" aria-hidden>
+        <span className="pointer-events-none absolute top-6 right-5 hidden items-end gap-[5px] @min-[370px]/kpi:flex" aria-hidden>
           {[34, 52, 70, 92].map((h, i) => (
             <span key={i} className={cn("w-[8px] rounded-t-[3px]", tint.bar)} style={{ height: h * 0.5, opacity: 0.3 + i * 0.18 }} />
           ))}
         </span>
       )}
-      {/* Узкая карточка (три в ряд на 1024px) — иконка над текстом, иначе подписи ломаются на 3–4 строки. */}
-      <div className="flex flex-col items-start gap-3 @min-[240px]:flex-row @min-[240px]:gap-4">
-        <span className={cn("inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] @min-[240px]:h-[58px] @min-[240px]:w-[58px] @min-[240px]:rounded-[16px]", TONE_SOFT[tone])}>
-          <Icon className="size-[22px] @min-[240px]:size-[27px]" strokeWidth={1.7} aria-hidden />
+      {/* Раскладка — от ширины самой карточки: широкая — иконка слева; средняя (три в ряд на 1024px) — иконка сверху;
+          узкая (2–3 в ряд на телефоне) — компактно, а совсем узкая — без пояснения: показатели видны без долгой прокрутки. */}
+      <div className="flex flex-col items-start gap-2.5 p-3.5 @min-[180px]/kpi:gap-3 @min-[180px]/kpi:p-5 @min-[280px]/kpi:flex-row @min-[280px]/kpi:gap-4">
+        <span className={cn("inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] @min-[180px]/kpi:h-11 @min-[180px]/kpi:w-11 @min-[180px]/kpi:rounded-[13px] @min-[280px]/kpi:h-[58px] @min-[280px]/kpi:w-[58px] @min-[280px]/kpi:rounded-[16px]", TONE_SOFT[tone])}>
+          <Icon className="size-[19px] @min-[180px]/kpi:size-[22px] @min-[280px]/kpi:size-[27px]" strokeWidth={1.7} aria-hidden />
         </span>
         <div className="@container w-full min-w-0 flex-1">
-          <div className="text-[14.5px] text-ink-2">{label}</div>
+          <div className="min-h-[2lh] text-[13px] leading-snug text-ink-2 @min-[180px]/kpi:min-h-0 @min-[180px]/kpi:text-[14.5px]">{label}</div>
           {/* Размер — от ширины колонки: в узкой карточке сумма «3 351 000 ₸» остаётся в одну строку. */}
-          <div className="mt-0.5 text-[clamp(20px,14cqw,30px)] leading-tight font-bold tracking-[-0.02em] whitespace-nowrap text-ink tabular-nums">{value}</div>
-          {trend ? <TrendLine trend={trend} /> : caption ? <div className="mt-1.5 text-[13.5px] text-muted">{caption}</div> : null}
+          <div className="mt-0.5 text-[clamp(18px,14cqw,30px)] leading-tight font-bold tracking-[-0.02em] whitespace-nowrap text-ink tabular-nums">{value}</div>
+          <div className="hidden @min-[150px]/kpi:block">{trend ? <TrendLine trend={trend} /> : caption ? <div className="mt-1.5 text-[13.5px] text-muted">{caption}</div> : null}</div>
         </div>
       </div>
     </Tag>
@@ -566,5 +568,29 @@ export function Toaster() {
       })}
     </div>,
     document.body,
+  );
+}
+
+/**
+ * Фильтры списка, свёрнутые на телефоне за кнопкой «Фильтры» (несколько списков подряд занимали весь экран до данных).
+ * Кладётся внутрь сетки фильтров: с sm — display: contents, поля становятся ячейками той же сетки, кнопки нет.
+ */
+export function MobileFilters({ active, children }: { active: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex h-11 w-full items-center gap-2 rounded-[11px] border border-line bg-white px-3.5 text-[14.5px] font-medium text-ink-2 sm:hidden"
+      >
+        <SlidersHorizontal size={17} className="text-muted" aria-hidden />
+        Фильтры
+        {active && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-[12px] font-semibold text-brand-ink">включены</span>}
+        <ChevronDown size={17} className={cn("ml-auto text-muted transition-transform", open && "rotate-180")} aria-hidden />
+      </button>
+      <div className={cn(open ? "grid gap-3" : "hidden", "sm:contents")}>{children}</div>
+    </>
   );
 }

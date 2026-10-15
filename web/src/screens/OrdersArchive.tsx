@@ -12,7 +12,7 @@ import { can } from "../data/permissions";
 import { orderBadgeShort } from "../data/logic";
 import type { OrderStatus, SourceId } from "../data/types";
 import { ServiceLabel } from "../components/icons";
-import { Badge, Button, EmptyState, Input, Loading, Select } from "../components/ui";
+import { Badge, Button, EmptyState, Input, Loading, MobileFilters, Select } from "../components/ui";
 import { cn, date, money, num, shortName } from "../lib/format";
 
 const PAGE = 30;
@@ -100,6 +100,7 @@ export function OrdersArchive() {
     <div className="mt-1">
       <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4", FIELD)}>
         <Input icon={Search} aria-label="Поиск" value={q} maxLength={100} onChange={(e) => setQ(e.target.value)} placeholder="№ заказа, имя или телефон клиента" className="sm:col-span-2" />
+        <MobileFilters active={!!(status || from || to || by === "done" || executor || source || category)}>
         <Select aria-label="Статус" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Все статусы</option>
           {GROUPS.map((g) => (
@@ -147,6 +148,7 @@ export function OrdersArchive() {
             </option>
           ))}
         </Select>
+        </MobileFilters>
       </div>
 
       <div className="card mt-4 p-3 sm:p-4">

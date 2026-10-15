@@ -132,7 +132,7 @@ export default function Analytics() {
       {header}
       {r.money ? (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             <KpiCard icon={Briefcase} tone="green" label="Выручка" value={money(d.s.revenue)} trend={d.trends.revenue} />
             <KpiCard icon={Wallet} tone="red" label="Начислено мастерам" value={money(d.s.payouts)} trend={{ ...d.trends.payouts, good: true }} />
             <KpiCard icon={ChartNoAxesColumn} tone="violet" label="Маржа" value={money(d.s.margin)} trend={d.trends.margin} />
@@ -146,7 +146,7 @@ export default function Analytics() {
           <CashFlowRow cur={r.cur.t} prev={r.prev} caption={caption} />
         </>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
           <KpiCard icon={FileText} tone="yellow" label="Заявки" value={num(n(r.cur.t, "leads"))} trend={d.trends.leads} caption={`в заказ — ${Math.round(d.conversion * 100)}%`} />
           <KpiCard icon={Briefcase} tone="green" label="Выполнено заказов" value={num(d.s.count)} trend={d.trends.count} />
           <KpiCard icon={BadgeCheck} tone="violet" label="Сдано вовремя" value={d.onTime === null ? "—" : `${Math.round(d.onTime * 100)}%`} trend={d.trends.onTime} />

@@ -13,7 +13,7 @@ import type { Order, OrderStatus } from "../data/types";
 import { ExportButton } from "../components/ExportButton";
 import { ServiceLabel } from "../components/icons";
 import { SkillChips, SkillLine } from "../components/SkillChips";
-import { Avatar, Badge, Loading, Menu, MenuItem, PageHeader, Select } from "../components/ui";
+import { Avatar, Badge, Loading, Menu, MenuItem, MobileFilters, PageHeader, Select } from "../components/ui";
 import { cn, dayDiff, dateTime, deadline, money, shortName } from "../lib/format";
 import { OrdersArchive } from "./OrdersArchive";
 
@@ -112,6 +112,7 @@ export default function Orders() {
       ) : (
       <>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MobileFilters active={!!(status || city || executor || due)}>
         <FilterCard label="Статус">
           <Select value={status} onChange={(e) => setStatus(e.target.value as OrderStatus | "")}>
             <option value="">Все активные и завершённые</option>
@@ -153,6 +154,7 @@ export default function Orders() {
             <option value="week">Ближайшие 7 дней</option>
           </Select>
         </FilterCard>
+        </MobileFilters>
       </div>
 
       {board === undefined ? (

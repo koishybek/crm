@@ -103,7 +103,7 @@ export default function Dashboard() {
       <SubscriptionBanner />
       <OnboardingCard />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <KpiCard deco icon={FileText} tone="yellow" label="Новые заявки" value={num(k.leads.value)} trend={k.leads.trend} onClick={() => nav("/leads")} />
         <KpiCard deco
           icon={Briefcase}
