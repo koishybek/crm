@@ -82,6 +82,14 @@ const sessionsOf = (t: Env["t"], userId: Id<"users">) => t.run((ctx) => ctx.db.q
 const refreshTokensOf = (t: Env["t"], sessionId: Id<"authSessions">) => t.run((ctx) => ctx.db.query("authRefreshTokens").withIndex("sessionId", (q) => q.eq("sessionId", sessionId)).collect());
 
 describe("временные пароли (аудит M-8, E30)", () => {
+  test("выдаёт доступ только владелец: оператор и руководитель не создают мастеру логин", async () => {
+    const { t, ids, as } = await setup();
+    const form = { name: "Чужой Мастер", phone: "+7 700 000 00 08", city: "Алматы", categories: ["ac"], skills: [], cooperation: "freelance" as const };
+    await expect(as(ids.operator).action(api.executors.create, form)).rejects.toThrow(/только владелец/);
+    const executors = await t.run((ctx) => ctx.db.query("executors").collect());
+    expect(executors.some((e) => e.name === "Чужой Мастер")).toBe(false);
+  });
+
   test("пароль, выданный другим человеком, — временный: сотрудник, мастер, сброс; демо-аккаунты — без смены", async () => {
     const { t, ids, as, user } = await setup();
     const owner = as(ids.owner);
@@ -89,7 +97,7 @@ describe("временные пароли (аудит M-8, E30)", () => {
     const aidana = (await t.run((ctx) => ctx.db.query("users").withIndex("email", (q) => q.eq("email", staff.login)).unique()))!;
     expect(aidana.mustChangePassword).toBe(true);
 
-    const master = await as(ids.operator).action(api.executors.create, { name: "Новый Мастер", phone: "+7 700 000 00 09", city: "Алматы", categories: ["ac"], skills: [], cooperation: "freelance" });
+    const master = await owner.action(api.executors.create, { name: "Новый Мастер", phone: "+7 700 000 00 09", city: "Алматы", categories: ["ac"], skills: [], cooperation: "freelance" });
     const masterUser = (await t.run((ctx) => ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", master.id)).first()))!;
     expect(masterUser.mustChangePassword).toBe(true);
 
