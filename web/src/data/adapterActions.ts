@@ -11,6 +11,7 @@ export const savePbx = (provider: PbxProvider, fields: Record<string, string>) =
 export const disablePbx = () => run(convex.mutation(api.pbx.disable, {}));
 export const checkPbx = () => run(convex.action(api.pbx.check, {}));
 export const setPbxExtension = (userId: string, extension: string) => run(convex.mutation(api.pbx.setExtension, { userId: userId as Id<"users">, extension }));
+export const setPbxLines = (lines: { number: string; source: string }[]) => run(convex.mutation(api.pbx.setLines, { lines }));
 export interface DialContext {
   orderId?: string;
   leadId?: string;

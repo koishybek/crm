@@ -25,6 +25,8 @@ import { ROLE_LABEL } from "../src/data/catalog";
 import { actionFor } from "./lib/tenantDb";
 import { lockText } from "../src/data/plans";
 import { requireModuleAction } from "./lib/tenant";
+import { isSourceId, LINE_SOURCES_KEY, lineSources, MAX_LINES, normLine } from "./lib/lineSources";
+import { SOURCES } from "../src/data/catalog";
 
 const KEY = { provider: "pbx.provider", public: "pbx.public", secrets: "pbx.secrets", session: "pbx.sessionKey" } as const;
 const pbxProvider = v.union(...PBX_PROVIDERS.map((p) => v.literal(p)));
@@ -126,6 +128,7 @@ export const settings = query({
       siteUrl: env("CONVEX_SITE_URL") ?? null,
       hasPbxSecret: !!(await setting(ctx, "pbxSecret")),
       staff: staff.map((u) => ({ id: u._id, name: u.name ?? "Сотрудник", role: ROLE_LABEL[u.role!], extension: u.pbxExtension ?? null })),
+      lines: Object.entries(await lineSources(ctx)).map(([number, source]) => ({ number, source })),
     };
   },
 });
@@ -226,6 +229,30 @@ export const setExtension = mutation({
     }
     await ctx.db.patch(userId, { pbxExtension: ext ?? undefined });
     await audit(ctx, me, "user.pbxExtension", ext ? `${u.name ?? "Сотрудник"}: внутренний номер АТС ${ext}` : `${u.name ?? "Сотрудник"}: внутренний номер АТС снят`, { entityId: userId, meta: { extension: ext } });
+  },
+});
+
+/**
+ * Источник по номеру линии (колл-трекинг): звонки на номер из объявлений OLX — заявки с источником «OLX».
+ * Список заменяется целиком; пустой — все звонки «Телефон».
+ */
+export const setLines = mutation({
+  args: { lines: v.array(v.object({ number: v.string(), source: v.string() })) },
+  handler: async (ctx, { lines }): Promise<void> => {
+    const me = await requireRole(ctx, OWNER);
+    if (lines.length > MAX_LINES) throw new ConvexError(`Не больше ${MAX_LINES} номеров`);
+    const map: Record<string, keyof typeof SOURCES> = {};
+    for (const l of lines) {
+      const number = normLine(l.number);
+      if (!/^\d{7,15}$/.test(number)) throw new ConvexError(`Номер «${l.number.slice(0, 30)}» — от 7 до 15 цифр`);
+      if (!isSourceId(l.source)) throw new ConvexError("Неизвестный источник");
+      if (map[number]) throw new ConvexError(`Номер ${number} указан дважды`);
+      map[number] = l.source;
+    }
+    if (JSON.stringify(await lineSources(ctx)) === JSON.stringify(map)) return;
+    await putSetting(ctx, LINE_SOURCES_KEY, Object.keys(map).length ? JSON.stringify(map) : null);
+    const text = Object.entries(map).map(([n, s]) => `${maskPhone(n)} → ${SOURCES[s].label}`).join(", ");
+    await audit(ctx, me, "integration.pbxLines", text ? `Телефония: источники по номерам — ${text}` : "Телефония: источники по номерам сняты", { entityId: "pbx", meta: { lines: Object.keys(map).length } });
   },
 });
 

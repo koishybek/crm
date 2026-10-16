@@ -493,3 +493,28 @@ describe("целостность данных на сервере (E24, E25, E10
     expect(await s.notes(s.ids.bauyr.user)).toEqual([]);
   });
 });
+
+// ── Колл-трекинг: источник по номеру, на который позвонили ───────────────────
+
+describe("источник звонка по номеру линии (OLX)", () => {
+  const AI = { summary: "Не холодит кондиционер", extracted: [], questions: [] };
+
+  test("звонок на номер из объявлений OLX — заявка и клиент «OLX»; остальные — «Телефон»; список задаёт только владелец", async () => {
+    const s = await setup();
+    await expect(s.as(s.ids.operator).mutation(api.pbx.setLines, { lines: [{ number: "8 727 345 00 01", source: "olx" }] })).rejects.toThrow();
+    await s.as(s.ids.owner).mutation(api.pbx.setLines, { lines: [{ number: "8 727 345 00 01", source: "olx" }] });
+    expect((await s.as(s.ids.owner).query(api.pbx.settings, {})).lines).toEqual([{ number: "77273450001", source: "olx" }]);
+
+    const olxCall = await s.t.run((ctx) => ctx.db.insert("calls", { tenantId: T, direction: "in", from: "77015550130", to: "77273450001", status: "completed", startedAt: iso(Date.now()), aiStatus: "pending" }));
+    await s.t.mutation(internal.calls._saveAi, { id: olxCall, status: "done", ai: AI, draft: { serviceId: "ac-repair" }, autoLead: true });
+    const lead = await s.get((await s.get(olxCall)).leadId!);
+    expect(lead.source).toBe("olx");
+    expect((await s.get(lead.clientId)).source).toBe("olx");
+
+    const other = await s.t.run((ctx) => ctx.db.insert("calls", { tenantId: T, direction: "in", from: "77015550131", to: "77273459999", status: "completed", startedAt: iso(Date.now()), aiStatus: "pending" }));
+    await s.t.mutation(internal.calls._saveAi, { id: other, status: "done", ai: AI, draft: { serviceId: "ac-repair" }, autoLead: true });
+    expect((await s.get((await s.get(other)).leadId!)).source).toBe("phone");
+
+    await expect(s.as(s.ids.owner).mutation(api.pbx.setLines, { lines: [{ number: "12", source: "olx" }] })).rejects.toThrow(/от 7 до 15 цифр/);
+  });
+});

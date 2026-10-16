@@ -1,5 +1,6 @@
 // Облачные АТС (ТЗ п.19.1, п.22.1, п.5.7): какие поддерживаем, что владелец вводит при подключении и как настроить АТС.
 // Общие для сервера (convex/pbx.ts, convex/lib/pbx/*) и карточки «Телефония → Провайдер АТС».
+import type { SourceId } from "./types";
 
 export const PBX_PROVIDERS = ["binotel", "zadarma", "onlinepbx"] as const;
 export type PbxProvider = (typeof PBX_PROVIDERS)[number];
@@ -95,6 +96,8 @@ export interface PbxSettingsView {
   /** Ключ АТС создан. */
   hasPbxSecret: boolean;
   staff: { id: string; name: string; role: string; extension: string | null }[];
+  /** Источник по номеру линии: звонки на номер из объявлений OLX — заявки «OLX» (колл-трекинг). */
+  lines: { number: string; source: SourceId }[];
 }
 
 /** Звонок через АТС из карточки: можно ли (АТС подключена и у сотрудника есть внутренний номер). */

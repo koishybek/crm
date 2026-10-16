@@ -27,6 +27,7 @@ import { phone as fmtPhone, shortName } from "../src/lib/format";
 import { boundTenant, tenantOf, tenantOfDoc, unscopedDb } from "./lib/tenantDb";
 import { hasModule, requireModule } from "./lib/tenant";
 import { safeEqual } from "./lib/crypto";
+import { lineSources, sourceOf } from "./lib/lineSources";
 
 /** Номер клиента в звонке: у входящего — кто звонит, у исходящего — кому. */
 const clientNumber = (c: Pick<Doc<"calls">, "direction" | "from" | "to">) => (c.direction === "in" ? c.from : c.to);
@@ -170,10 +171,12 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   const svc = cat.services.find((s) => s.id === serviceId);
   if (!svc) return null;
   const city = normalizeCity(c.draft?.city) || normalizeCity(env("COMPANY_CITY")) || "Алматы";
+  // Звонок на номер из объявлений OLX (или другой линии с источником) — заявка с этим источником, не «Телефон».
+  const source = sourceOf(c, await lineSources(ctx));
   let client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first();
   const newClient = !client;
   if (!client) {
-    const id = await insertClient(ctx, { name: c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source: "phone" });
+    const id = await insertClient(ctx, { name: c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source });
     client = (await ctx.db.get(id))!;
   }
   const at = nowIso();
@@ -184,7 +187,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
     clientId: client._id,
     clientName: client.name,
     clientPhone: client.phone,
-    source: "phone",
+    source,
     serviceId,
     city,
     description: c.draft?.description ?? c.ai?.summary ?? "Звонок клиента",
@@ -211,7 +214,7 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   // Заявку завёл не человек — автор записи «AI» (ТЗ п.27): оператор видит, что её надо проверить.
   await audit(ctx, "AI", "lead.created", `Заявка №${number}: ${svc.label} — ${shortName(client.name)}${newClient ? " (новый клиент)" : ""}, звонок разобран AI`, {
     entityId: leadId,
-    meta: { source: "phone", serviceId, city, urgency: c.draft?.urgency ?? "normal", clientId: client._id, newClient, callId: c._id, ai: true },
+    meta: { source, serviceId, city, urgency: c.draft?.urgency ?? "normal", clientId: client._id, newClient, callId: c._id, ai: true },
   });
   await notify(ctx, await staffIds(ctx, svc.category), `Звонок разобран AI → заявка №${number}: ${svc.label} (${client.name})`, { link: `/leads?open=${leadId}`, tone: "info", email: { kind: "lead_new", text: `Новая заявка №${number} по звонку: ${svc.label}` } });
   await emitEvent(ctx, "lead.created", { leadId });

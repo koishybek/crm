@@ -2,12 +2,13 @@
 // онлайн-оплата (Freedom Pay, CloudPayments, ссылка Kaspi), реквизиты для документов и выгрузки для 1С.
 // Ключи провайдеров хранятся зашифрованными и обратно не показываются; без подключения — «Не подключено» и шаги настройки.
 import { useQuery } from "convex/react";
-import { Check, CreditCard, ExternalLink, FileText, Link2, PhoneOutgoing, PlugZap, Save, Unplug } from "lucide-react";
+import { Check, CreditCard, ExternalLink, FileText, Link2, PhoneOutgoing, Plus, PlugZap, Save, Trash2, Unplug } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import { ExportButton } from "../components/ExportButton";
 import { Badge, Button, Card, FormRow, Input, Loading, Segmented, Select } from "../components/ui";
-import { checkPbx, disablePay, disablePbx, saveKaspiTemplate, savePay, savePbx, saveRequisites, setPbxExtension } from "../data/adapterActions";
+import { checkPbx, disablePay, disablePbx, saveKaspiTemplate, savePay, savePbx, saveRequisites, setPbxExtension, setPbxLines } from "../data/adapterActions";
+import { SOURCE_IDS, SOURCES } from "../data/catalog";
 import { REQUISITE_FIELDS, requisitesIssues, type CompanyRequisites } from "../data/documents";
 import { ONLINE_PROVIDERS, PAY_INFO, payWebhookPath, type OnlineProvider } from "../data/payIntents";
 import { PBX_INFO, PBX_PROVIDERS, pbxWebhookPath, type PbxProvider } from "../data/pbx";
@@ -169,6 +170,7 @@ function PbxProviderCard() {
         <Steps steps={info.steps} docs={info.docs} />
       </div>
       <Extensions staff={s.staff} />
+      <Lines saved={s.lines} />
     </Card>
   );
 }
@@ -207,6 +209,51 @@ function Extensions({ staff }: { staff: { id: string; name: string; role: string
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** Источник по номеру линии: номер АТС в объявлениях OLX → заявки из звонков на него — «OLX», а не «Телефон». */
+function Lines({ saved }: { saved: { number: string; source: string }[] }) {
+  const [rows, setRows] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setRows(saved), [saved]);
+  const dirty = JSON.stringify(rows) !== JSON.stringify(saved);
+  const patch = (i: number, p: Partial<{ number: string; source: string }>) => setRows((r) => r.map((x, j) => (j === i ? { ...x, ...p } : x)));
+  const save = async () => {
+    setBusy(true);
+    report(await setPbxLines(rows.filter((r) => r.number.trim())), "Источники по номерам сохранены");
+    setBusy(false);
+  };
+  return (
+    <div className="mt-4">
+      <div className="mb-1.5 text-[13.5px] font-semibold text-ink">Источник по номеру</div>
+      <p className="mb-2 text-[12.5px] text-muted">Номер АТС, указанный в объявлениях OLX (или другой рекламе): заявки из звонков на него получат этот источник — в аналитике видно, сколько звонков и заказов принёс OLX. Остальные звонки — «Телефон».</p>
+      <div className="flex flex-col gap-2">
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <Input aria-label="Номер линии" inputMode="tel" placeholder="+7 727 …" value={r.number} onChange={(e) => patch(i, { number: e.target.value })} className="min-w-0 flex-1" />
+            <Select aria-label="Источник" value={r.source} onChange={(e) => patch(i, { source: e.target.value })} className="w-36 shrink-0">
+              {SOURCE_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {SOURCES[id].label}
+                </option>
+              ))}
+            </Select>
+            <Button size="sm" variant="ghost" icon={Trash2} aria-label="Убрать номер" onClick={() => setRows((x) => x.filter((_, j) => j !== i))} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" icon={Plus} onClick={() => setRows((x) => [...x, { number: "", source: "olx" }])}>
+          Добавить номер
+        </Button>
+        {dirty && (
+          <Button size="sm" icon={Save} disabled={busy} onClick={() => void save()}>
+            Сохранить
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
