@@ -11,6 +11,7 @@ import { md5Hex } from "./lib/md5";
 import { zadarmaAuth } from "./lib/pbx/zadarma";
 import { binotel } from "./lib/pbx/binotel";
 import { onlinepbx } from "./lib/pbx/onlinepbx";
+import { kcell } from "./lib/pbx/kcell";
 import type { WebhookInput } from "./lib/pbx/types";
 
 const modules = Object.fromEntries(
@@ -65,7 +66,7 @@ async function setup() {
     return { owner, operator, noExt, manager, client };
   });
   const as = (id: Id<"users">) => t.withIdentity({ subject: `${id}|s` });
-  const connect = async (provider: "binotel" | "zadarma" | "onlinepbx", fields: Record<string, string>) => {
+  const connect = async (provider: "kcell" | "binotel" | "zadarma" | "onlinepbx", fields: Record<string, string>) => {
     await as(ids.owner).action(api.pbx.save, { provider, fields });
     return t.run(async (ctx) => (await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", "pbxSecret")).unique())!.value);
   };
@@ -237,6 +238,56 @@ describe("OnlinePBX", () => {
     expect(talked).toMatchObject({ ok: true, recording: { externalId: "u2", ref: { kind: "id", id: "u2" } } });
     const other = await binotel.parseWebhook(input({ requestType: "somethingElse" }), {});
     expect(other).toMatchObject({ ok: true, events: [] });
+  });
+});
+
+describe("Kcell ВАТС", () => {
+  const KCELL = { domain: "https://homemax.vpbx.kcell.kz/", apiKey: "kkey", crmToken: "ktoken" };
+
+  test("event INCOMING → ACCEPTED, затем history со ссылкой: звонок завершён, запись скачана; чужой crm_token — 403; contact — JSON", async () => {
+    const s = await setup();
+    const key = await s.connect("kcell", KCELL);
+    routes.push((r) => (r.url === "https://records.kcell.example/rec.mp3" ? audio() : null));
+    const common = { crm_token: "ktoken", callid: "33274237", phone: CLIENT, diversion: "77273450000", user: "madina", ext: "101" };
+    expect((await s.post(`/pbx/kcell?key=${key}`, form({ ...common, cmd: "event", type: "INCOMING", direction: "in" }))).status).toBe(200);
+    expect((await s.calls())[0]).toMatchObject({ status: "ringing", direction: "in", from: CLIENT, to: "77273450000", operatorId: s.ids.operator });
+    expect((await s.post(`/pbx/kcell?key=${key}`, form({ ...common, cmd: "event", type: "ACCEPTED", direction: "in" }))).status).toBe(200);
+    const history = await s.post(`/pbx/kcell?key=${key}`, form({ ...common, cmd: "history", type: "in", status: "Success", start: "20261021T090000Z", duration: "84", wait: "5", link: "https://records.kcell.example/rec.mp3" }));
+    expect(history.status).toBe(200);
+    expect(history.headers.get("content-type")).toContain("application/json");
+    await s.flush();
+    expect((await s.calls())[0]).toMatchObject({ status: "completed", duration: 84 });
+    expect((await s.calls())[0]!.recordingId).toBeDefined();
+
+    expect((await s.post(`/pbx/kcell?key=${key}`, form({ ...common, crm_token: "чужой", callid: "x1", cmd: "event", type: "INCOMING", direction: "in" }))).status).toBe(403);
+    const contact = await s.post(`/pbx/kcell?key=${key}`, form({ cmd: "contact", crm_token: "ktoken", phone: CLIENT, callid: "c1" }));
+    expect(contact.status).toBe(200);
+    expect(await contact.json()).toEqual({});
+    expect(await s.calls()).toHaveLength(1);
+  });
+
+  test("разбор без сервера: пропущенный (history missed, CANCELLED) — без записи; адрес АТС только *.kcell.kz", async () => {
+    const input = (o: Record<string, string>): WebhookInput => ({ method: "POST", query: new URLSearchParams(), headers: new Headers(), body: form(o), contentType: "application/x-www-form-urlencoded" });
+    const creds = { domain: "homemax.vpbx.kcell.kz", apiKey: "k", crmToken: "t" };
+    const missed = await kcell.parseWebhook(input({ cmd: "history", crm_token: "t", callid: "m1", type: "in", status: "missed", phone: CLIENT, diversion: "77273450000", duration: "0", link: "https://records.kcell.example/x.mp3" }), creds);
+    expect(missed).toMatchObject({ ok: true, events: [{ event: "missed", direction: "in", from: CLIENT, duration: 0 }] });
+    expect(missed.ok && missed.recording).toBeFalsy();
+    const cancelled = await kcell.parseWebhook(input({ cmd: "event", crm_token: "t", callid: "m2", type: "CANCELLED", direction: "in", phone: CLIENT }), creds);
+    expect(cancelled).toMatchObject({ ok: true, events: [{ event: "missed", externalId: "m2" }] });
+    const s = await setup();
+    await expect(s.connect("kcell", { ...KCELL, domain: "evil.example.com" })).rejects.toThrow("kcell.kz");
+  });
+
+  test("«Позвонить через АТС»: POST /crmapi/v1/makecall с X-API-KEY, короткий номер сотрудника и номер клиента", async () => {
+    const s = await setup();
+    await s.connect("kcell", KCELL);
+    routes.push((r) => (r.url === "https://homemax.vpbx.kcell.kz/crmapi/v1/makecall" ? json({ callid: "2015948553" }) : null));
+    const r = await s.as(s.ids.operator).action(api.calls.dial, { phone: "+7 (707) 123-45-67", clientId: s.ids.client });
+    expect(r).toEqual({ mode: "pbx", provider: "kcell" });
+    const req = seen.find((x) => x.url.endsWith("/crmapi/v1/makecall"))!;
+    expect(req.method).toBe("POST");
+    expect(req.headers.get("x-api-key")).toBe("kkey");
+    expect(JSON.parse(req.body)).toEqual({ phone: CLIENT, user: "101" });
   });
 });
 

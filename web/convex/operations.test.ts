@@ -509,7 +509,7 @@ describe("источник звонка по номеру линии (OLX)", () 
     await s.t.mutation(internal.calls._saveAi, { id: olxCall, status: "done", ai: AI, draft: { serviceId: "ac-repair" }, autoLead: true });
     const lead = await s.get((await s.get(olxCall)).leadId!);
     expect(lead.source).toBe("olx");
-    expect((await s.get(lead.clientId)).source).toBe("olx");
+    expect((await s.t.run((ctx) => ctx.db.get(lead.clientId)))?.source).toBe("olx");
 
     const other = await s.t.run((ctx) => ctx.db.insert("calls", { tenantId: T, direction: "in", from: "77015550131", to: "77273459999", status: "completed", startedAt: iso(Date.now()), aiStatus: "pending" }));
     await s.t.mutation(internal.calls._saveAi, { id: other, status: "done", ai: AI, draft: { serviceId: "ac-repair" }, autoLead: true });

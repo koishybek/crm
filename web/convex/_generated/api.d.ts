@@ -74,6 +74,7 @@ import type * as lib_hmac from "../lib/hmac.js";
 import type * as lib_httpUtil from "../lib/httpUtil.js";
 import type * as lib_intake from "../lib/intake.js";
 import type * as lib_limits from "../lib/limits.js";
+import type * as lib_lineSources from "../lib/lineSources.js";
 import type * as lib_load from "../lib/load.js";
 import type * as lib_login from "../lib/login.js";
 import type * as lib_mail from "../lib/mail.js";
@@ -219,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   "lib/httpUtil": typeof lib_httpUtil;
   "lib/intake": typeof lib_intake;
   "lib/limits": typeof lib_limits;
+  "lib/lineSources": typeof lib_lineSources;
   "lib/load": typeof lib_load;
   "lib/login": typeof lib_login;
   "lib/mail": typeof lib_mail;

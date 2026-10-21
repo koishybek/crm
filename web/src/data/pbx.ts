@@ -2,7 +2,7 @@
 // Общие для сервера (convex/pbx.ts, convex/lib/pbx/*) и карточки «Телефония → Провайдер АТС».
 import type { SourceId } from "./types";
 
-export const PBX_PROVIDERS = ["binotel", "zadarma", "onlinepbx"] as const;
+export const PBX_PROVIDERS = ["kcell", "binotel", "zadarma", "onlinepbx"] as const;
 export type PbxProvider = (typeof PBX_PROVIDERS)[number];
 
 /** Поле подключения: secret — хранится зашифрованным и обратно не показывается. */
@@ -25,6 +25,20 @@ export interface PbxProviderInfo {
 }
 
 export const PBX_INFO: Record<PbxProvider, PbxProviderInfo> = {
+  kcell: {
+    label: "Kcell ВАТС",
+    docs: "https://manual.kcell.kz/rest_api",
+    fields: [
+      { key: "domain", label: "Адрес АТС", secret: false, placeholder: "company.vpbx.kcell.kz", hint: "Адрес вашего личного кабинета ВАТС, без https://" },
+      { key: "apiKey", label: "Ключ для авторизации в АТС", secret: true, hint: "ВАТС → Интеграции → «Другая CRM (REST API)»" },
+      { key: "crmToken", label: "Ключ CRM (token)", secret: true, hint: "Задаётся там же — АТС присылает его в каждом событии" },
+    ],
+    steps: [
+      "Личный кабинет ВАТС Kcell → Интеграции → «Другая CRM (REST API)»: включите интеграцию (опция «Интеграция с CRM»).",
+      "В поле адреса CRM вставьте «Адрес для АТС» ниже; ключ CRM (token) и «Ключ для авторизации в АТС» из этой интеграции впишите здесь.",
+      "Включите запись звонков и укажите сотрудникам их короткие номера ВАТС — тогда работает «Позвонить через АТС», а входящие привязываются к оператору.",
+    ],
+  },
   binotel: {
     label: "Binotel",
     docs: "https://developers.binotel.ua/",
@@ -78,6 +92,12 @@ export function cleanExtension(raw: string): string | null | "invalid" {
   if (!s) return null;
   return /^\d{1,8}$/.test(s) ? s : "invalid";
 }
+
+/** Адрес ВАТС Kcell: поддомен kcell.kz («company.vpbx.kcell.kz») — без схемы и пути. */
+export const KCELL_DOMAIN = /^[a-z0-9][a-z0-9-]{0,62}(\.[a-z0-9][a-z0-9-]{0,62})*\.kcell\.kz$/;
+
+/** Адрес АТС, как его вставили: без https:// и пути, строчными. */
+export const cleanPbxDomain = (raw: string): string => raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
 /** Домен OnlinePBX: «company.onpbx.ru» — без схемы и пути. */
 export const ONLINEPBX_DOMAIN = /^[a-z0-9][a-z0-9-]{0,62}\.onpbx\.ru$/;

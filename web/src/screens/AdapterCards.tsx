@@ -104,7 +104,7 @@ function Fields({ defs, values, onChange, saved }: { defs: FieldDef[]; values: R
 
 function PbxProviderCard() {
   const s = useQuery(api.pbx.settings);
-  const [provider, setProvider] = useState<PbxProvider>("binotel");
+  const [provider, setProvider] = useState<PbxProvider>(PBX_PROVIDERS[0]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   useEffect(() => {

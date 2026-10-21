@@ -20,7 +20,7 @@ import { integrationsKeyIssue, isSealed, openSecret, sealSecret, SecretBoxError 
 import { normalizeLogin } from "./lib/login";
 import { RECORDING_MAX_BYTES } from "./ai";
 import { env } from "./env";
-import { cleanExtension, isPbxProvider, ONLINEPBX_DOMAIN, PBX_INFO, PBX_PROVIDERS, type DialResult, type PbxDialState, type PbxProvider, type PbxSettingsView } from "../src/data/pbx";
+import { cleanExtension, cleanPbxDomain, isPbxProvider, KCELL_DOMAIN, ONLINEPBX_DOMAIN, PBX_INFO, PBX_PROVIDERS, type DialResult, type PbxDialState, type PbxProvider, type PbxSettingsView } from "../src/data/pbx";
 import { ROLE_LABEL } from "../src/data/catalog";
 import { actionFor } from "./lib/tenantDb";
 import { lockText } from "../src/data/plans";
@@ -144,9 +144,11 @@ function cleanFields(provider: PbxProvider, raw: Record<string, string>, keepSec
       if (f.optional || (f.secret && keepSecrets)) continue;
       throw new ConvexError(`Заполните поле «${f.label}»`);
     }
-    if (f.key === "domain" && !ONLINEPBX_DOMAIN.test(value.toLowerCase())) throw new ConvexError("Домен АТС — вида company.onpbx.ru");
+    const domain = f.key === "domain" ? cleanPbxDomain(value) : null;
+    if (domain !== null && provider === "onlinepbx" && !ONLINEPBX_DOMAIN.test(domain)) throw new ConvexError("Домен АТС — вида company.onpbx.ru");
+    if (domain !== null && provider === "kcell" && !KCELL_DOMAIN.test(domain)) throw new ConvexError("Адрес АТС Kcell — вида company.vpbx.kcell.kz");
     if (f.key === "companyId" && !/^\d{1,12}$/.test(value)) throw new ConvexError("Номер компании Binotel — только цифры");
-    (f.secret ? secret : pub)[f.key] = f.key === "domain" ? value.toLowerCase() : value;
+    (f.secret ? secret : pub)[f.key] = domain ?? value;
   }
   return { pub, secret };
 }
