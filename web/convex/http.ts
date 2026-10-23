@@ -15,6 +15,7 @@ import { createLeadHttp, getLeadHttp, getOrderHttp, openApiHttp, servicesHttp } 
 import { leadOptions, leadPost } from "./site";
 import { payWebhook } from "./payments";
 import { pbxWebhook } from "./pbx";
+import { RECORDING_MAX_BYTES } from "./ai";
 import { PBX_PROVIDERS, pbxWebhookPath } from "../src/data/pbx";
 import { ONLINE_PROVIDERS, payWebhookPath } from "../src/data/payIntents";
 
@@ -130,6 +131,66 @@ http.route({
       return reject(500, "error", "Событие АТС не сохранено — внутренняя ошибка");
     }
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }),
+});
+
+// ── Запись разговора файлом: POST /pbx/recording ─────────────────────────────
+// Для телефона оператора на Android (Tasker): события звонка — на /pbx/events, после звонка — сам аудиофайл сюда.
+// Ключ — X-Pbx-Secret, как у /pbx/events. Тело — файл как есть (до 50 МБ); о звонке — в адресе: callId (тот же, что в
+// событиях), direction, from, to, operator, duration, at. Повтор той же записи (телефон досылает после обрыва) — без
+// второго файла. Дальше как у записи от АТС: хранилище → звонок → разбор AI → заявка.
+http.route({
+  path: "/pbx/recording",
+  method: "POST",
+  handler: httpAction(async (base, request) => {
+    const url = new URL(request.url);
+    const header = request.headers.get("x-pbx-secret");
+    const given = header ?? url.searchParams.get("secret");
+    const found = await base.runQuery(internal.calls._pbxTenant, { given: (given ?? "").slice(0, 200) });
+    if (!found.configured) return new Response("not configured", { status: 503 });
+    if (!given || !found.tenantId) {
+      await base.runMutation(internal.calls._pbxRejected, { via: header !== null ? "header" : given ? "query" : "none" });
+      return new Response("forbidden", { status: 403 });
+    }
+    const ctx = actionFor(base, found.tenantId);
+    const reject = async (status: number, body: string, why: string) => {
+      await ctx.runMutation(internal.health._mark, { key: "pbx", ok: false, note: why });
+      return new Response(body, { status });
+    };
+    if (found.locked) return reject(403, "module disabled", lockText("telephony"));
+    const q = (k: string) => url.searchParams.get(k)?.trim() || undefined;
+    const callId = q("callId");
+    if (!callId || callId.length > 120) return reject(400, "callId required", "Телефон прислал запись без номера звонка (callId)");
+    const tooLarge = "Телефон прислал запись больше 50 МБ";
+    if (Number(request.headers.get("content-length") ?? 0) > RECORDING_MAX_BYTES) return reject(413, "too large", tooLarge);
+    const known = await ctx.runQuery(internal.pbx._recordingState, { externalId: callId });
+    const ok = (extra: Record<string, unknown> = {}) => new Response(JSON.stringify({ ok: true, ...extra }), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (known?.recorded) return ok({ duplicate: true });
+    const type = request.headers.get("content-type") ?? "";
+    if (/^(text\/|application\/(json|xml|xhtml|x-www-form-urlencoded))/i.test(type)) return reject(415, "audio required", "Телефон прислал не аудиофайл");
+    const blob = await request.blob();
+    if (!blob.size) return reject(400, "empty", "Телефон прислал пустую запись");
+    if (blob.size > RECORDING_MAX_BYTES) return reject(413, "too large", tooLarge);
+    const duration = Number(q("duration"));
+    try {
+      // Запись есть — значит, разговор был: длительность не меньше секунды, иначе звонок посчитался бы пропущенным.
+      const id = await ctx.runMutation(internal.calls._ingest, {
+        event: "ended",
+        externalId: callId,
+        direction: q("direction") === "out" ? "out" : "in",
+        from: q("from"),
+        to: q("to"),
+        operator: q("operator"),
+        duration: Number.isFinite(duration) && duration >= 1 ? duration : 1,
+        at: known ? undefined : q("at"),
+      });
+      const storageId = await ctx.storage.store(blob);
+      await ctx.runMutation(internal.pbx._recordingStored, { callId: id, storageId });
+    } catch (e) {
+      console.error(`Запись с телефона не сохранена: ${e instanceof Error ? e.name : "ошибка"}`);
+      return reject(500, "error", "Запись с телефона не сохранена — внутренняя ошибка");
+    }
+    return ok();
   }),
 });
 

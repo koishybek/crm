@@ -241,6 +241,31 @@ describe("OnlinePBX", () => {
   });
 });
 
+describe("Телефон оператора на Android: запись файлом", () => {
+  test("ringing на /pbx/events, затем файл на /pbx/recording: звонок завершён, запись сохранена; повтор — без второго файла; без ключа — 403; не аудио — 415", async () => {
+    const s = await setup();
+    const key = await s.connect("zadarma", { key: "zkey", secret: "zsecret" });
+    const ringing = await s.t.fetch("/pbx/events", { method: "POST", headers: { "Content-Type": "application/json", "X-Pbx-Secret": key }, body: JSON.stringify({ event: "ringing", callId: "op1-1761200000", direction: "in", from: CLIENT, operator: "101" }) });
+    expect(ringing.status).toBe(200);
+    expect((await s.calls())[0]).toMatchObject({ status: "ringing", from: CLIENT, operatorId: s.ids.operator });
+
+    const upload = (callId: string, headers: Record<string, string>, type = "audio/mp4") =>
+      s.t.fetch(`/pbx/recording?callId=${callId}&direction=in&from=${CLIENT}&duration=42`, { method: "POST", headers: { "Content-Type": type, ...headers }, body: MP3 });
+    expect((await upload("op1-1761200000", {})).status).toBe(403);
+    expect((await upload("op1-1761200000", { "X-Pbx-Secret": key })).status).toBe(200);
+    await s.flush();
+    const [call] = await s.calls();
+    expect(call).toMatchObject({ status: "completed", duration: 42 });
+    expect(call!.recordingId).toBeDefined();
+
+    // Телефон дослал ту же запись повторно (пропадал интернет) — второй файл не сохраняем.
+    expect((await upload("op1-1761200000", { "X-Pbx-Secret": key })).status).toBe(200);
+    expect(await s.t.run((ctx) => ctx.db.system.query("_storage").collect())).toHaveLength(1);
+    expect((await upload("op1-other", { "X-Pbx-Secret": key }, "text/html")).status).toBe(415);
+    expect(await s.calls()).toHaveLength(1);
+  });
+});
+
 describe("Kcell ВАТС", () => {
   const KCELL = { domain: "https://homemax.vpbx.kcell.kz/", apiKey: "kkey", crmToken: "ktoken" };
 

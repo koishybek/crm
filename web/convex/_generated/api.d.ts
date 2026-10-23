@@ -93,6 +93,7 @@ import type * as lib_pay_index from "../lib/pay/index.js";
 import type * as lib_pay_types from "../lib/pay/types.js";
 import type * as lib_pbx_binotel from "../lib/pbx/binotel.js";
 import type * as lib_pbx_index from "../lib/pbx/index.js";
+import type * as lib_pbx_kcell from "../lib/pbx/kcell.js";
 import type * as lib_pbx_onlinepbx from "../lib/pbx/onlinepbx.js";
 import type * as lib_pbx_types from "../lib/pbx/types.js";
 import type * as lib_pbx_zadarma from "../lib/pbx/zadarma.js";
@@ -239,6 +240,7 @@ declare const fullApi: ApiFromModules<{
   "lib/pay/types": typeof lib_pay_types;
   "lib/pbx/binotel": typeof lib_pbx_binotel;
   "lib/pbx/index": typeof lib_pbx_index;
+  "lib/pbx/kcell": typeof lib_pbx_kcell;
   "lib/pbx/onlinepbx": typeof lib_pbx_onlinepbx;
   "lib/pbx/types": typeof lib_pbx_types;
   "lib/pbx/zadarma": typeof lib_pbx_zadarma;

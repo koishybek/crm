@@ -140,6 +140,8 @@ export function TelephonyCard() {
       ) : (
         <div className="mt-3 space-y-3">
           <CopyRow label="Адрес для событий (webhook)" value={s.url} />
+          {/* Телефон оператора на Android (Tasker) после звонка шлёт сюда сам аудиофайл, ключ — тот же. */}
+          <CopyRow label="Адрес для записей файлом (телефон на Android)" value={s.url.replace(/\/pbx\/events$/, "/pbx/recording")} />
           <CopyRow
             label="Ключ — заголовок X-PBX-Secret"
             value={secret ?? ""}

@@ -368,6 +368,18 @@ export const _callByExternal = internalQuery({
     )?._id ?? null,
 });
 
+/** Звонок по номеру у источника: есть ли уже запись (POST /pbx/recording не сохраняет её второй раз). */
+export const _recordingState = internalQuery({
+  args: { externalId: v.string() },
+  handler: async (ctx, { externalId }): Promise<{ id: Id<"calls">; recorded: boolean } | null> => {
+    const c = await ctx.db
+      .query("calls")
+      .withIndex("by_external", (q) => q.eq("externalId", externalId))
+      .first();
+    return c ? { id: c._id, recorded: !!c.recordingId } : null;
+  },
+});
+
 /**
  * POST /pbx/<провайдер>?key=<ключ АТС>: ключ АТС (как у /pbx/events), выбранный владельцем провайдер, подпись провайдера
  * (у Zadarma) → события в calls._ingest → скачивание записи фоном. GET — проверка адреса (Zadarma: zd_echo).
