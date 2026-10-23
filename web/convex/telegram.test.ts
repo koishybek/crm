@@ -205,6 +205,44 @@ describe("телефония", () => {
   });
 });
 
+describe("запись разговора от сотрудника («Поделиться» → бот)", () => {
+  test("номер и имя в подписи → звонок с записью, AI, заявка на это имя; без номера бот спрашивает, номер ответом → заявка", async () => {
+    vi.useFakeTimers();
+    vi.stubEnv("AI_URL", "https://ai.test");
+    vi.stubEnv("AI_SECRET", "s");
+    // Telegram отдаёт файл: getFile → путь, затем сам файл.
+    const base = fetch as unknown as (url: string, init?: RequestInit) => Promise<Response>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).endsWith("/getFile")) return Response.json({ ok: true, result: { file_path: "music/call.m4a", file_size: 2048 } });
+        if (String(url).startsWith("https://api.telegram.org/file/")) return new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "application/octet-stream" } });
+        return base(url, init);
+      }),
+    );
+    const { t, ids } = await setup();
+    const calls = () => t.run((ctx) => ctx.db.query("calls").collect());
+
+    const document = { file_id: "f1", file_name: "Call recording_241023_101500.m4a", mime_type: "audio/mp4" };
+    await t.action(internal.telegram.handleUpdate, msg(100, "", { text: undefined, caption: "Ерлан Сериков +7 701 555 01 60", document }));
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    const [first] = await calls();
+    expect(first).toMatchObject({ from: "77015550160", status: "completed", aiStatus: "done", operatorId: ids.owner });
+    expect(first!.recordingId).toBeDefined();
+    expect(await t.run((ctx) => ctx.db.get(first!.leadId!))).toMatchObject({ clientName: "Ерлан Сериков", clientPhone: "77015550160", serviceId: "wm-repair" });
+    expect(texts().some((s) => s.includes("Принято"))).toBe(true);
+
+    await t.action(internal.telegram.handleUpdate, msg(100, "", { text: undefined, audio: { file_id: "f2", duration: 95 } }));
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    expect(texts().at(-1)).toContain("номер клиента");
+    await t.action(internal.telegram.handleUpdate, msg(100, "8 (701) 555-01-61"));
+    const second = (await calls()).find((c) => c._id !== first!._id)!;
+    expect(second).toMatchObject({ from: "77015550161", duration: 95 });
+    expect(second.leadId).toBeDefined();
+    expect(texts().at(-1)).toContain("заявка №");
+  });
+});
+
 describe("запись звонка → AI", () => {
   test("из формы заявки AI только заполняет звонок, из раздела «Звонки» — сам создаёт заявку; звонок связывается с одной заявкой", async () => {
     vi.useFakeTimers();

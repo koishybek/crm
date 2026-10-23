@@ -116,6 +116,99 @@ export const upload = mutation({
   },
 });
 
+/**
+ * Запись разговора, которую сотрудник прислал боту («Поделиться» → Telegram с телефона без АТС): как загрузка из
+ * «Звонков» — звонок, разбор AI, заявка. Номер и имя — из подписи к файлу; номера нет — бот спросит (_setPhone).
+ * Сотрудник — по привязанному чату; мастеру и чужим так нельзя.
+ */
+export const _fromBot = internalMutation({
+  args: { chatId: v.string(), storageId: v.id("_storage"), externalId: v.string(), phone: v.optional(v.string()), name: v.optional(v.string()), duration: v.optional(v.number()) },
+  handler: async (ctx, a): Promise<Id<"calls"> | null> => {
+    const me = await ctx.db
+      .query("users")
+      .withIndex("by_telegram_chat", (q) => q.eq("telegramChatId", a.chatId))
+      .first();
+    if (!me?.role || me.role === "executor" || me.active === false) {
+      await ctx.storage.delete(a.storageId);
+      return null;
+    }
+    const p = normPhone(a.phone);
+    const client = validPhone(p) ? await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first() : null;
+    const duration = a.duration && a.duration > 0 ? Math.round(a.duration) : undefined;
+    const end = Date.now();
+    const id = await ctx.db.insert("calls", {
+      tenantId: tenantOf(ctx),
+      externalId: a.externalId,
+      direction: "in",
+      from: p,
+      to: "",
+      clientId: client?._id,
+      // Имя из подписи — для нового клиента (leadFromCall); известного клиента зовём как в базе.
+      clientName: client?.name ?? a.name,
+      operatorId: me._id,
+      status: "completed",
+      startedAt: new Date(end - (duration ?? 0) * 1000).toISOString(),
+      endedAt: new Date(end).toISOString(),
+      duration,
+      recordingId: a.storageId,
+      aiStatus: "pending",
+    });
+    await ctx.scheduler.runAfter(0, internal.ai.processCall, { callId: id });
+    const who = client ? ` — ${shortName(client.name)}` : validPhone(p) ? ` — номер ${maskPhone(p)}` : "";
+    await audit(ctx, me, "call.uploaded", `Запись разговора прислана в Telegram${who}: AI разберёт её и создаст заявку`, { entityId: id, meta: { clientId: client?._id, via: "telegram" } });
+    return id;
+  },
+});
+
+/** Номер клиента ответом боту для записи без номера: привязка к клиенту и, если AI уже разобрал, — заявка. */
+export const _setPhone = internalMutation({
+  args: { callId: v.id("calls"), phone: v.string() },
+  handler: async (ctx, { callId, phone }): Promise<{ ok: boolean; leadNumber?: number }> => {
+    const c = await ctx.db.get(callId);
+    const p = normPhone(phone);
+    if (!c || !validPhone(p)) return { ok: false };
+    const client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first();
+    await ctx.db.patch(callId, { from: p, ...(client ? { clientId: client._id, clientName: client.name } : {}) });
+    const fresh = (await ctx.db.get(callId))!;
+    // AI ещё разбирает — заявку создаст он сам (_saveAi), номер уже на звонке.
+    if (fresh.aiStatus !== "done" || fresh.leadId) return { ok: true };
+    const leadId = await leadFromCall(ctx, fresh);
+    return { ok: true, leadNumber: leadId ? (await ctx.db.get(leadId))?.number : undefined };
+  },
+});
+
+/** Бот ждёт номер клиента к записи из этого чата (6 часов): ответ с номером — к ней. callId=null — больше не ждём. */
+const AWAIT_PHONE_MS = 6 * 3600_000;
+const awaitKey = (chatId: string) => `tg.awaitPhone.${chatId}`;
+
+export const _awaitPhone = internalMutation({
+  args: { chatId: v.string(), callId: v.union(v.id("calls"), v.null()) },
+  handler: async (ctx, { chatId, callId }): Promise<void> => {
+    const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", awaitKey(chatId))).unique();
+    if (callId === null) {
+      if (row) await ctx.db.delete(row._id);
+      return;
+    }
+    const value = JSON.stringify({ callId, at: Date.now() });
+    if (row) await ctx.db.patch(row._id, { value });
+    else await ctx.db.insert("settings", { key: awaitKey(chatId), value });
+  },
+});
+
+export const _awaitingPhone = internalQuery({
+  args: { chatId: v.string() },
+  handler: async (ctx, { chatId }): Promise<Id<"calls"> | null> => {
+    const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", awaitKey(chatId))).unique();
+    if (!row) return null;
+    try {
+      const o = JSON.parse(row.value) as { callId?: string; at?: number };
+      return o.callId && o.at && Date.now() - o.at < AWAIT_PHONE_MS ? ctx.db.normalizeId("calls", o.callId) : null;
+    } catch {
+      return null;
+    }
+  },
+});
+
 export const reprocess = mutation({
   args: { id: v.id("calls") },
   handler: async (ctx, { id }): Promise<void> => {
@@ -176,7 +269,9 @@ async function leadFromCall(ctx: MutationCtx, c: Doc<"calls">): Promise<Id<"lead
   let client = await ctx.db.query("clients").withIndex("by_phone", (q) => q.eq("phone", p)).first();
   const newClient = !client;
   if (!client) {
-    const id = await insertClient(ctx, { name: c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source });
+    // Имя, которое оператор вписал сам (подпись к записи в боте), надёжнее имени, услышанного AI.
+    const hinted = c.clientId ? undefined : c.clientName;
+    const id = await insertClient(ctx, { name: hinted ?? c.draft?.clientName ?? `Клиент ${fmtPhone(p)}`, phone: p, city, address: c.draft?.address, source });
     client = (await ctx.db.get(id))!;
   }
   const at = nowIso();

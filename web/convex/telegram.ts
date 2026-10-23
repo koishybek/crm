@@ -176,7 +176,8 @@ type TgUpdate = { message?: TgMessage; callback_query?: { id: string; data?: str
 
 const HELP_EXECUTOR =
   "Я присылаю новые заказы по вашей специализации — их можно взять кнопкой «Взять заказ».\n\n/feed — свободные заказы\n/orders — мои заказы с кнопками: начать, завершить\n\nАдрес и телефон клиента появляются, как только заказ ваш.";
-const HELP_STAFF = "Я присылаю новые заявки, события по заказам и утреннюю сводку в 9:00.\n\n/orders — сводка прямо сейчас";
+const HELP_STAFF =
+  "Я присылаю новые заявки, события по заказам и утреннюю сводку в 9:00.\n\n/orders — сводка прямо сейчас\n\nЗапись разговора с клиентом: после звонка «Поделиться» → этот чат, в подписи — имя и номер клиента. AI разберёт её и создаст заявку.";
 const HELP_CLIENT = `Здравствуйте! 👋 Это ${APP_NAME}. Опишите, что случилось и где вы находитесь — можно текстом или голосовым. Затем поделитесь номером, и оператор перезвонит.`;
 
 const fullName = (u?: { first_name?: string; last_name?: string }) => [u?.first_name, u?.last_name].filter(Boolean).join(" ").trim() || undefined;
@@ -189,6 +190,62 @@ async function linkedUser(ctx: ActionCtx, chatId: string): Promise<{ role: strin
 async function sendCards(chatId: string, cards: CardData[], header: (c: CardData) => string) {
   const app = appUrl();
   for (const c of cards) await sendHtml(chatId, cardHtml(c, header(c)), inline(workerButtons(c.status, c.id, app)));
+}
+
+// ── Сотрудник присылает запись разговора («Поделиться» → бот) ───────────────
+// Телефон оператора без АТС пишет звонки сам; запись оператор отправляет боту — дальше как запись от АТС: звонок, AI,
+// заявка. Номер и имя клиента — в подписи к файлу (или номер в имени файла); номера нет — бот спрашивает.
+
+const AUDIO_EXT: Record<string, string> = { m4a: "audio/mp4", mp4: "audio/mp4", aac: "audio/aac", mp3: "audio/mpeg", amr: "audio/amr", awb: "audio/amr-wb", ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", "3gp": "audio/3gpp", flac: "audio/flac" };
+const extOf = (name?: string) => /\.([a-z0-9]+)$/i.exec(name ?? "")?.[1]?.toLowerCase();
+
+/** Аудиофайл в сообщении: запись разговора, голосовое или документ-аудио. */
+function recordingIn(msg: TgMessage): { fileId: string; fileName?: string; duration?: number; type?: string } | null {
+  if (msg.audio) return { fileId: msg.audio.file_id, fileName: msg.audio.file_name, duration: msg.audio.duration };
+  if (msg.voice) return { fileId: msg.voice.file_id, fileName: "voice.ogg", duration: msg.voice.duration };
+  const d = msg.document;
+  const ext = extOf(d?.file_name);
+  if (d && (d.mime_type?.startsWith("audio/") || (ext && AUDIO_EXT[ext]))) return { fileId: d.file_id, fileName: d.file_name, type: d.mime_type };
+  return null;
+}
+
+/** Казахстанский номер в тексте («+7 701 555 01 60», «8 (701) 555-01-60», «87015550160») → «77015550160». */
+export function phoneIn(s: string): string | null {
+  const m = /(?:\+\s*7|\b7|\b8)[\s\-()]*(\d{3})[\s\-()]*(\d{3})[\s\-]*(\d{2})[\s\-]*(\d{2})(?!\d)/.exec(s);
+  return m ? `7${m[1]}${m[2]}${m[3]}${m[4]}` : null;
+}
+
+/** Имя из подписи: подпись без номера, если в ней есть буквы. */
+function nameIn(caption: string): string | undefined {
+  const m = /(?:\+\s*7|\b7|\b8)[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}(?!\d)/.exec(caption);
+  const rest = (m ? caption.replace(m[0], " ") : caption).replace(/[,;:|]+/g, " ").replace(/\s+/g, " ").trim();
+  return /\p{L}/u.test(rest) ? rest.slice(0, 80) : undefined;
+}
+
+async function staffRecording(ctx: ActionCtx, chatId: string, msg: TgMessage, rec: NonNullable<ReturnType<typeof recordingIn>>) {
+  const caption = (msg.caption ?? "").trim();
+  const phone = phoneIn(caption) ?? phoneIn(rec.fileName ?? "");
+  const file = await download(rec.fileId);
+  if (!file) return void (await sendHtml(chatId, "Не получилось скачать запись: бот принимает файлы до 20 МБ. Отправьте файл ещё раз или загрузите его в разделе «Звонки»."));
+  // Тип — по расширению: Telegram отдаёт файлы как application/octet-stream, а расшифровке нужен аудиоформат.
+  const type = AUDIO_EXT[extOf(rec.fileName) ?? ""] ?? (rec.type?.startsWith("audio/") ? rec.type : "audio/mp4");
+  const storageId = await ctx.storage.store(new Blob([file], { type }));
+  const callId = await ctx.runMutation(internal.calls._fromBot, { chatId, storageId, externalId: `tg:${chatId}:${msg.message_id}`, phone: phone ?? undefined, name: nameIn(caption), duration: rec.duration });
+  if (!callId) return;
+  await ctx.runMutation(internal.calls._awaitPhone, { chatId, callId: phone ? null : callId });
+  await sendHtml(
+    chatId,
+    phone
+      ? "Принято 🎧 Разбираю запись — через 1–3 минуты в системе будут звонок, сводка и заявка."
+      : "Принято 🎧 Разбираю запись. <b>Пришлите номер клиента</b> одним сообщением — без него заявку не создать.\n\nВ следующий раз впишите номер и имя в подпись к файлу — тогда спрашивать не буду.",
+  );
+}
+
+async function staffPhone(ctx: ActionCtx, chatId: string, callId: Id<"calls">, phone: string) {
+  const r = await ctx.runMutation(internal.calls._setPhone, { callId, phone });
+  if (!r.ok) return void (await sendHtml(chatId, "Не узнал номер — пришлите его полностью, например +7 701 123 45 67."));
+  await ctx.runMutation(internal.calls._awaitPhone, { chatId, callId: null });
+  await sendHtml(chatId, r.leadNumber ? `Номер записан → заявка №${r.leadNumber} ✅` : "Номер записан ✅ Как только AI разберёт запись, появится заявка.");
 }
 
 // ── Клиенты: заявка через бота, вся переписка — в «Сообщениях» ─────────────
@@ -513,6 +570,14 @@ export const handleUpdate = internalAction({
         await sendHtml(chatId, text === "/feed" ? `<b>Свободные заказы: ${r.cards.length}</b>` : `<b>Ваши заказы: ${r.cards.length}</b>`);
         await sendCards(chatId, r.cards, (c) => (text === "/feed" ? `🆕 Заказ №${c.number}` : `Заказ №${c.number}`));
         return;
+      }
+      if (who.role !== "executor") {
+        // Запись разговора с телефона оператора — в «Звонки» и на разбор AI; номер ответом — к последней записи без номера.
+        const rec = recordingIn(msg);
+        if (rec) return void (await staffRecording(ctx, chatId, msg, rec));
+        const phone = phoneIn(text);
+        const waiting = phone ? await ctx.runQuery(internal.calls._awaitingPhone, { chatId }) : null;
+        if (phone && waiting) return void (await staffPhone(ctx, chatId, waiting, phone));
       }
       return void (await sendHtml(chatId, esc(who.role === "executor" ? HELP_EXECUTOR : HELP_STAFF)));
     }
