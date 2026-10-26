@@ -39,7 +39,8 @@ export function CategoryLabel({ cats }: { cats: CategoryId[] }) {
 }
 
 export default function Executors() {
-  const isOwner = useMe()?.role === "owner";
+  const role = useMe()?.role;
+  const canAdd = role === "owner" || role === "operator";
   const data = useQuery(api.executors.list);
   const db = useMemo(() => ({ executors: data?.executors ?? [], orders: data?.load ?? [] }), [data]);
   const nav = useNavigate();
@@ -69,8 +70,8 @@ export default function Executors() {
         actions={
           <>
             <ExportButton kinds={["executors", "payouts"]} height={50} />
-            {/* Добавить исполнителя = выдать ему логин и пароль: только владелец (сервер проверяет так же). */}
-            {isOwner && (
+            {/* Добавить исполнителя = выдать ему логин и пароль: владелец и оператор (сервер проверяет так же). */}
+            {canAdd && (
               <Button size="lg" icon={Plus} className="h-[50px] text-[15px]" onClick={() => ui.openExecutor()}>
                 Добавить исполнителя
               </Button>

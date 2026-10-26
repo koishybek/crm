@@ -208,11 +208,12 @@ export const _insert = internalMutation({
   },
 });
 
-/** Новый исполнитель: профиль + логин (его телефон) + временный пароль — показать один раз. Доступ выдаёт только владелец. */
+/** Новый исполнитель: профиль + логин (его телефон) + временный пароль — показать один раз. Добавляют владелец и оператор. */
 export const create = action({
   args: fields,
   handler: async (ctx, a): Promise<{ id: Id<"executors">; login: string; password: string }> => {
-    if ((await ctx.runQuery(internal.users._viewerRole, {})) !== "owner") throw new ConvexError("Добавлять исполнителей и выдавать им доступ может только владелец");
+    const role = await ctx.runQuery(internal.users._viewerRole, {});
+    if (role !== "owner" && role !== "operator") throw new ConvexError("Добавлять исполнителей может владелец или оператор");
     const phone = normalizeLogin(a.phone);
     if (!a.name.trim()) throw new ConvexError("Укажите имя");
     if (!/^7\d{10}$/.test(phone)) throw new ConvexError("Укажите телефон полностью");
