@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { action, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./lib/functions";
-import { currentUser, OWNER, requireRole, scopeOf, TEAM } from "./lib/access";
+import { currentUser, OWNER, requireRole, scopeOf, STAFF, TEAM } from "./lib/access";
 import { almatyStamp, audit, ChangeLog, listDiff, listDiffText, quote, type AuditActor } from "./lib/audit";
 import { executorUser, notify, nowIso } from "./lib/domain";
 import { executorFor, orderFor, toUser } from "./lib/dto";
@@ -205,6 +205,41 @@ export const _insert = internalMutation({
       meta: { categories, skills },
     });
     return id;
+  },
+});
+
+/**
+ * Удалить исполнителя, у которого ещё нет заказов, выплат и отзывов (добавили по ошибке, не успели отдать пароль):
+ * профиль, пользователь, логин и входы — телефон освобождается под новый аккаунт. С историей — нельзя: пропали бы
+ * заказы мастера в отчётах; тогда новый пароль или отключение доступа. Владелец и оператор — как при добавлении.
+ */
+export const remove = mutation({
+  args: { id: v.id("executors") },
+  handler: async (ctx, { id }): Promise<void> => {
+    const me = await requireRole(ctx, STAFF);
+    const e = await ctx.db.get(id);
+    if (!e) throw new ConvexError("Исполнитель не найден");
+    const busy =
+      (await ctx.db.query("orders").withIndex("by_executor", (q) => q.eq("executorId", id)).first()) ??
+      (await ctx.db.query("payouts").withIndex("by_executor", (q) => q.eq("executorId", id)).first()) ??
+      (await ctx.db.query("reviews").withIndex("by_executor", (q) => q.eq("executorId", id)).first());
+    if (busy) throw new ConvexError("У исполнителя есть заказы — удалить нельзя, иначе пропадёт история. Выдайте ему новый пароль или отключите доступ");
+    // Логины и входы — общие таблицы Convex Auth, без компании.
+    const auth = unscopedDb(ctx);
+    for (const u of await ctx.db.query("users").withIndex("by_executor", (q) => q.eq("executorId", id)).collect()) {
+      for (const acc of await auth.query("authAccounts").withIndex("userIdAndProvider", (q) => q.eq("userId", u._id)).collect()) {
+        for (const code of await auth.query("authVerificationCodes").withIndex("accountId", (q) => q.eq("accountId", acc._id)).collect()) await auth.delete(code._id);
+        await auth.delete(acc._id);
+      }
+      for (const s of await auth.query("authSessions").withIndex("userId", (q) => q.eq("userId", u._id)).collect()) {
+        for (const r of await auth.query("authRefreshTokens").withIndex("sessionId", (q) => q.eq("sessionId", s._id)).collect()) await auth.delete(r._id);
+        await auth.delete(s._id);
+      }
+      for (const p of await ctx.db.query("pushSubscriptions").withIndex("by_user", (q) => q.eq("userId", u._id)).collect()) await ctx.db.delete(p._id);
+      await ctx.db.delete(u._id);
+    }
+    await ctx.db.delete(id);
+    await audit(ctx, me, "executor.deleted", `Удалён исполнитель ${shortName(e.name)} (без заказов) — его телефон свободен для нового аккаунта`, { entityId: id });
   },
 });
 

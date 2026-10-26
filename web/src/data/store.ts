@@ -142,6 +142,7 @@ export const setExecutorAvailable = (id: string, available: boolean) => run(conv
 
 // ── Команда и прочее ─────────────────────────────────────────────────────────
 export const createStaff = (a: { name: string; login: string; role: "owner" | "operator" | "manager"; categories?: string[] }) => run(convex.action(api.users.createStaff, a));
+export const removeExecutor = (id: string) => run(convex.mutation(api.executors.remove, { id: eid(id) }));
 export const resetPassword = (userId: string) => run(convex.action(api.users.resetPassword, { userId: userId as Id<"users"> }));
 export const setUserActive = (userId: string, active: boolean) => run(convex.mutation(api.users.setActive, { userId: userId as Id<"users">, active }));
 export const markAllRead = () => run(convex.mutation(api.notifications.markAllRead, {}));

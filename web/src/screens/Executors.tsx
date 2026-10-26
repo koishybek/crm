@@ -1,4 +1,4 @@
-import { KeyRound, Briefcase, CalendarDays, ClipboardCheck, Ellipsis, MapPin, Moon, Pencil, Phone, Plus, Search, Truck, Users, Wallet, Clock, Ban, TrendingUp, FileText } from "lucide-react";
+import { KeyRound, Briefcase, CalendarDays, ClipboardCheck, Ellipsis, MapPin, Moon, Pencil, Phone, Plus, Search, Truck, Users, Wallet, Clock, Ban, TrendingUp, FileText, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { APP_NAME, CATEGORIES, CITIES, SERVICES, categoryById } from "../data/catalog";
@@ -7,7 +7,7 @@ import { EXEC_STATE, executorState, executorStats, isInWork, type ExecState } fr
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { report, resetPassword, setExecutorAvailable, setUserActive, toast } from "../data/store";
+import { removeExecutor, report, resetPassword, setExecutorAvailable, setUserActive, toast } from "../data/store";
 import { useMe } from "../data/hooks";
 import { can } from "../data/permissions";
 import type { CategoryId, Executor } from "../data/types";
@@ -217,6 +217,8 @@ export function ExecutorDetail() {
   const nav = useNavigate();
   const ui = useUi();
   const [creds, setCreds] = useState<{ login: string; password: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const e = d?.executor;
   const db = { orders: d?.orders ?? [] };
   if (d === undefined) return <Loading />;
@@ -235,6 +237,38 @@ export function ExecutorDetail() {
   return (
     <>
       <BackLink to="/executors">К списку исполнителей</BackLink>
+      <Modal
+        open={deleting}
+        onClose={() => setDeleting(false)}
+        title="Удалить исполнителя?"
+        width={460}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeleting(false)}>
+              Отмена
+            </Button>
+            <Button
+              variant="danger"
+              icon={Trash2}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                const ok = report(await removeExecutor(e.id), `${e.name.split(" ")[0]} удалён — телефон свободен для нового аккаунта`);
+                setBusy(false);
+                setDeleting(false);
+                if (ok) nav("/executors");
+              }}
+            >
+              Удалить
+            </Button>
+          </>
+        }
+      >
+        <p className="text-[14.5px] text-ink-2">
+          <b className="text-ink">{e.name}</b> и его логин ({phone(e.phone)}) удалятся. На этот телефон можно будет сразу создать новый аккаунт: «Добавить исполнителя».
+        </p>
+        <p className="mt-2 text-[13.5px] text-muted">Если у исполнителя уже есть заказы, удалить его нельзя, иначе пропадёт история. Тогда выдайте новый пароль или отключите доступ.</p>
+      </Modal>
       <section className="card mt-1 flex flex-wrap items-center gap-5 p-5 sm:p-6">
         <Avatar name={e.name} size={92} variant="person" status={state === "off" ? "red" : "green"} />
         <div className="min-w-0 flex-1">
@@ -279,7 +313,7 @@ export function ExecutorDetail() {
             <Button variant="secondary" icon={Pencil} className="bg-white" onClick={() => ui.openExecutor(e.id)}>
               Редактировать
             </Button>
-            {me?.role === "owner" && d.user && (
+            {(me?.role === "owner" || me?.role === "operator") && d.user && (
               <Menu
                 width={250}
                 trigger={(toggle) => (
@@ -290,6 +324,8 @@ export function ExecutorDetail() {
               >
                 {(close) => (
                   <>
+                    {me?.role === "owner" && (
+                    <>
                     <MenuItem
                       icon={KeyRound}
                       hint="Старые входы закроются"
@@ -311,6 +347,12 @@ export function ExecutorDetail() {
                       }}
                     >
                       {d.user?.active === false ? "Включить доступ" : "Отключить доступ"}
+                    </MenuItem>
+                    </>
+                    )}
+                    {/* Добавили по ошибке или не успели отдать пароль — удалить и создать заново на тот же телефон. */}
+                    <MenuItem icon={Trash2} danger hint="Только если у него ещё нет заказов" onClick={() => (close(), setDeleting(true))}>
+                      Удалить исполнителя
                     </MenuItem>
                   </>
                 )}

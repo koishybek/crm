@@ -93,6 +93,22 @@ describe("временные пароли (аудит M-8, E30)", () => {
     expect(names).not.toContain("Мастер Руководителя");
   });
 
+  test("удалить мастера без заказов: профиль и логин стираются, телефон снова свободен; с заказом — нельзя; руководитель — нет", async () => {
+    const { t, ids, as } = await setup();
+    const form = { name: "Новый Монтажник", phone: "+7 700 000 00 06", city: "Алматы", categories: ["ac"], skills: [], cooperation: "freelance" as const };
+    const first = await as(ids.operator).action(api.executors.create, form);
+    await expect(as(ids.manager).mutation(api.executors.remove, { id: first.id })).rejects.toThrow();
+    await as(ids.operator).mutation(api.executors.remove, { id: first.id });
+    expect(await t.run((ctx) => ctx.db.get(first.id))).toBeNull();
+    const logins = await t.run((ctx) => ctx.db.query("authAccounts").collect());
+    expect(logins.some((a) => a.providerAccountId === "77000000006")).toBe(false);
+    expect((await as(ids.operator).action(api.executors.create, form)).login).toBe("77000000006");
+
+    const busy = await as(ids.owner).action(api.executors.create, { ...form, name: "Мастер С Заказом", phone: "+7 700 000 00 05" });
+    await t.run((ctx) => ctx.db.patch(ids.order, { executorId: busy.id }));
+    await expect(as(ids.owner).mutation(api.executors.remove, { id: busy.id })).rejects.toThrow(/есть заказы/);
+  });
+
   test("пароль, выданный другим человеком, — временный: сотрудник, мастер, сброс; демо-аккаунты — без смены", async () => {
     const { t, ids, as, user } = await setup();
     const owner = as(ids.owner);
